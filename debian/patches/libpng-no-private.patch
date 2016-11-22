@@ -1,0 +1,143 @@
+From: Maks Orlovich <morlovich@google.com>
+Subject: Stop using private libpng data, but rather the public API.
+ This is needed to build on Debian sid against system libpng, which is always 1.6.
+ Also stop using png_sizeof, it's the same as sizeof in practice,
+ and is gone in 1.6.
+Origin: upstream, https://github.com/pagespeed/mod_pagespeed/commit/2fcfa08ce1c168c3669067c2047cbc8875d677a2
+--- a/src/pagespeed/kernel/image/gif_reader.cc
++++ b/src/pagespeed/kernel/image/gif_reader.cc
+@@ -108,7 +108,10 @@
+                           int transparent_palette_index,
+                           MessageHandler* handler) {
+   const int num_trans = transparent_palette_index + 1;
+-  if (num_trans <= 0 || num_trans > info_ptr->num_palette) {
++  png_colorp palette;
++  int num_palette = 0;
++  png_get_PLTE(png_ptr, info_ptr, &palette, &num_palette);
++  if (num_trans <= 0 || num_trans > num_palette) {
+     PS_LOG_INFO(handler, "Transparent palette index out of bounds.");
+     return false;
+   }
+@@ -177,12 +180,13 @@
+     return false;
+   }
+ 
++  png_bytepp rows = png_get_rows(png_ptr, info_ptr);
+   if (gif_file->Image.Interlace == 0) {
+     // Not interlaced. Read each line into the PNG buffer.
+     for (GifWord i = 0; i < height; ++i) {
+       if (DGifGetLine(gif_file,
+                       static_cast<GifPixelType*>(
+-                          &info_ptr->row_pointers[row + i][pixel]),
++                          &rows[row + i][pixel]),
+                       width) == GIF_ERROR) {
+         PS_DLOG_INFO(handler, "Failed to DGifGetLine");
+         return false;
+@@ -197,7 +201,7 @@
+            j += kInterlaceJumps[i]) {
+         if (DGifGetLine(gif_file,
+                         static_cast<GifPixelType*>(
+-                            &info_ptr->row_pointers[j][pixel]),
++                            &rows[j][pixel]),
+                         width) == GIF_ERROR) {
+           PS_DLOG_INFO(handler, "Failed to DGifGetLine");
+           return false;
+@@ -206,7 +210,7 @@
+     }
+   }
+ 
+-  info_ptr->valid |= PNG_INFO_IDAT;
++  png_set_rows(png_ptr, info_ptr, rows);
+   return true;
+ }
+ 
+@@ -274,23 +278,22 @@
+     return 0;
+   }
+ 
+-#ifdef PNG_FREE_ME_SUPPORTED
+   png_free_data(png_ptr, info_ptr, PNG_FREE_ROWS, 0);
+-#endif
+-  if (info_ptr->row_pointers == NULL) {
++  if (png_get_rows(png_ptr, info_ptr) == NULL) {
++    png_uint_32 height = png_get_image_height(png_ptr, info_ptr);
++
+     // Allocate the array of pointers to each row.
+     const png_size_t row_pointers_size =
+-        info_ptr->height * png_sizeof(png_bytep);
+-    info_ptr->row_pointers = static_cast<png_bytepp>(
++        height * sizeof(png_bytep);
++    png_bytepp row_pointers = static_cast<png_bytepp>(
+         png_malloc(png_ptr, row_pointers_size));
+-    memset(info_ptr->row_pointers, 0, row_pointers_size);
+-#ifdef PNG_FREE_ME_SUPPORTED
+-    info_ptr->free_me |= PNG_FREE_ROWS;
+-#endif
++    memset(row_pointers, 0, row_pointers_size);
++    png_set_rows(png_ptr, info_ptr, row_pointers);
++    png_data_freer(png_ptr, info_ptr, PNG_DESTROY_WILL_FREE_DATA, PNG_FREE_ROWS);
+ 
+     // Allocate memory for each row.
+-    for (png_uint_32 row = 0; row < info_ptr->height; ++row) {
+-      info_ptr->row_pointers[row] =
++    for (png_uint_32 row = 0; row < height; ++row) {
++      row_pointers[row] =
+           static_cast<png_bytep>(png_malloc(png_ptr, row_size));
+     }
+   }
+@@ -327,14 +330,17 @@
+     return false;
+   }
+ 
++  png_bytepp rgb_row_pointers = png_get_rows(rgb_png_ptr, rgb_info_ptr);
++  png_bytepp pal_row_pointers = png_get_rows(paletted_png_ptr,
++                                             paletted_info_ptr);
+   for (png_uint_32 row = 0; row < height; ++row) {
+-    png_bytep rgb_next_byte = rgb_info_ptr->row_pointers[row];
++    png_bytep rgb_next_byte = rgb_row_pointers[row];
+     if (have_alpha) {
+       // Make the row opaque initially.
+       memset(rgb_next_byte, 0xff, row_size);
+     }
+     for (png_uint_32 column = 0; column < width; ++column) {
+-      png_byte palette_entry = paletted_info_ptr->row_pointers[row][column];
++      png_byte palette_entry = pal_row_pointers[row][column];
+       if (have_alpha &&
+           (palette_entry == static_cast<png_byte>(transparent_palette_index))) {
+         // Transparent: clear RGBA bytes.
+@@ -346,7 +352,7 @@
+       rgb_next_byte += bytes_per_pixel;
+     }
+   }
+-  rgb_info_ptr->valid |= PNG_INFO_IDAT;
++  png_set_rows(rgb_png_ptr, rgb_info_ptr, rgb_row_pointers);
+   return true;
+ }
+ 
+@@ -358,7 +364,7 @@
+                   bool require_opaque,
+                   MessageHandler* handler) {
+   if (static_cast<png_size_t>(gif_file->SHeight) >
+-      PNG_UINT_32_MAX/png_sizeof(png_bytep)) {
++      PNG_UINT_32_MAX/sizeof(png_bytep)) {
+     PS_DLOG_INFO(handler, "GIF image is too big to process.");
+     return false;
+   }
+@@ -407,12 +413,11 @@
+   }
+ 
+   // Fill the rows with the background color.
+-  memset(paletted_info_ptr->row_pointers[0],
+-         gif_file->SBackGroundColor, row_size);
+-  for (png_uint_32 row = 1; row < paletted_info_ptr->height; ++row) {
+-    memcpy(paletted_info_ptr->row_pointers[row],
+-           paletted_info_ptr->row_pointers[0],
+-           row_size);
++  png_bytepp row_pointers = png_get_rows(paletted_png_ptr, paletted_info_ptr);
++  png_uint_32 height = png_get_image_height(paletted_png_ptr, paletted_info_ptr);
++  memset(row_pointers[0], gif_file->SBackGroundColor, row_size);
++  for (png_uint_32 row = 1; row < height; ++row) {
++    memcpy(row_pointers[row], row_pointers[0], row_size);
+   }
+ 
+   int transparent_palette_index = -1;

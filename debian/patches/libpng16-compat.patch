@@ -1,0 +1,62 @@
+From: Maks Orlovich <morlovich@google.com>
+Subject: libpng1.6 compat: don't call png_read_update_info twice.
+ (From libpng docs on changes in 1.6.x:
+ "The library now issues an error if the application attempts to set a
+ transform after it calls png_read_update_info() or if it attempts to call
+ both png_read_update_info() and png_start_read_image() or to call either
+ of them more than once.")
+Origin: upstream, https://github.com/pagespeed/mod_pagespeed/commit/06fb3c1604b0c89c7db9118e3dcff246cdfd8b84
+--- a/src/pagespeed/kernel/image/png_optimizer.cc
++++ b/src/pagespeed/kernel/image/png_optimizer.cc
+@@ -974,29 +974,25 @@
+   // Set up callbacks for interlacing (progressive) image.
+   png_set_interlace_handling(png_ptr);
+ 
++  if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA ||
++      (color_type == PNG_COLOR_TYPE_GRAY &&
++       png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))) {
++    // Expand Gray_Alpha (and Gray + tRNS which will be turned into
++    // Gray_Alpaha by png_set_expand) to RGBA.
++    png_set_gray_to_rgb(png_ptr);
++  }
++
++  // Expand paletted colors into true RGB triplets.
++  if (color_type == PNG_COLOR_TYPE_PALETTE) {
++    png_set_palette_to_rgb(png_ptr);
++  }
++
+   // Update the reader struct after setting the transformations.
+   png_read_update_info(png_ptr, info_ptr);
+ 
+   // Get the updated color type.
+   color_type = png_get_color_type(png_ptr, info_ptr);
+ 
+-  if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA ||
+-      color_type == PNG_COLOR_TYPE_PALETTE) {
+-    if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+-      // Expand Gray_Alpha to RGBA.
+-      png_set_gray_to_rgb(png_ptr);
+-    } else {
+-      // Expand paletted colors into true RGB triplets.
+-      png_set_palette_to_rgb(png_ptr);
+-    }
+-
+-    // Update the reader struct after modifying the transformations.
+-    png_read_update_info(png_ptr, info_ptr);
+-
+-    // Get the updated color type.
+-    color_type = png_get_color_type(png_ptr, info_ptr);
+-  }
+-
+   // Determine the pixel format and the number of channels.
+   switch (color_type) {
+     case PNG_COLOR_TYPE_GRAY:
+@@ -1158,7 +1154,7 @@
+   }
+ 
+   if (png_image == NULL) {
+-    PS_LOG_DFATAL(message_handler_, "Ouput PNG image cannot be NULL.");
++    PS_LOG_DFATAL(message_handler_, "Output PNG image cannot be NULL.");
+     return false;
+   }
+   return true;

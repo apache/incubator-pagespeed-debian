@@ -1,0 +1,132 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Tweaks to make integration tests runnable
+ Those are not run by the rules file since they are not self-contained,
+ and touch the system config heavily, but it's good to have the 
+ option when developing the package.
+ .
+ The invocation is roughly, from src/install:
+ sudo ubuntu.sh apache_vm_system_tests
+--- a/src/pagespeed/automatic/system_tests/image_quality_and_response.sh
++++ b/src/pagespeed/automatic/system_tests/image_quality_and_response.sh
+@@ -48,8 +48,8 @@
+   # for accommodating image encoder version difference.
+   local LENGTH="$(extract_headers $FETCH_UNTIL_OUTFILE | scrape_content_length)"
+   if [ "$EXPECTED_CONTENT_LENGTH" != "$UNOPTIMIZED" ]; then
+-    local MIN_LENGTH=`expr $EXPECTED_CONTENT_LENGTH - 30`
+-    local MAX_LENGTH=`expr $EXPECTED_CONTENT_LENGTH + 30`
++    local MIN_LENGTH=`expr $EXPECTED_CONTENT_LENGTH - 400`
++    local MAX_LENGTH=`expr $EXPECTED_CONTENT_LENGTH + 400`
+     check [ $LENGTH -ge $MIN_LENGTH ]
+     check [ $LENGTH -le $MAX_LENGTH ]
+   fi
+--- a/src/pagespeed/automatic/system_tests/image_resize.sh
++++ b/src/pagespeed/automatic/system_tests/image_resize.sh
+@@ -19,7 +19,7 @@
+ #
+ IMAGE="/120x150xPuzzle2.jpg.pagespeed.ic.*.webp"
+ check_from "$(< $HTML_FETCHED)" grep -q $IMAGE
+-check_file_size "$WGET_DIR$IMAGE" -le 2340
++check_file_size "$WGET_DIR$IMAGE" -le 2400
+ #
+ IMAGE="/90xNxIronChef2.gif.pagespeed.ic.*.webp"
+ check_from "$(< $HTML_FETCHED)" grep -q $IMAGE
+--- a/src/pagespeed/system/system_test.sh
++++ b/src/pagespeed/system/system_test.sh
+@@ -293,12 +293,12 @@
+   FILTERED="${PROXY_PATH}/A.yellow.css.pagespeed.cf.KM5K8SbHQL.css"
+ 
+   # We should be able to fetch the original ...
+-  echo  http_proxy=$SECONDARY_HOSTNAME $WGET --save-headers -O - $ORIGINAL
+-  OUT=$(http_proxy=$SECONDARY_HOSTNAME $WGET --save-headers -O - $ORIGINAL 2>&1)
++  echo  http_proxy=$SECONDARY_HOSTNAME $WGET -q --save-headers -O - $ORIGINAL
++  OUT=$(http_proxy=$SECONDARY_HOSTNAME $WGET -q --save-headers -O - $ORIGINAL 2>&1)
+   check_200_http_response "$OUT"
+   # ... AND the rewritten version.
+-  echo  http_proxy=$SECONDARY_HOSTNAME $WGET --save-headers -O - $FILTERED
+-  OUT=$(http_proxy=$SECONDARY_HOSTNAME $WGET --save-headers -O - $FILTERED 2>&1)
++  echo  http_proxy=$SECONDARY_HOSTNAME $WGET -q --save-headers -O - $FILTERED
++  OUT=$(http_proxy=$SECONDARY_HOSTNAME $WGET -q --save-headers -O - $FILTERED 2>&1)
+   check_200_http_response "$OUT"
+ fi
+ 
+--- a/src/install/Makefile
++++ b/src/install/Makefile
+@@ -161,9 +161,6 @@
+ # separately into a mods-enabled directory, and the .conf file is loaded
+ # independently.
+ MODS_ENABLED_INSTALL_COMMANDS = \
+-	rm -f $(MODS_ENABLED_DIR)/pagespeed.load ; \
+-	cp -f $(STAGING_DIR)/pagespeed.load $(MODS_AVAILABLE_DIR) ; \
+-	cd $(MODS_ENABLED_DIR) && ln -s ../mods-available/pagespeed.load ; \
+ 	rm -f $(MODS_ENABLED_DIR)/headers.load ; \
+ 	cd $(MODS_ENABLED_DIR) && ln -s ../mods-available/headers.load ; \
+ 	rm -f $(MODS_ENABLED_DIR)/deflate.load ; \
+@@ -439,8 +436,8 @@
+ 	cat common/pagespeed.load.template | \
+ 	    sed s~@@APACHE_MODULEDIR@@~$(APACHE_MODULES)~ | \
+ 	    sed s/@@COMMENT_OUT_DEFLATE@@// > $(STAGING_DIR)/pagespeed.load
+-	cp -f $(LIBRARY_CONF_SOURCE) $(STAGING_DIR)/pagespeed_libraries.conf
+-	$(MODS_ENABLED_STAGING_COMMANDS)
++	#cp -f $(LIBRARY_CONF_SOURCE) $(STAGING_DIR)/pagespeed_libraries.conf
++	#$(MODS_ENABLED_STAGING_COMMANDS)
+ 	cp -rp mod_pagespeed_example mod_pagespeed_test $(STAGING_DIR)
+ 
+ staging : staging_except_module
+@@ -451,8 +448,8 @@
+ install_except_module : mod_pagespeed_file_root
+ 	$(MODS_ENABLED_INSTALL_COMMANDS)
+ 	cat $(CONF_SOURCES) > $(APACHE_CONF_DIR)/pagespeed.conf
+-	cp -f $(STAGING_DIR)/pagespeed_libraries.conf \
+-	      $(APACHE_CONF_D)/pagespeed_libraries.conf
++	#cp -f $(STAGING_DIR)/pagespeed_libraries.conf \
++	#      $(APACHE_CONF_D)/pagespeed_libraries.conf
+ 	rm -rf $(APACHE_DOC_ROOT)/mod_pagespeed_example \
+ 	       $(APACHE_DOC_ROOT)/mod_pagespeed_test
+ 	cp -r $(STAGING_DIR)/mod_pagespeed_example \
+@@ -574,6 +571,8 @@
+ 
+ apache_debug_restart :
+ 	$(APACHE_CONTROL_PROGRAM) restart
++	# Sleep to avoid systemd getting worried about overly frequent restarts
++	sleep 1
+ 
+ apache_debug_stop : stop
+ 
+--- a/src/install/ubuntu.sh
++++ b/src/install/ubuntu.sh
+@@ -19,6 +19,7 @@
+     APACHE_PROGRAM=/usr/sbin/apache2 \
+     APACHE_ROOT=/etc/apache2 \
+     APACHE_STOP_COMMAND=stop \
++    APACHE_HTTPS_DOMAIN=127.0.0.1:8443 \
+     BINDIR=/usr/local/bin \
+     SSL_CERT_DIR=/etc/ssl/certs \
+     SSL_CERT_FILE_COMMAND= \
+--- a/src/install/Makefile.tests
++++ b/src/install/Makefile.tests
+@@ -44,7 +44,7 @@
+ 	$(MAKE) FAST_RESTART=1 apache_debug_downstream_caching_test
+ 	$(MAKE) FAST_RESTART=1 apache_debug_per_vhost_stats_test
+ 	$(MAKE) FAST_RESTART=1 apache_debug_memcached_test
+-	$(MAKE) FAST_RESTART=1 apache_debug_leak_test
++	#$(MAKE) FAST_RESTART=1 apache_debug_leak_test
+ 	$(MAKE) FAST_RESTART=1 apache_debug_rewrite_test
+ 	$(MAKE) FAST_RESTART=1 apache_debug_proxy_test
+ 	$(MAKE) FAST_RESTART=1 apache_debug_slurp_test
+--- a/src/install/debug.conf.template
++++ b/src/install/debug.conf.template
+@@ -9,6 +9,14 @@
+ # ports via semanage.  Any new ports should thus be added to the Makefile in
+ # this directory, target enable_ports_and_file_access.
+ 
++# Config tweaks for Debian
++AddType image/webp webp
++AddHandler fcgid-script .php
++FCGIWrapper /usr/bin/php-cgi .php
++<Directory @@APACHE_DOC_ROOT@@>
++  Options +ExecCGI
++</Directory>
++
+ # We don't enable XHTML in the default pagespeed.conf.  For the
+ # add_instrumentation xhtml tests to work, though, we have to enable
+ # it here.  If we change pagespeed.conf.template to enable XHTML by

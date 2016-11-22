@@ -1,0 +1,5 @@
+modpagespeed (1.11.33.4-1) unstable; urgency=medium
+
+  * Initial release (Closes: #602316)
+
+ -- Jeff Kaufman <jefftk@google.com>  Tue, 22 Nov 2016 16:50:08 +0000

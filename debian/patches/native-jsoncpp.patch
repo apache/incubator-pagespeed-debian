@@ -1,0 +1,47 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Build against system jsoncpp
+--- a/src/pagespeed/kernel/base/json.h
++++ b/src/pagespeed/kernel/base/json.h
+@@ -20,6 +20,6 @@
+ #define PAGESPEED_KERNEL_BASE_JSON_H_
+ 
+ 
+-#include "third_party/jsoncpp/src/include/json/json.h"
++#include "jsoncpp/json/json.h"
+ 
+ #endif  // PAGESPEED_KERNEL_BASE_JSON_H_
+--- a/src/third_party/jsoncpp/jsoncpp.gyp
++++ b/src/third_party/jsoncpp/jsoncpp.gyp
+@@ -13,26 +13,15 @@
+ # limitations under the License.
+ 
+ {
+-  'variables': {
+-    'jsoncpp_root': '<(DEPTH)/third_party/jsoncpp/src',
+-  },
+   'targets': [
+     {
+       'target_name': 'jsoncpp',
+-      'type': '<(library)',
+-      'include_dirs': [
+-        '<(jsoncpp_root)/include',
+-      ],
+-      'sources': [
+-        'src/src/lib_json/json_batchallocator.h',
+-        'src/src/lib_json/json_internalarray.inl',
+-        'src/src/lib_json/json_internalmap.inl',
+-        'src/src/lib_json/json_reader.cpp',
+-        'src/src/lib_json/json_tool.h',
+-        'src/src/lib_json/json_value.cpp',
+-        'src/src/lib_json/json_valueiterator.inl',
+-        'src/src/lib_json/json_writer.cpp',
+-      ],
++      'type': 'none',
++      'all_dependent_settings': {
++        'libraries': [
++          '-ljsoncpp'
++        ],
++      },
+     },
+   ],
+ }

@@ -1,0 +1,14 @@
+modpagespeed for Debian
+----------------------
+
+This is a build of mod_pagespeed for Debian which dynamically links to
+system-provided libraries as much as possible --- the usual practice
+for packaged software. This contrasts with the .deb's provided on
+mod_pagespeed site which basically statically link everything so they
+can install on a wide variety of systems.
+
+There is one downside: apachectrl graceful will not be able to load
+changed versions of the module .so, due to limitations on unloading
+imposed by dynamically linking to libprotobuf.
+
+ -- Maksim Orlovich <morlovich@google.com>  Tue, 22 Nov 2016 16:50:08 +0000

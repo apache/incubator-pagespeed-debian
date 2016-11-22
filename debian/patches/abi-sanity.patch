@@ -1,0 +1,16 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Remove C++ ABI override.
+  This is problematic for linking against system libraries.
+--- a/src/build/common.gypi
++++ b/src/build/common.gypi
+@@ -155,7 +155,9 @@
+ 
+     'defines': [ 'CHROMIUM_REVISION=<(chromium_revision)',
+                  # See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+-                 '_GLIBCXX_USE_CXX11_ABI=0',
++                 # Don't want to mess with this on Debian, since we want to link against
++                 # packages of protobuf and the like.
++                 # '_GLIBCXX_USE_CXX11_ABI=0',
+                  '__STDC_LIMIT_MACROS',],
+ 
+     # We don't want -std=gnu++0x (enabled by some versions of libpagespeed)

@@ -1,0 +1,134 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Build against system re2
+ This also disables building of the speed_test executable, which was pulling in a re2
+ file for some microbenchmark utilities.
+--- a/src/build/all.gyp
++++ b/src/build/all.gyp
+@@ -56,7 +56,6 @@
+         '../net/instaweb/instaweb_core.gyp:*',
+         '../net/instaweb/instaweb_apr.gyp:*',
+         '../net/instaweb/test.gyp:mod_pagespeed_test',
+-        '../net/instaweb/test.gyp:mod_pagespeed_speed_test',
+         'install.gyp:*',
+       ]
+     },
+--- a/src/net/instaweb/test.gyp
++++ b/src/net/instaweb/test.gyp
+@@ -481,41 +481,6 @@
+       ],
+     },
+     {
+-      'target_name': 'mod_pagespeed_speed_test',
+-      'type': 'executable',
+-      'dependencies': [
+-        'test_util',
+-        '<(DEPTH)/net/instaweb/instaweb.gyp:instaweb_console_css_data2c',
+-        '<(DEPTH)/net/instaweb/instaweb.gyp:instaweb_console_js_data2c',
+-        '<(DEPTH)/pagespeed/kernel.gyp:pthread_system',
+-        '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_base_core',
+-        '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_http',
+-        '<(DEPTH)/pagespeed/kernel.gyp:proto_util',
+-        '<(DEPTH)/third_party/css_parser/css_parser.gyp:css_parser',
+-        '<(DEPTH)/third_party/re2/re2.gyp:re2_bench_util',
+-      ],
+-      'include_dirs': [
+-        '<(DEPTH)',
+-        '<(DEPTH)/third_party/css_parser/src',
+-      ],
+-      'sources': [
+-        'rewriter/css_minify_speed_test.cc',
+-        'rewriter/domain_lawyer_speed_test.cc',
+-        'rewriter/image_speed_test.cc',
+-        'rewriter/javascript_minify_speed_test.cc',
+-        'rewriter/rewrite_driver_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/base/fast_wildcard_group_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/base/file_system_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/base/string_multi_map_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/base/wildcard_group.cc',
+-        '<(DEPTH)/pagespeed/kernel/cache/compressed_cache_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/cache/lru_cache_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/html/html_parse_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/util/deque_speed_test.cc',
+-        '<(DEPTH)/pagespeed/kernel/util/url_escaper_speed_test.cc',
+-      ],
+-    },
+-    {
+       'target_name': 'css_minify_main',
+       'type': 'executable',
+       'sources': [
+--- a/src/pagespeed/kernel/util/re2.h
++++ b/src/pagespeed/kernel/util/re2.h
+@@ -21,7 +21,7 @@
+ 
+ #include "pagespeed/kernel/base/string_util.h"
+ 
+-#include "third_party/re2/src/re2/re2.h"
++#include "re2/re2.h"
+ 
+ using re2::RE2;
+ 
+--- a/src/third_party/re2/re2.gyp
++++ b/src/third_party/re2/re2.gyp
+@@ -15,60 +15,15 @@
+ # Author: gagansingh@google.com (Gagandeep Singh)
+ 
+ {
+-  'variables': {
+-    're2_root': '<(DEPTH)/third_party/re2',
+-  },
+   'targets': [
+     {
+       'target_name': 're2',
+       'type': '<(library)',
+-      'include_dirs': [
+-        '<(re2_root)/src/',
+-      ],
+       'all_dependent_settings': {
+-        'include_dirs': [
+-          '<(DEPTH)/third_party/re2/src/',
++        'libraries': [
++          '-lre2',
+         ],
+       },
+-      'sources': [
+-        'src/re2/bitstate.cc',
+-        'src/re2/compile.cc',
+-        'src/re2/dfa.cc',
+-        'src/re2/filtered_re2.cc',
+-        'src/re2/mimics_pcre.cc',
+-        'src/re2/nfa.cc',
+-        'src/re2/onepass.cc',
+-        'src/re2/parse.cc',
+-        'src/re2/perl_groups.cc',
+-        'src/re2/prefilter.cc',
+-        'src/re2/prefilter_tree.cc',
+-        'src/re2/prog.cc',
+-        'src/re2/re2.cc',
+-        'src/re2/regexp.cc',
+-        'src/re2/set.cc',
+-        'src/re2/simplify.cc',
+-        'src/re2/stringpiece.cc',
+-        'src/re2/tostring.cc',
+-        'src/re2/unicode_casefold.cc',
+-        'src/re2/unicode_groups.cc',
+-        'src/util/hash.cc',
+-        'src/util/logging.cc',
+-        'src/util/pcre.cc',
+-        'src/util/rune.cc',
+-        'src/util/strutil.cc',
+-        'src/util/stringprintf.cc',
+-        'src/util/valgrind.cc',
+-      ],
+-    },
+-    {
+-      'target_name': 're2_bench_util',
+-      'type': '<(library)',
+-      'include_dirs': [
+-        '<(re2_root)/src/',
+-      ],
+-      'sources': [
+-        'src/util/benchmark.cc',
+-      ],
+     },
+   ],
+ }

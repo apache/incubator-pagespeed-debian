@@ -1,0 +1,43 @@
+#!/usr/bin/make -f
+# See debhelper(7) (uncomment to enable)
+# output every command that modifies files on the build system.
+export DH_VERBOSE = 1
+
+
+# see FEATURE AREAS in dpkg-buildflags(1)
+#export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# see ENVIRONMENT in dpkg-buildflags(1)
+# package maintainers to append CFLAGS
+#export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
+# package maintainers to append LDFLAGS
+#export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+
+%:
+	dh $@ --with apache2
+
+override_dh_auto_configure:
+	./generate.sh -Dsystem_include_path_apr=/usr/include/apr-1.0 -Dsystem_include_path_httpd=/usr/include/apache2 -Duse_system_protobuf=1 -Dprotoc_executable=/usr/bin/protoc
+
+override_dh_auto_build:
+	cd src && $(MAKE) BUILDTYPE=Release V=1 -j4
+	cat ./src/out/Release/install/common/pagespeed.conf.template \
+	  | sed s#@@MOD_PAGESPEED_CACHE@@#/var/cache/mod_pagespeed# \
+	  | sed s#@@MOD_PAGESPEED_LOG@@#/var/log/pagespeed# \
+	  | sed s#@@SSL_CERT_FILE_COMMAND@@## \
+	  | sed s#@@SSL_CERT_DIR@@#/etc/ssl/certs# \
+	  > ./src/out/Release/install/common/pagespeed.conf
+	cp ./src/out/Release/libmod_pagespeed.so ./src/out/Release/mod_pagespeed.so
+
+override_dh_auto_clean:
+	-rm -rf src/out/
+	-rm src/Makefile
+	-rm src/third_party/chromium/src/base/cpu_patched.cc
+	-find src -name '*.mk' -delete
+	-find src -name '*.Makefile' -delete
+	-find src -name '*.pyc' -delete
+
+override_dh_auto_test:
+	src/out/Release/mod_pagespeed_test
+	src/out/Release/pagespeed_automatic_test

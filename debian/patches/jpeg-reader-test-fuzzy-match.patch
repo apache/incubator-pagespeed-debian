@@ -1,0 +1,20 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Fuzzy comparison for JPEG decoding results (test only)
+--- a/src/pagespeed/kernel/image/jpeg_reader_test.cc
++++ b/src/pagespeed/kernel/image/jpeg_reader_test.cc
+@@ -66,10 +66,11 @@
+     GoogleString jpeg_image, png_image;
+     ReadTestFile(kJpegTestDir, kValidJpegImages[i], "jpg", &jpeg_image);
+     ReadTestFile(kJpegTestDir, kValidJpegImages[i], "png", &png_image);
+-    DecodeAndCompareImages(IMAGE_PNG, png_image.c_str(), png_image.length(),
+-                           IMAGE_JPEG, jpeg_image.c_str(), jpeg_image.length(),
+-                           false,  // ignore_transparent_rgb
+-                           &message_handler);
++    DecodeAndCompareImagesByPSNR(IMAGE_PNG, png_image.c_str(), png_image.length(),
++                                 IMAGE_JPEG, jpeg_image.c_str(), jpeg_image.length(),
++                                 45,  // PSNR goal
++                                 false,  // ignore_transparent_rgb
++                                 &message_handler);
+   }
+ }
+ 

@@ -1,0 +1,36 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Pick up system ICU includes; don't look for bundled ones.
+--- a/src/third_party/chromium/src/base/i18n/icu_string_conversions.cc
++++ b/src/third_party/chromium/src/base/i18n/icu_string_conversions.cc
+@@ -11,11 +11,11 @@
+ #include "base/memory/scoped_ptr.h"
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+-#include "third_party/icu/source/common/unicode/ucnv.h"
+-#include "third_party/icu/source/common/unicode/ucnv_cb.h"
+-#include "third_party/icu/source/common/unicode/ucnv_err.h"
+-#include "third_party/icu/source/common/unicode/unorm.h"
+-#include "third_party/icu/source/common/unicode/ustring.h"
++#includ  <unicode/ucnv.h>
++#include <unicode/ucnv_cb.h>
++#include <unicode/ucnv_err.h>
++#include <unicode/unorm.h>
++#include <unicode/ustring.h>
+ 
+ namespace base {
+ 
+--- a/src/url/url_canon_icu.cc
++++ b/src/url/url_canon_icu.cc
+@@ -9,9 +9,9 @@
+ 
+ #include "base/lazy_instance.h"
+ #include "base/logging.h"
+-#include "third_party/icu/source/common/unicode/ucnv.h"
+-#include "third_party/icu/source/common/unicode/ucnv_cb.h"
+-#include "third_party/icu/source/common/unicode/uidna.h"
++#include <unicode/ucnv.h>
++#include <unicode/ucnv_cb.h>
++#include <unicode/uidna.h>
+ #include "third_party/chromium/src/googleurl/src/url_canon_icu.h"
+ #include "third_party/chromium/src/googleurl/src/url_canon_internal.h"  // for _itoa_s
+ 

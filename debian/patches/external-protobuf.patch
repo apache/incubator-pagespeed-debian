@@ -1,0 +1,13 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Export the right target in protobuf.gyp when using system protobuf
+--- a/src/third_party/protobuf/protobuf.gyp
++++ b/src/third_party/protobuf/protobuf.gyp
+@@ -495,7 +495,7 @@
+     }, { # use_system_protobuf==1
+       'targets': [
+         {
+-          'target_name': 'protobuf_lite',
++          'target_name': 'protobuf_full_do_not_use',
+           'type': 'none',
+           'direct_dependent_settings': {
+             'cflags': [

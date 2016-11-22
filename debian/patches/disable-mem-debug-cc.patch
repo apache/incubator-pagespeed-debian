@@ -1,0 +1,16 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Disable mem_debug.cc
+ This only matters for debug builds, but it totally breaks them;
+ it's unworkable with a proper dynamically linked build.
+
+--- a/src/pagespeed/kernel/base/mem_debug.cc
++++ b/src/pagespeed/kernel/base/mem_debug.cc
+@@ -51,7 +51,7 @@
+ // are not included in Release builds, type:
+ //   nm out/Debug/libmod_pagespeed.so   | /usr/bin/c++filt |grep 'operator new'
+ //   nm out/Release/libmod_pagespeed.so | /usr/bin/c++filt |grep 'operator new'
+-#ifndef NDEBUG
++#if 0
+ 
+ #include <cstdlib>
+ #include "base/logging.h"

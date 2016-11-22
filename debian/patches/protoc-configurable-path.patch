@@ -1,0 +1,47 @@
+Author: Maks Orlovich <morlovich@google.com>
+Description: Permit configuring external protoc
+ (Trunk too different to upstream this particular change)
+--- a/src/net/instaweb/instaweb.gyp
++++ b/src/net/instaweb/instaweb.gyp
+@@ -35,7 +35,7 @@
+   'variables': {
+     'instaweb_root': '../..',
+     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out/instaweb',
+-    'protoc_executable':
++    'protoc_executable%':
+         '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+     'compiled_js_dir': '<(SHARED_INTERMEDIATE_DIR)/closure_out/instaweb',
+     'data2c_out_dir': '<(SHARED_INTERMEDIATE_DIR)/data2c_out/instaweb',
+--- a/src/net/instaweb/protoc.gypi
++++ b/src/net/instaweb/protoc.gypi
+@@ -30,7 +30,7 @@
+       'action': [
+         'bash',
+         '-c',
+-        'cat <(instaweb_root)/<(instaweb_protoc_subdir)/<(RULE_INPUT_NAME) | sed \'s!"third_party/pagespeed!"pagespeed!\' | sed \'s!// \[opensource\] !!\' > <(protoc_out_dir)/<(instaweb_protoc_subdir)/<(RULE_INPUT_ROOT).proto && <(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX) --proto_path=<(protoc_out_dir)/ <(protoc_out_dir)/<(instaweb_protoc_subdir)/<(RULE_INPUT_ROOT).proto --cpp_out=<(protoc_out_dir)',
++        'cat <(instaweb_root)/<(instaweb_protoc_subdir)/<(RULE_INPUT_NAME) | sed \'s!"third_party/pagespeed!"pagespeed!\' | sed \'s!// \[opensource\] !!\' > <(protoc_out_dir)/<(instaweb_protoc_subdir)/<(RULE_INPUT_ROOT).proto && <(protoc_executable) --proto_path=<(protoc_out_dir)/ <(protoc_out_dir)/<(instaweb_protoc_subdir)/<(RULE_INPUT_ROOT).proto --cpp_out=<(protoc_out_dir)',
+       ],
+     },
+   ],
+--- a/src/pagespeed/kernel.gyp
++++ b/src/pagespeed/kernel.gyp
+@@ -16,7 +16,7 @@
+   'variables': {
+     'instaweb_root': '..',
+     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out/instaweb',
+-    'protoc_executable':
++    'protoc_executable%':
+         '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+     'data2c_out_dir': '<(SHARED_INTERMEDIATE_DIR)/data2c_out/instaweb',
+     'data2c_exe':
+--- a/src/pagespeed/opt.gyp
++++ b/src/pagespeed/opt.gyp
+@@ -20,7 +20,7 @@
+     # errors.
+     'chromium_code': 1,
+     'protoc_out_dir': '<(SHARED_INTERMEDIATE_DIR)/protoc_out/instaweb',
+-    'protoc_executable':
++    'protoc_executable%':
+         '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
+     'compiled_js_dir': '<(SHARED_INTERMEDIATE_DIR)/closure_out/instaweb',
+     'data2c_out_dir': '<(SHARED_INTERMEDIATE_DIR)/data2c_out/instaweb',

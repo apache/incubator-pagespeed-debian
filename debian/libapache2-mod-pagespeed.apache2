@@ -1,0 +1,4 @@
+mod src/out/Release/mod_pagespeed.so
+mod debian/pagespeed.load
+mod src/out/Release/install/common/pagespeed.conf
+conf src/net/instaweb/genfiles/conf/pagespeed_libraries.conf

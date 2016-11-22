@@ -1,0 +1,20 @@
+Source: modpagespeed
+Section: web
+Priority: optional
+Maintainer: Jeff Kaufman <jefftk@google.com>
+Build-Depends: debhelper (>= 9), pkg-config, libapr1-dev, apache2-dev, dh-apache2,
+ libpng-dev, libicu-dev, gperf, libjpeg9-dev, zlib1g-dev, protobuf-compiler, libprotobuf-dev, libwebp-dev, 
+ libre2-dev, googletest, libgif-dev, libjsoncpp-dev, libgflags-dev
+Standards-Version: 3.9.8
+Homepage: https://developers.google.com/speed/pagespeed/module/
+Vcs-Git: https://github.com/pagespeed/mod_pagespeed.git
+Vcs-Browser: https://github.com/pagespeed/mod_pagespeed
+
+Package: libapache2-mod-pagespeed
+Architecture: i386 amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}, apache2-api-20120211, ca-certificates
+Description: Apache module for rewriting web pages for efficiency
+ mod_pagespeed optimizes web pages and resources as they flow through your
+ server, saving its optimizations in a cache. Core optimizations include
+ longcaching, minifying, combining, and inlining, which it can apply to
+ JavaScript, CSS, and images.
