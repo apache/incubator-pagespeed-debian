@@ -7,8 +7,8 @@ Build-Depends: debhelper (>= 9), pkg-config, libapr1-dev, apache2-dev, dh-apache
  libre2-dev, googletest, libgif-dev, libjsoncpp-dev, libgflags-dev, libssl1.0-dev, ca-certificates
 Standards-Version: 3.9.8
 Homepage: https://developers.google.com/speed/pagespeed/module/
-Vcs-Git: https://github.com/pagespeed/mod_pagespeed.git
-Vcs-Browser: https://github.com/pagespeed/mod_pagespeed
+Vcs-Git: https://github.com/pagespeed/mod_pagespeed-debian-packaging.git
+Vcs-Browser: https://github.com/pagespeed/mod_pagespeed-debian-packaging
 
 Package: libapache2-mod-pagespeed
 Architecture: i386 amd64
