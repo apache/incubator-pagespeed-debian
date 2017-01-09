@@ -29,6 +29,7 @@ override_dh_auto_build:
 	  | sed s#@@SSL_CERT_DIR@@#/etc/ssl/certs# \
 	  > ./src/out/Release/install/common/pagespeed.conf
 	cp ./src/out/Release/libmod_pagespeed.so ./src/out/Release/mod_pagespeed.so
+	cp ./src/out/Release/js_minify ./src/out/Release/pagespeed_js_minify
 
 override_dh_auto_clean:
 	-rm -rf src/out/

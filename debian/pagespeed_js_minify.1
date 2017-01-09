@@ -1,0 +1,25 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" (C) Copyright 2016 Google Inc.
+.\"
+.TH pagespeed_js_minify 1 "15 Dec 2016" "mod_pagespeed"
+.SH NAME
+pagespeed_js_minify \- simple JavaScript minifier
+.SH SYNOPSIS
+.B pagespeed_js_minify [\fI -print_size_and_hash \fR] [\fI file \fR]
+.SH DESCRIPTION
+\fBpagespeed_js_minify\fP is a simple JavaScript minifier that
+removes whitespace where it's safe to do so, but does not
+do any variable renaming.
+.PP
+It can also be used to generate \fIModPagespeedLibrary\fR directives
+for use with \fBmod_pagespeed\fP.
+
+.SH OPTIONS
+If a filename is included, it will be used as the input. If not,
+the input source code will be read from standard input instead.
+.PP
+If \fI-print_size_and_hash\fR is included, rather than printing
+the minified sourcecode, the arguments appropriate for detecting
+the input with the \fIModPagespeedLibrary\fR configuration directive
+of \fBmod_pagespeed\fP will be produced.
+
