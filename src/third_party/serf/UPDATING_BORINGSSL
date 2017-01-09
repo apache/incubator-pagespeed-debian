@@ -1,0 +1,30 @@
+Updating BoringSSL can sometimes be tricky!
+
+Because sometimes the gypi file can change drastically upstream, we will
+have to take the gypi file from chromium's trunk and modify the paths.
+
+  SERF_DIR=/path/to/client/google3/third_party/instaweb/src/third_party/serf
+  git clone https://chromium.googlesource.com/chromium/src
+
+  # Look up what boringssl commit to use
+  cat src/DEPS | grep "boringssl_revision':"
+  # edit our DEPS file to use that commit
+
+  # Now copy the build files
+  cat src/third_party/boringssl/boringssl.gypi \
+    | sed 's~src/~<(openssl_root)/~g' \
+    > $SERF_DIR/openssl.gypi
+  # You probably don't need to change the .gyp file, but that's a place to look
+  # if you get build errors.
+
+  # copy the assembly routines and err_data
+  cp src/third_party/boringssl/err_data.c $SERF_DIR/
+  for arch in linux-x86 linux-x86_64 mac-x86_64 mac-x86 win-x86 \
+              win-x86_64 linux-aarch64 linux-arm ; do
+    rm -rf $SERF_DIR/$arch/
+    cp -r src/third_party/boringssl/$arch $SERF_DIR/$arch/
+  done
+
+Then run:
+
+  make gclient_update
