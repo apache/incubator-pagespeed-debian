@@ -4,7 +4,7 @@ Priority: optional
 Maintainer: Jeff Kaufman <jefftk@google.com>
 Build-Depends: debhelper (>= 9), pkg-config, libapr1-dev, apache2-dev, dh-apache2,
  libpng-dev, libicu-dev, gperf, libjpeg9-dev, zlib1g-dev, protobuf-compiler, libprotobuf-dev, libwebp-dev,
- libre2-dev, googletest, libgif-dev, libjsoncpp-dev, libgflags-dev, libssl1.0-dev, ca-certificates, dh-exec
+ libre2-dev, googletest, libgif-dev, libjsoncpp-dev, libgflags-dev, libssl1.0-dev, ca-certificates, dh-exec, gyp
 Standards-Version: 3.9.8
 Homepage: https://developers.google.com/speed/pagespeed/module/
 Vcs-Git: https://github.com/pagespeed/mod_pagespeed-debian-packaging.git

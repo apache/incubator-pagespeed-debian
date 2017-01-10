@@ -18,3 +18,4 @@ increase-test-fuzzyness.patch
 disable-mem-debug-cc.patch
 proto-crash-fix.patch
 test-hacking.patch
+gyp-native.patch

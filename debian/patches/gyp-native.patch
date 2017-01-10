@@ -1,0 +1,8 @@
+--- a/generate.sh
++++ b/generate.sh
+@@ -16,4 +16,4 @@
+ #
+ # Also, BUILDTYPE=Release can be passed to make (the default is Debug).
+ echo "Generating src/Makefile"
+-src/build/gyp_chromium -D use_system_libs=1 $*
++gyp -I src/build/common.gypi --no-circular-check --toplevel-dir=$(pwd)/src -DSHARED_INTERMEDIATE_DIR=$(pwd)/src/out/gen -D gyp_output_dir=$(pwd)/src/out -D use_system_libs=1 $* src/build/all.gyp
