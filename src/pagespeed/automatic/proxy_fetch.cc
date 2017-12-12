@@ -28,7 +28,6 @@
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/public/global_constants.h"
-#include "net/instaweb/rewriter/public/blink_util.h"
 #include "net/instaweb/rewriter/public/domain_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
 #include "net/instaweb/rewriter/public/experiment_util.h"
@@ -102,14 +101,13 @@ ProxyFetch* ProxyFetchFactory::CreateNewProxyFetch(
   // from a non-transparently proxied domain.
   UrlNamer* namer = server_context_->url_namer();
   GoogleString decoded_resource;
-  GoogleUrl gurl(url_in), request_origin;
+  GoogleUrl gurl(url_in);
   DCHECK(!server_context_->IsPagespeedResource(gurl))
       << "expect ResourceFetch called for pagespeed resources, not ProxyFetch";
 
   bool cross_domain = false;
   if (gurl.IsWebValid()) {
-    if (namer->Decode(gurl, driver->options(), &request_origin,
-                      &decoded_resource)) {
+    if (namer->Decode(gurl, driver->options(), &decoded_resource)) {
       const RewriteOptions* options = driver->options();
       if (namer->IsAuthorized(gurl, *options)) {
         // The URL is proxied, but is not rewritten as a pagespeed resource,
@@ -393,6 +391,7 @@ void ProxyFetchPropertyCallbackCollector::ExecuteConnectProxyFetch(
   proxy_fetch_ = proxy_fetch;
 
   // Use global options in case options is NULL.
+  // options can be NULL if it is unconfigured domain.
   const RewriteOptions* options =
       options_ != NULL ? options_ : server_context_->global_options();
 
@@ -517,29 +516,18 @@ ProxyFetch::ProxyFetch(
       waiting_for_flush_to_finish_(false),
       idle_alarm_(NULL),
       factory_(factory),
-      distributed_fetch_(false),
       trusted_input_(false) {
   driver_->SetWriter(async_fetch);
   set_request_headers(async_fetch->request_headers());
   set_response_headers(async_fetch->response_headers());
 
-  // Was this proxy_fetch created on behalf of a distributed rewrite? Note: We
-  // don't verify the distributed rewrite key because we want to be conservative
-  // about when we apply rewriting.
-  if (request_headers()->Has(HttpAttributes::kXPsaDistributedRewriteFetch) ||
-      request_headers()->Has(HttpAttributes::kXPsaDistributedRewriteForHtml)) {
-    distributed_fetch_ = true;
-  }
-
   DCHECK(driver_->request_headers() != NULL);
   driver_->EnableBlockingRewrite(request_headers());
 
-  // Set the implicit cache ttl and the min cache ttl for the response headers
-  // based on the value specified in the options.
+  // Set the implicit cache ttl for the response headers based on the value
+  // specified in the options.
   response_headers()->set_implicit_cache_ttl_ms(
       Options()->implicit_cache_ttl_ms());
-  response_headers()->set_min_cache_ttl_ms(
-      Options()->min_cache_ttl_ms());
 
   VLOG(1) << "Attaching RewriteDriver " << driver_
           << " to HtmlRewriter " << this;
@@ -697,9 +685,7 @@ void ProxyFetch::AddPagespeedHeader() {
 void ProxyFetch::SetupForHtml() {
   const RewriteOptions* options = Options();
 
-  if (options->enabled() && options->IsAllowed(url_) && !distributed_fetch_) {
-    // Note that we guard with distributed_fetch_ to avoid parsing HTML on a
-    // distributed task, that's left to the ingress task to do.
+  if (options->enabled() && options->IsAllowed(url_)) {
     started_parse_ = StartParse();
     if (started_parse_) {
       // TODO(sligocki): Get these in the main flow.
@@ -859,6 +845,7 @@ void ProxyFetch::PropertyCacheComplete(
     driver_->set_origin_property_page(
         callback_collector->ReleaseOriginPropertyPage());
     driver_->set_device_type(callback_collector->device_type());
+    driver_->PropertyCacheSetupDone();
   }
   // We have to set the callback to NULL to let ScheduleQueueExecutionIfNeeded
   // proceed (it waits until it's NULL). And we have to delete it because then
@@ -963,7 +950,7 @@ bool ProxyFetch::HandleFlush(MessageHandler* message_handler) {
     // in ExecuteQueued.  Note that this can re-order Flushes behind
     // pending text, and aggregate together multiple flushes received from
     // the network into one.
-    if (Options()->flush_html()) {
+    if (Options()->flush_html() || Options()->follow_flushes()) {
       ScopedMutex lock(mutex_.get());
       network_flush_outstanding_ = true;
       ScheduleQueueExecutionIfNeeded();
@@ -1045,16 +1032,21 @@ void ProxyFetch::ExecuteQueued() {
     ScopedMutex lock(mutex_.get());
     DCHECK(!waiting_for_flush_to_finish_);
 
-    // See if we should force a flush based on how much stuff has
-    // accumulated.
     size_t total = 0;
     size_t force_flush_chunk_count = 0;  // set only if force_flush is true.
-    for (size_t c = 0, n = text_queue_.size(); c < n; ++c) {
-      total += text_queue_[c]->length();
-      if (total >= buffer_limit) {
-        force_flush = true;
-        force_flush_chunk_count = c + 1;
-        break;
+    if (network_flush_outstanding_ && Options()->follow_flushes()) {
+      force_flush = true;
+      force_flush_chunk_count = text_queue_.size();
+    } else {
+      // See if we should force a flush based on how much stuff has
+      // accumulated.
+      for (size_t c = 0, n = text_queue_.size(); c < n; ++c) {
+        total += text_queue_[c]->length();
+        if (total >= buffer_limit) {
+          force_flush = true;
+          force_flush_chunk_count = c + 1;
+          break;
+        }
       }
     }
 
@@ -1172,9 +1164,12 @@ void ProxyFetch::Finish(bool success) {
     }
   }
 
+  // We want to de-register before calling HandleDone since the latter may
+  // cleanup the factory.
+  factory_->RegisterFinishedFetch(this);
+
   SharedAsyncFetch::HandleDone(success);
   done_called_ = true;
-  factory_->RegisterFinishedFetch(this);
 
   // In ProxyInterfaceTest.HeadersSetupRace, raise a signal that
   // indicates the test functionality is complete.  In other contexts
@@ -1232,26 +1227,6 @@ void ProxyFetch::HandleIdleAlarm() {
 
 namespace {
 
-PropertyCache::CohortVector GetCohortList(
-    bool requires_blink_cohort,
-    const ServerContext* server_context) {
-  PropertyCache* page_property_cache = server_context->page_property_cache();
-  const PropertyCache::CohortVector cohort_list =
-      page_property_cache->GetAllCohorts();
-  if (requires_blink_cohort) {
-    return cohort_list;
-  }
-
-  PropertyCache::CohortVector cohort_list_without_blink;
-  for (int i = 0, m = cohort_list.size(); i < m; ++i) {
-    if (cohort_list[i]->name() == BlinkUtil::kBlinkCohort) {
-      continue;
-    }
-    cohort_list_without_blink.push_back(cohort_list[i]);
-  }
-  return cohort_list_without_blink;
-}
-
 bool UrlMightHavePropertyCacheEntry(const GoogleUrl& url) {
   const ContentType* type = NameExtensionToContentType(url.LeafSansQuery());
   if (type == NULL) {
@@ -1306,8 +1281,7 @@ ProxyFetchPropertyCallbackCollector*
         const GoogleUrl& request_url,
         ServerContext* server_context,
         RewriteOptions* options,
-        AsyncFetch* async_fetch,
-        const bool requires_blink_cohort) {
+        AsyncFetch* async_fetch) {
   if (options == NULL) {
     options = server_context->global_options();
   }
@@ -1407,27 +1381,21 @@ ProxyFetchPropertyCallbackCollector*
   }
 
   // All callbacks need to be registered before Reads to avoid race.
-  PropertyCache::CohortVector cohort_list_without_blink =
-      GetCohortList(false /* requires_blink_cohort */, server_context);
+  PropertyCache::CohortVector cohort_list = RewriteDriver::GetCohortList(
+      page_property_cache, options, server_context);
   if (property_callback != NULL) {
-    page_property_cache->ReadWithCohorts(
-        requires_blink_cohort ?
-            GetCohortList(
-                true /* requires_blink_cohort */, server_context) :
-            cohort_list_without_blink,
-            property_callback);
+    page_property_cache->ReadWithCohorts(cohort_list, property_callback);
   }
 
   if (fallback_property_callback != NULL) {
     // Always read property page with fallback values without blink as there is
     // no property in BlinkCohort which can used fallback values.
-    page_property_cache->ReadWithCohorts(cohort_list_without_blink,
+    page_property_cache->ReadWithCohorts(cohort_list,
                                          fallback_property_callback);
   }
 
   if (origin_property_callback != NULL) {
-    page_property_cache->ReadWithCohorts(cohort_list_without_blink,
-                                         origin_property_callback);
+    page_property_cache->ReadWithCohorts(cohort_list, origin_property_callback);
   }
 
   if (added_callback) {

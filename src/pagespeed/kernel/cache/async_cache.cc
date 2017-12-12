@@ -71,7 +71,7 @@ void AsyncCache::DoGet(GoogleString* key, Callback* callback) {
   if (IsHealthy()) {
     cache_->Get(*key, callback);
     delete key;
-    outstanding_operations_.NoBarrierIncrement(-1);
+    outstanding_operations_.BarrierIncrement(-1);
   } else {
     CancelGet(key, callback);
   }
@@ -80,13 +80,13 @@ void AsyncCache::DoGet(GoogleString* key, Callback* callback) {
 void AsyncCache::CancelGet(GoogleString* key, Callback* callback) {
   ValidateAndReportResult(*key, CacheInterface::kNotFound, callback);
   delete key;
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
 }
 
 void AsyncCache::DoMultiGet(MultiGetRequest* request) {
   if (IsHealthy()) {
     cache_->MultiGet(request);
-    outstanding_operations_.NoBarrierIncrement(-1);
+    outstanding_operations_.BarrierIncrement(-1);
   } else {
     CancelMultiGet(request);
   }
@@ -94,34 +94,32 @@ void AsyncCache::DoMultiGet(MultiGetRequest* request) {
 
 void AsyncCache::CancelMultiGet(MultiGetRequest* request) {
   ReportMultiGetNotFound(request);
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
 }
 
-void AsyncCache::Put(const GoogleString& key, SharedString* value) {
+void AsyncCache::Put(const GoogleString& key, const SharedString& value) {
   if (IsHealthy()) {
+    SharedString value_to_put = value;
     // If the cache will encode the key into the value during Put,
     // then instead do it inline now, not in sequence_, as
     // SharedString::Append can mutate the shared value storage in a
     // thread-unsafe way.
     if (cache_->MustEncodeKeyInValueOnPut()) {
-      SharedString* encoded_value = new SharedString;
-      if (!key_value_codec::Encode(key, value, encoded_value)) {
-        delete encoded_value;
+      SharedString encoded_value;
+      if (!key_value_codec::Encode(key, value, &encoded_value)) {
         return;
       }
-      value = encoded_value;
-    } else {
-      value = new SharedString(*value);
+      value_to_put = encoded_value;
     }
 
     outstanding_operations_.NoBarrierIncrement(1);
     sequence_->Add(
         MakeFunction(this, &AsyncCache::DoPut, &AsyncCache::CancelPut,
-                     new GoogleString(key), value));
+                     new GoogleString(key), value_to_put));
   }
 }
 
-void AsyncCache::DoPut(GoogleString* key, SharedString* value) {
+void AsyncCache::DoPut(GoogleString* key, const SharedString value) {
   if (IsHealthy()) {
     // TODO(jmarantz): Start timers at the beginning of each operation,
     // particularly this one, and use long delays as a !IsHealthy signal.
@@ -132,14 +130,12 @@ void AsyncCache::DoPut(GoogleString* key, SharedString* value) {
     }
   }
   delete key;
-  delete value;
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
 }
 
-void AsyncCache::CancelPut(GoogleString* key, SharedString* value) {
+void AsyncCache::CancelPut(GoogleString* key, const SharedString value) {
   delete key;
-  delete value;
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
 }
 
 void AsyncCache::Delete(const GoogleString& key) {
@@ -156,11 +152,11 @@ void AsyncCache::DoDelete(GoogleString* key) {
     cache_->Delete(*key);
   }
   delete key;
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
 }
 
 void AsyncCache::CancelDelete(GoogleString* key) {
-  outstanding_operations_.NoBarrierIncrement(-1);
+  outstanding_operations_.BarrierIncrement(-1);
   delete key;
 }
 

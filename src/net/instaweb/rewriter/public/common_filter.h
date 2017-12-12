@@ -97,18 +97,23 @@ class CommonFilter : public EmptyHtmlFilter {
   // the return value: for example if we are allowing inlining of resources
   // from unauthorized domains we will return non-NULL but *is_authorized will
   // be false; converse cases are possible too (e.g. input_url is a data URI).
-  ResourcePtr CreateInputResource(StringPiece input_url, bool* is_authorized);
+  ResourcePtr CreateInputResource(StringPiece input_url,
+                                  RewriteDriver::InputRole role,
+                                  bool* is_authorized);
 
   // Similar to CreateInputResource except that if the input_url is not
   // authorized we insert a debug comment after the given element if possible
   // (debug is enabled and the element is writable). The returned ResourcePtr
   // is guaranteed to be non-NULL iff the input_url is authorized.
-  ResourcePtr CreateInputResourceOrInsertDebugComment(StringPiece input_url,
-                                                      HtmlElement* element);
+  ResourcePtr CreateInputResourceOrInsertDebugComment(
+      StringPiece input_url, RewriteDriver::InputRole role,
+      HtmlElement* element);
 
   // Resolves input_url based on the driver's location and any base tag into
   // out_url. If resolution fails, the resulting URL may be invalid.
   void ResolveUrl(StringPiece input_url, GoogleUrl* out_url);
+
+  bool IsRelativeUrlLoadPermittedByCsp(StringPiece url, CspDirective role);
 
   // Returns whether or not the base url is valid.  This value will change
   // as a filter processes the document.  E.g. If there are url refs before

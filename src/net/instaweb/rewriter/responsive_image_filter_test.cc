@@ -24,9 +24,11 @@
 #include "net/instaweb/rewriter/public/rewrite_test_base.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
+#include "pagespeed/kernel/base/gmock.h"
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_parse_test_base.h"
+#include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/user_agent_matcher_test_base.h"
 
@@ -75,9 +77,11 @@ class ResponsiveImageFilterTest : public RewriteTestBase {
     GoogleString width_str = IntegerToString(width);
     GoogleString height_str = IntegerToString(height);
     GoogleString input_html = StrCat(
+        html_prolog_,
         "<img src=", filename, " width=", width_str, " height=", height_str,
         ">");
     GoogleString output_html = StrCat(
+        html_prolog_,
         "<img src=", EncodeImage(width, height, filename, "0", final_ext),
         " width=", width_str, " height=", height_str);
     StrAppend(
@@ -95,6 +99,8 @@ class ResponsiveImageFilterTest : public RewriteTestBase {
     }
     ValidateExpected("test_simple", input_html, output_html);
   }
+
+  GoogleString html_prolog_;
 };
 
 TEST_F(ResponsiveImageFilterTest, SimpleJpg) {
@@ -144,6 +150,18 @@ TEST_F(ResponsiveImageFilterTest, Zoom) {
 
   // Add zoom script.
   TestSimple(100, 100, "a.jpg", "10.23", "jpg", true);
+}
+
+TEST_F(ResponsiveImageFilterTest, ZoomDisabledDueToAmp) {
+  options()->EnableFilter(RewriteOptions::kResponsiveImages);
+  options()->EnableFilter(RewriteOptions::kResponsiveImagesZoom);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  rewrite_driver()->AddFilters();
+
+  // Zoom-script does not get added due to <html amp> prolog
+  html_prolog_ = "<html amp>";
+  TestSimple(100, 100, "a.jpg", "10.23", "jpg", false);
 }
 
 TEST_F(ResponsiveImageFilterTest, OddRatio) {
@@ -411,6 +429,41 @@ TEST_F(ResponsiveImageFilterTest, CommasInUrls) {
              "' width=682 height=511>"));
 }
 
+TEST_F(ResponsiveImageFilterTest, JavaScriptUrl) {
+  options()->EnableFilter(RewriteOptions::kResponsiveImages);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  rewrite_driver()->AddFilters();
+
+  ValidateNoChanges(
+      "js_image",
+      "<img src='javascript:slide();' width=682 height=511>");
+}
+
+TEST_F(ResponsiveImageFilterTest, EscapedUrl) {
+  options()->EnableFilter(RewriteOptions::kResponsiveImages);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+  options()->EnableFilter(RewriteOptions::kDebug);
+  rewrite_driver()->AddFilters();
+
+  // This tests the responsive image filter in the presence of an
+  // image URL that cannot be decoded.  Currently we refuse
+  // to decode a URL with query params specified via "&" rather than "&amp;".
+  // This is because if we mutate such a value we don't know whether to
+  // put in "&amp;" or just "&".
+  //
+  // This ASSERT in just to make clear that this test depends on that property.
+  GoogleString buf;
+  bool decoding_error;
+  static const char kUrl[] = "http://example.com/?a=b&cup=3";
+  ASSERT_TRUE(HtmlKeywords::Unescape(kUrl, &buf, &decoding_error).empty());
+
+  ParseUrl("http://example.com/escaped_image",
+           StrCat("<img src='", kUrl, "' width=682 height=511>"));
+  EXPECT_THAT(output_buffer_, testing::HasSubstr(
+      StrCat("<img src='", kUrl, "' width=682 height=511>"
+             "<!--Responsive image URL not decodable")));
+}
+
 TEST_F(ResponsiveImageFilterTest, SpacesInUrls) {
   options()->EnableFilter(RewriteOptions::kResponsiveImages);
   options()->EnableFilter(RewriteOptions::kResizeImages);
@@ -510,13 +563,24 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
       "<!--ResponsiveImageFilter: Not adding srcset because of "
       "data-pagespeed-no-transform attribute.-->");
 
+  // Note that here the regular rewrite images filter touches the srcset,
+  // and spams a whole bunch of debug comments. (It's also unable to rewrite
+  // b.png)
   ValidateExpected(
       "with_srcset",
       "<img src=a.jpg width=100 height=100 srcset='a.jpg 1x, b.png 2x'>",
-
       StrCat("<img src=", EncodeImage(100, 100, "a.jpg", "0", "jpg"),
-             " width=100 height=100 srcset='a.jpg 1x, b.png 2x'>"
-             "<!--Resized image from 1023x766 to 100x100-->"
+             " width=100 height=100 srcset='",
+             EncodeImage(-1, -1, "a.jpg", "0", "jpg"), " 1x, b.png 2x'>",
+             "<!--Image http://test.com/b.png "
+             "does not appear to need resizing.-->"
+             "<!--Image http://test.com/b.png "
+             "has no transparent pixels, is sensitive to "
+             "compression noise, and has no animation.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
+             "<!--Resized image http://test.com/a.jpg "
+             "from 1023x766 to 100x100-->"
              "<!--ResponsiveImageFilter: Not adding srcset because image "
              "already has one.-->"));
 
@@ -525,7 +589,8 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
       "<img src=a.jpg>",
 
       StrCat("<img src=", EncodeImage(-1, -1, "a.jpg", "0", "jpg"), ">"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
              "<!--ResponsiveImageFilter: Not adding srcset because image does "
              "not have dimensions (or a src URL).-->"));
 
@@ -534,7 +599,8 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
       "<img src=small_1x1.gif width=1 height=1>",
 
       "<img src=small_1x1.gif width=1 height=1>"
-      "<!--Image does not appear to need resizing.-->"
+      "<!--Image http://test.com/small_1x1.gif "
+      "does not appear to need resizing.-->"
       "<!--ResponsiveImageFilter: Not adding srcset to tracking pixel.-->");
 
   ValidateExpected(
@@ -548,35 +614,40 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
              "to the virtual 1.5x image with src=",
              EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
              " width=1534 height=1149-->"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
 
              // 2x virtual image debug messages:
              "<!--ResponsiveImageFilter: Any debug messages after this refer "
              "to the virtual 2x image with src=",
              EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
              " width=2046 height=1532-->"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
 
              // 3x virtual image debug messages:
              "<!--ResponsiveImageFilter: Any debug messages after this refer "
              "to the virtual 3x image with src=",
              EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
              " width=3069 height=2298-->"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
 
              // Inlinable virtual image debug messages:
              "<!--ResponsiveImageFilter: Any debug messages after this refer "
              "to the virtual inlinable 3x image with src=",
              EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
              " width=3069 height=2298-->"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
 
              // Full virtual image debug messages:
              "<!--ResponsiveImageFilter: Any debug messages after this refer "
              "to the virtual full-sized image with src=",
              EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
              " width= height=-->"
-             "<!--Image does not appear to need resizing.-->"
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"
 
              // Actual image + debug messages:
              "<img src=", EncodeImage(-1, -1, "a.jpg", "0", "jpg"),
@@ -589,7 +660,8 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
              "because it is the same as previous candidate.-->"
              "<!--ResponsiveImageFilter: Not adding 1.5x candidate to srcset "
              "because it is the same as previous candidate.-->"
-             "<!--Image does not appear to need resizing.-->"));
+             "<!--Image http://test.com/a.jpg "
+             "does not appear to need resizing.-->"));
 
   ValidateExpected(
       "same_src",
@@ -642,6 +714,55 @@ TEST_F(ResponsiveImageFilterTest, Debug) {
       "because it is the same as previous candidate.-->"
       "<!--The preceding resource was not rewritten because its domain "
       "(other-domain.com) is not authorized-->");
+}
+
+TEST_F(ResponsiveImageFilterTest, DebugCsp) {
+  options()->EnableFilter(RewriteOptions::kResponsiveImages);
+  options()->EnableFilter(RewriteOptions::kResponsiveImagesZoom);
+  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
+  options()->EnableFilter(RewriteOptions::kResizeImages);
+
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy",
+              "script-src https://modpagespeed.com; img-src *;");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+
+  ValidateExpected(
+      "csp_no_zoom",
+      // Input
+      "<img src=a.jpg width=10 height=10>",
+      // Output
+      "<!--ResponsiveImageFilter: Any debug messages after this refer "
+      "to the virtual 1.5x image with "
+      "src=15x15xa.jpg.pagespeed.ic.0.jpg width=15 height=15-->"
+      "<!--Resized image http://test.com/a.jpg from 1023x766 to 15x15-->"
+      "<!--ResponsiveImageFilter: Any debug messages after this refer "
+      "to the virtual 2x image with "
+      "src=20x20xa.jpg.pagespeed.ic.0.jpg width=20 height=20-->"
+      "<!--Resized image http://test.com/a.jpg from 1023x766 to 20x20-->"
+      "<!--ResponsiveImageFilter: Any debug messages after this refer "
+      "to the virtual 3x image with "
+      "src=30x30xa.jpg.pagespeed.ic.0.jpg width=30 height=30-->"
+      "<!--Resized image http://test.com/a.jpg from 1023x766 to 30x30-->"
+      "<!--ResponsiveImageFilter: Any debug messages after this refer "
+      "to the virtual inlinable 3x image with "
+      "src=30x30xa.jpg.pagespeed.ic.0.jpg width=30 height=30-->"
+      "<!--Resized image http://test.com/a.jpg from 1023x766 to 30x30-->"
+      "<!--ResponsiveImageFilter: Any debug messages after this refer "
+      "to the virtual full-sized image with "
+      "src=xa.jpg.pagespeed.ic.0.jpg width= height=-->"
+      "<!--Image http://test.com/a.jpg does not appear to need resizing.-->"
+      "<img src=10x10xa.jpg.pagespeed.ic.0.jpg width=10 height=10 "
+      "srcset=\"15x15xa.jpg.pagespeed.ic.0.jpg "
+      "1.5x,20x20xa.jpg.pagespeed.ic.0.jpg "
+      "2x,30x30xa.jpg.pagespeed.ic.0.jpg "
+      "3x,xa.jpg.pagespeed.ic.0.jpg 102.3x\">"
+      "<!--Resized image http://test.com/a.jpg from 1023x766 to 10x10-->"
+      "<!--ResponsiveImageFilter: cannot insert zoom JS as "
+      "Content-Security-Policy would disallow it-->");
 }
 
 TEST_F(ResponsiveImageFilterTest, InlinePreview) {

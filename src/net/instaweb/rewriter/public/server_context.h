@@ -32,6 +32,7 @@
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/util/public/property_cache.h"
+#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -48,6 +49,7 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
+#include "pagespeed/kernel/thread/sequence.h"
 #include "pagespeed/kernel/util/simple_random.h"
 
 namespace pagespeed { namespace js { struct JsTokenizerPatterns; } }
@@ -55,19 +57,14 @@ namespace pagespeed { namespace js { struct JsTokenizerPatterns; } }
 namespace net_instaweb {
 
 class AsyncFetch;
-class CacheHtmlInfoFinder;
 class CachePropertyStore;
-class CriticalCssFinder;
 class CriticalImagesFinder;
-class CriticalLineInfoFinder;
 class CriticalSelectorFinder;
 class RequestProperties;
 class ExperimentMatcher;
 class FileSystem;
-class FlushEarlyInfoFinder;
 class GoogleUrl;
 class MessageHandler;
-class MobilizeCachedFinder;
 class NamedLock;
 class NamedLockManager;
 class PropertyStore;
@@ -113,9 +110,6 @@ class ServerContext {
   // of mod_headers.
   static const char kResourceEtagValue[];
   static const char kCacheKeyResourceNamePrefix[];
-
-  // Default statistics group name.
-  static const char kStatisticsGroup[];
 
   explicit ServerContext(RewriteDriverFactory* factory);
   virtual ~ServerContext();
@@ -200,21 +194,14 @@ class ServerContext {
   bool has_default_system_fetcher() const {
     return default_system_fetcher_ != NULL;
   }
-  bool has_default_distributed_fetcher() {
-    return default_distributed_fetcher_ != NULL;
-  }
   // Note: for rewriting user content, you want to use RewriteDriver's
   // async_fetcher() instead, as it may apply session-specific optimizations.
   UrlAsyncFetcher* DefaultSystemFetcher() { return default_system_fetcher_; }
 
-  UrlAsyncFetcher* DefaultDistributedFetcher() {
-    return default_distributed_fetcher_;
-  }
-
   // Creates a caching-fetcher based on the specified options.  If you call
   // this with DefaultSystemFetcher() then it will not include any loopback
   // fetching installed in the RewriteDriver.
-  CacheUrlAsyncFetcher* CreateCustomCacheFetcher(
+  virtual CacheUrlAsyncFetcher* CreateCustomCacheFetcher(
       const RewriteOptions* options, const GoogleString& fragment,
       CacheUrlAsyncFetcher::AsyncOpHooks* hooks, UrlAsyncFetcher* fetcher);
 
@@ -236,11 +223,15 @@ class ServerContext {
   const PropertyCache::Cohort* dom_cohort() const { return dom_cohort_; }
   void set_dom_cohort(const PropertyCache::Cohort* c) { dom_cohort_ = c; }
 
-  const PropertyCache::Cohort* blink_cohort() const { return blink_cohort_; }
-  void set_blink_cohort(const PropertyCache::Cohort* c) { blink_cohort_ = c; }
-
   const PropertyCache::Cohort* beacon_cohort() const { return beacon_cohort_; }
   void set_beacon_cohort(const PropertyCache::Cohort* c) { beacon_cohort_ = c; }
+
+  const PropertyCache::Cohort* dependencies_cohort() const {
+    return dependencies_cohort_;
+  }
+  void set_dependencies_cohort(const PropertyCache::Cohort* c) {
+    dependencies_cohort_ = c;
+  }
 
   const PropertyCache::Cohort* fix_reflow_cohort() const {
     return fix_reflow_cohort_;
@@ -267,11 +258,6 @@ class ServerContext {
   CacheInterface* metadata_cache() const { return metadata_cache_; }
   void set_metadata_cache(CacheInterface* x) { metadata_cache_ = x; }
 
-  CriticalCssFinder* critical_css_finder() const {
-    return critical_css_finder_.get();
-  }
-  void set_critical_css_finder(CriticalCssFinder* finder);
-
   CriticalImagesFinder* critical_images_finder() const {
     return critical_images_finder_.get();
   }
@@ -282,38 +268,14 @@ class ServerContext {
   }
   void set_critical_selector_finder(CriticalSelectorFinder* finder);
 
-  FlushEarlyInfoFinder* flush_early_info_finder() const {
-    return flush_early_info_finder_.get();
-  }
-  void set_flush_early_info_finder(FlushEarlyInfoFinder* finder);
-
-  // May be NULL
-  MobilizeCachedFinder* mobilize_cached_finder() const  {
-    return mobilize_cached_finder_.get();
-  }
-  void set_mobilize_cached_finder(MobilizeCachedFinder* finder);
-
   UserAgentMatcher* user_agent_matcher() const {
     return user_agent_matcher_;
   }
   void set_user_agent_matcher(UserAgentMatcher* n) { user_agent_matcher_ = n; }
 
-  CacheHtmlInfoFinder* cache_html_info_finder() const {
-    return cache_html_info_finder_.get();
-  }
-
   SimpleRandom* simple_random() {
     return &simple_random_;
   }
-
-  void set_cache_html_info_finder(CacheHtmlInfoFinder* finder);
-
-  CriticalLineInfoFinder* critical_line_info_finder() const {
-    return critical_line_info_finder_.get();
-  }
-
-  // Takes ownership of the passed in finder.
-  void set_critical_line_info_finder(CriticalLineInfoFinder* finder);
 
   // Whether or not dumps of rewritten resources should be stored to
   // the filesystem. This is meant for testing purposes only.
@@ -338,16 +300,13 @@ class ServerContext {
   // callback on the  given worker Sequence.  If the lock times out, cancel the
   // callback, running the cancel on the worker.
   void LockForCreation(NamedLock* creation_lock,
-                       QueuedWorkerPool::Sequence* worker, Function* callback);
+                       Sequence* worker, Function* callback);
 
   // Setters should probably only be used in testing.
   void set_hasher(Hasher* hasher) { hasher_ = hasher; }
   void set_signature(SHA1Signature* signature) { signature_ = signature; }
   void set_default_system_fetcher(UrlAsyncFetcher* fetcher) {
     default_system_fetcher_ = fetcher;
-  }
-  void set_default_distributed_fetcher(UrlAsyncFetcher* fetcher) {
-    default_distributed_fetcher_ = fetcher;
   }
 
   // Handles an incoming beacon request by incrementing the appropriate
@@ -416,14 +375,6 @@ class ServerContext {
   // backgrounded and the result is ignored. Startup fetches are only used for
   // populating the cache.
   void GetRemoteOptions(RewriteOptions* remote_options, bool on_startup);
-
-  // Checks the url for the split html ATF/BTF query param. If present, it
-  // strips the param from the url, and sets a bit in the request context
-  // indicating which chunk of the split response was requested.
-  // Returns true if it found a query param.
-  static bool ScanSplitHtmlRequest(const RequestContextPtr& ctx,
-                                   const RewriteOptions* options,
-                                   GoogleString* url);
 
   // Returns any custom options required for this request, incorporating
   // any domain-specific options from the UrlNamer, options set in query-params,
@@ -518,7 +469,7 @@ class ServerContext {
   // TODO(jmarantz): Change New*RewriteDriver() calls to return NULL
   // when run after shutdown.  This requires changing call-sites to
   // null-check their drivers and gracefully fail.
-  void ShutDownDrivers();
+  void ShutDownDrivers(int64 cutoff_time_ms);
 
   // Take any headers that are not caching-related, and not otherwise
   // filled in by SetDefaultLongCacheHeaders or SetContentType, but
@@ -607,13 +558,18 @@ class ServerContext {
     hostname_ = x;
   }
 
+  void set_central_controller(std::shared_ptr<CentralController> controller) {
+    central_controller_ = controller;
+  }
+
+  CentralController* central_controller() {
+    return central_controller_.get();
+  }
+
   // Adds an X-Original-Content-Length header to the response headers
   // based on the size of the input resources.
   void AddOriginalContentLengthHeader(const ResourceVector& inputs,
                                       ResponseHeaders* headers);
-
-  // Chooses a driver pool based on the request protocol.
-  virtual RewriteDriverPool* SelectDriverPool(bool using_spdy);
 
   // Provides a hook for ServerContext implementations to determine
   // the fetcher implementation based on the request.
@@ -732,16 +688,10 @@ class ServerContext {
   UserAgentMatcher* user_agent_matcher_;
   Scheduler* scheduler_;
   UrlAsyncFetcher* default_system_fetcher_;
-  UrlAsyncFetcher* default_distributed_fetcher_;
   Hasher* hasher_;
   SHA1Signature* signature_;
   scoped_ptr<CriticalImagesFinder> critical_images_finder_;
-  scoped_ptr<CriticalCssFinder> critical_css_finder_;
   scoped_ptr<CriticalSelectorFinder> critical_selector_finder_;
-  scoped_ptr<CacheHtmlInfoFinder> cache_html_info_finder_;
-  scoped_ptr<FlushEarlyInfoFinder> flush_early_info_finder_;
-  scoped_ptr<CriticalLineInfoFinder> critical_line_info_finder_;
-  scoped_ptr<MobilizeCachedFinder> mobilize_cached_finder_;
 
   // hasher_ is often set to a mock within unit tests, but some parts of the
   // system will not work sensibly if the "hash algorithm" used always returns
@@ -768,8 +718,8 @@ class ServerContext {
   MessageHandler* message_handler_;
 
   const PropertyCache::Cohort* dom_cohort_;
-  const PropertyCache::Cohort* blink_cohort_;
   const PropertyCache::Cohort* beacon_cohort_;
+  const PropertyCache::Cohort* dependencies_cohort_;
   const PropertyCache::Cohort* fix_reflow_cohort_;
 
   // RewriteDrivers that were previously allocated, but have
@@ -843,6 +793,8 @@ class ServerContext {
   const pagespeed::js::JsTokenizerPatterns* js_tokenizer_patterns_;
 
   scoped_ptr<CachePropertyStore> cache_property_store_;
+
+  std::shared_ptr<CentralController> central_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(ServerContext);
 };

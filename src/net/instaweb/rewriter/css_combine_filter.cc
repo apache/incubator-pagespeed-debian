@@ -22,12 +22,12 @@
 
 #include "net/instaweb/rewriter/public/css_combine_filter.h"
 
-#include <memory>
 #include <vector>
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/log_record.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/css_tag_scanner.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
@@ -41,7 +41,6 @@
 #include "net/instaweb/rewriter/public/rewrite_result.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/charset_util.h"
-#include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -51,14 +50,13 @@
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "webutil/css/parser.h"
 
 namespace net_instaweb {
 
 class MessageHandler;
-class HtmlIEDirectiveNode;
-class UrlSegmentEncoder;
 
 // Names for Statistics variables.
 const char CssCombineFilter::kCssCombineOpportunities[] =
@@ -180,7 +178,7 @@ class CssCombineFilter::Context : public RewriteContext {
 
   bool AddElement(HtmlElement* element, HtmlElement::Attribute* href) {
     ResourcePtr resource(filter_->CreateInputResourceOrInsertDebugComment(
-        href->DecodedValueOrNull(), element));
+        href->DecodedValueOrNull(), RewriteDriver::InputRole::kStyle, element));
     if (resource.get() == NULL) {
       return false;
     }
@@ -272,9 +270,13 @@ class CssCombineFilter::Context : public RewriteContext {
     RewriteDone(result, partition_index);
   }
 
+  bool PolicyPermitsRendering() const override {
+    return AreOutputsAllowedByCsp(CspDirective::kStyleSrc);
+  }
+
   virtual void Render() {
     for (int p = 0, np = num_output_partitions(); p < np; ++p) {
-      CachedResult* partition = output_partition(p);
+      const CachedResult* partition = output_partition(p);
       if (partition->input_size() == 0) {
         continue;
       }
@@ -324,7 +326,7 @@ class CssCombineFilter::Context : public RewriteContext {
     }
   }
 
-  void DisableRemovedSlots(CachedResult* partition) {
+  void DisableRemovedSlots(const CachedResult* partition) {
     // Slot 0 will be replaced by the combined resource as part of
     // rewrite_context.cc.  But we still need to delete links for slots 1-N,
     // and to prevent further acting on them.
@@ -404,15 +406,35 @@ void CssCombineFilter::StartElementImpl(HtmlElement* element) {
       NextCombination("children in flush window");
       return;
     }
+
+    // Support PermitIdsForCssCombining by treating any ids whose values match
+    // the regexp as "expected" and removing them from nonstandard_attributes.
+    // TODO(jefftk): figure out how likely things are to break if you do go
+    // ahead and combine multiple elements with an id; various templates seem
+    // to put in ids when they're not actually referenced and we've gotten
+    // several mailing list questions about why we don't combine in this case.
+    // Is there actually javascript referencing css link tags by id?
+    // Tracked in https://github.com/pagespeed/mod_pagespeed/issues/1385
+    if (driver()->options()->CssCombiningMayPermitIds()) {
+      const char* value = element->AttributeValue(HtmlName::kId);
+      if (value != nullptr &&
+          driver()->options()->IsAllowedIdForCssCombining(value)) {
+        // Remove id from nonstandard_attributes, since it's expected.   This is
+        // awkward since we want to do this in a case insensitive way.
+        for (auto it = nonstandard_attributes.begin();
+             it != nonstandard_attributes.end(); ++it) {
+          if (StringCaseEqual(*it, "id")) {
+            nonstandard_attributes.erase(it);  // invalidates it, but that's ok
+            break;
+          }
+        }
+      }
+    }
+
     if (!nonstandard_attributes.empty()) {
       // TODO(jmaessen): allow more attributes.  This is the place it's
-      // riskiest:  we can't combine multiple elements with an id, for
+      // riskiest: we can't generally combine multiple elements with an id, for
       // example, so we'd need to explicitly catch and handle that case.
-      // TODO(jefftk): figure out how likely things are to break if you do go
-      // ahead and combine multiple elements with an id; various templates seem
-      // to put in ids when they're not actually referenced and we've gotten
-      // several mailing list questions about why we don't combine in this
-      // case.  Is there actually javascript referencing css link tags by id?
       GoogleString message("potentially non-combinable attribute");
       if (DebugMode()) {
         if (nonstandard_attributes.size() > 1) {
@@ -468,9 +490,8 @@ void CssCombineFilter::StartElementImpl(HtmlElement* element) {
     // match spec-defined ones would have hit the ParseCssElement case above.
     resource_tag_scanner::ScanElement(
         element, driver()->options(), &attributes);
-    resource_tag_scanner::UrlCategoryVector::iterator uc;
-    for (uc = attributes.begin(); uc != attributes.end(); uc++) {
-      if (uc->category == semantic_type::kStylesheet) {
+    for (resource_tag_scanner::UrlCategoryPair uc : attributes) {
+      if (uc.category == semantic_type::kStylesheet) {
         NextCombination("custom or alternate stylesheet attribute");
         return;
       }
@@ -551,8 +572,6 @@ void CssCombineFilter::DetermineEnabled(GoogleString* disabled_reason) {
   if (driver()->options()->css_preserve_urls()) {
     *disabled_reason = "Due to CSS URL preservation being on.";
     set_is_enabled(false);
-  } else {
-    set_is_enabled(!driver()->flushed_cached_html());
   }
 }
 

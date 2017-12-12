@@ -22,10 +22,10 @@
 #   add it js_files_utils_dep.
 # * If your file has a dependency on another file but NOT on closure, add a pair
 #   of new targets (opt and dbg) and add a js_includes field with the other
-#   dependencies (see the panel_loader targets for an example).
+#   dependencies.
 # * If you made it this far, you have a closure dependency. Add a pair of new
 #   targets (opt and dbg) and specify the required extra_closure_flags
-#   (--closure_entry_point and '<@(include_closure_library)'). Also add
+#   (--entry_point and '<@(include_closure_library)'). Also add
 #   js_includes if you need it (needed if your file uses js_utils.js). See
 #   critical_images_beacon for an example.
 # Then add data2c targets for the dbg and opt builds. No trickery here, these
@@ -53,9 +53,11 @@
     # line client the best you can do is find all the js files that make up the
     # closure library and pass them to the compiler in a deterministic order.
     'include_closure_library':
-        '<!(echo --only_closure_dependencies'
-        '    $(find <(instaweb_root)/third_party/closure_library -name "*.js"'
-        '           | sort | sed "s/^/--js /"))',
+        '<!(echo --dependency_mode=STRICT'
+        '    $(find <(instaweb_root)/third_party/closure_library/closure '
+        '           <(instaweb_root)/third_party/closure_library/third_party '
+        '           -name "*.js"'
+        '           | grep -v _test.js | sort | sed "s/^/--js /"))',
     # Setting chromium_code to 1 turns on extra warnings. Also, if the compiler
     # is whitelisted in our common.gypi, those warnings will get treated as
     # errors.
@@ -73,10 +75,6 @@
       'rewriter/critical_css_beacon.js',
       'rewriter/lazyload_images.js',
       'rewriter/delay_images.js',
-      # TODO(jud): There is currently a dependency on a google specific path in
-      # this file. Resolve that so we can use the open-source closure build
-      # path.
-      # 'rewriter/ghost_click_buster.js',
       'rewriter/js_defer.js',
       'rewriter/local_storage_cache.js',
     ],
@@ -123,7 +121,7 @@
         'js_dir': 'system',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point', 'pagespeed.Caches',
+          '--entry_point=goog:pagespeed.Caches',
           '<@(include_closure_library)',
         ],
       },
@@ -135,7 +133,7 @@
       'variables': {
         'js_dir': 'system',
         'extra_closure_flags': [
-          '--closure_entry_point', 'pagespeed.Caches',
+          '--entry_point=goog:pagespeed.Caches',
           '<@(include_closure_library)',
         ],
       },
@@ -151,8 +149,8 @@
         'extra_closure_flags': [
           '--externs=<(DEPTH)/pagespeed/system/js_externs.js',
           '--externs=<(DEPTH)/third_party/closure/externs/google_visualization_api.js',
-          '--closure_entry_point', 'pagespeed.Console',
-          '--closure_entry_point', 'pagespeed.statistics',
+          '--entry_point=goog:pagespeed.Console',
+          '--entry_point=goog:pagespeed.statistics',
           '<@(include_closure_library)',
         ],
       },
@@ -167,8 +165,8 @@
         'extra_closure_flags': [
           '--externs=<(DEPTH)/pagespeed/system/js_externs.js',
           '--externs=<(DEPTH)/third_party/closure/externs/google_visualization_api.js',
-          '--closure_entry_point', 'pagespeed.Console',
-          '--closure_entry_point', 'pagespeed.statistics',
+          '--entry_point=goog:pagespeed.Console',
+          '--entry_point=goog:pagespeed.statistics',
           '<@(include_closure_library)',
         ],
       },
@@ -183,7 +181,7 @@
         'js_dir': 'rewriter',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.CriticalCssLoader',
+          '--entry_point=goog:pagespeed.CriticalCssLoader',
           '<@(include_closure_library)',
         ],
         'js_includes': [ 'js/js_utils.js' ],
@@ -196,7 +194,7 @@
       'variables': {
         'js_dir': 'rewriter',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.CriticalCssLoader',
+          '--entry_point=goog:pagespeed.CriticalCssLoader',
           '<@(include_closure_library)',
         ],
         'js_includes': [ 'js/js_utils.js' ],
@@ -211,7 +209,7 @@
         'js_dir': 'rewriter',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.CriticalImages',
+          '--entry_point=goog:pagespeed.CriticalImages',
           '<@(include_closure_library)',
         ],
         'js_includes': [ 'js/js_utils.js' ],
@@ -224,7 +222,7 @@
       'variables': {
         'js_dir': 'rewriter',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.CriticalImages',
+          '--entry_point=goog:pagespeed.CriticalImages',
           '<@(include_closure_library)',
         ],
         'js_includes': [ 'js/js_utils.js' ],
@@ -240,7 +238,7 @@
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
           '--externs=<(DEPTH)/third_party/closure/externs/google_visualization_api.js',
-          '--closure_entry_point=pagespeed.Graphs',
+          '--entry_point=goog:pagespeed.Graphs',
           '<@(include_closure_library)',
         ],
       },
@@ -253,7 +251,7 @@
         'js_dir': 'system',
         'extra_closure_flags': [
           '--externs=<(DEPTH)/third_party/closure/externs/google_visualization_api.js',
-          '--closure_entry_point=pagespeed.Graphs',
+          '--entry_point=goog:pagespeed.Graphs',
           '<@(include_closure_library)',
         ],
       },
@@ -267,7 +265,7 @@
         'js_dir': 'system',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Messages',
+          '--entry_point=goog:pagespeed.Messages',
           '<@(include_closure_library)',
         ],
       },
@@ -279,7 +277,7 @@
       'variables': {
         'js_dir': 'system',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Messages',
+          '--entry_point=goog:pagespeed.Messages',
           '<@(include_closure_library)',
         ],
       },
@@ -293,7 +291,7 @@
         'js_dir': 'system',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Statistics',
+          '--entry_point=goog:pagespeed.Statistics',
           '<@(include_closure_library)',
         ],
       },
@@ -305,31 +303,11 @@
       'variables': {
         'js_dir': 'system',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Statistics',
+          '--entry_point=goog:pagespeed.Statistics',
           '<@(include_closure_library)',
         ],
       },
       'sources': [ '<(DEPTH)/pagespeed/system/statistics.js' ],
-      'includes': [ 'closure.gypi', ],
-    },
-
-    {
-      'target_name': 'panel_loader_js_dbg',
-      'variables': {
-        'js_dir': 'rewriter',
-        'closure_build_type': 'dbg',
-        'js_includes': [ 'rewriter/panels.js' ],
-      },
-      'sources': [ 'rewriter/panel_loader.js', ],
-      'includes': [ 'closure.gypi', ],
-    },
-    {
-      'target_name': 'panel_loader_js_opt',
-      'variables': {
-        'js_dir': 'rewriter',
-        'js_includes': [ 'rewriter/panels.js' ],
-      },
-      'sources': [ 'rewriter/panel_loader.js', ],
       'includes': [ 'closure.gypi', ],
     },
 
@@ -339,7 +317,7 @@
         'js_dir': 'rewriter',
         'closure_build_type': 'dbg',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Responsive',
+          '--entry_point=goog:pagespeed.Responsive',
           '<@(include_closure_library)',
         ],
       },
@@ -352,37 +330,11 @@
       'variables': {
         'js_dir': 'rewriter',
         'extra_closure_flags': [
-          '--closure_entry_point=pagespeed.Responsive',
+          '--entry_point=goog:pagespeed.Responsive',
           '<@(include_closure_library)',
         ],
       },
       'sources': [ 'rewriter/responsive.js', ],
-      'includes': [ 'closure.gypi', ],
-    },
-
-    {
-      'target_name': 'split_html_beacon_js_dbg',
-      'variables': {
-        'js_dir': 'rewriter',
-        'closure_build_type': 'dbg',
-        'js_includes' : [
-            'js/js_utils.js',
-            'js/critical_xpaths.js',
-         ]
-      },
-      'sources': [ 'rewriter/split_html_beacon.js', ],
-      'includes': [ 'closure.gypi', ],
-    },
-    {
-      'target_name': 'split_html_beacon_js_opt',
-      'variables': {
-        'js_dir': 'rewriter',
-        'js_includes' : [
-            'js/js_utils.js',
-            'js/critical_xpaths.js',
-         ]
-      },
-      'sources': [ 'rewriter/split_html_beacon.js', ],
       'includes': [ 'closure.gypi', ],
     },
 
@@ -705,62 +657,6 @@
       },
       'sources': [
         '<(compiled_js_dir)/rewriter/deterministic_opt.js',
-      ],
-      'includes': [
-        'data2c.gypi',
-      ]
-    },
-    {
-      'target_name': 'instaweb_ghost_click_buster_opt_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'net/instaweb/rewriter',
-        'instaweb_js_subdir': 'genfiles/rewriter',
-        'var_name': 'ghost_click_buster_opt',
-      },
-      'sources': [
-        'genfiles/rewriter/ghost_click_buster_opt.js',
-      ],
-      'includes': [
-        'data2c.gypi',
-      ]
-    },
-    {
-      'target_name': 'instaweb_split_html_beacon_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'net/instaweb/rewriter',
-        'instaweb_js_subdir': '<(compiled_js_dir)/rewriter',
-        'var_name': 'split_html_beacon',
-      },
-      'sources': [
-        '<(compiled_js_dir)/rewriter/split_html_beacon_dbg.js',
-      ],
-      'includes': [
-        'data2c.gypi',
-      ]
-    },
-    {
-      'target_name': 'instaweb_split_html_beacon_opt_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'net/instaweb/rewriter',
-        'instaweb_js_subdir': '<(compiled_js_dir)/rewriter',
-        'var_name': 'split_html_beacon_opt',
-      },
-      'sources': [
-        '<(compiled_js_dir)/rewriter/split_html_beacon_opt.js',
-      ],
-      'includes': [
-        'data2c.gypi',
-      ]
-    },
-    {
-      'target_name': 'instaweb_panel_loader_opt_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'net/instaweb/rewriter',
-        'instaweb_js_subdir': '<(compiled_js_dir)/rewriter',
-        'var_name': 'panel_loader_opt',
-      },
-      'sources': [
-        '<(compiled_js_dir)/rewriter/panel_loader_opt.js',
       ],
       'includes': [
         'data2c.gypi',
@@ -1145,6 +1041,22 @@
       ],
     },
     {
+      'target_name': 'instaweb_dependencies_pb',
+      'variables': {
+        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
+      },
+      'sources': [
+        'rewriter/dependencies.proto',
+        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/dependencies.pb.cc',
+      ],
+      'dependencies': [
+        'instaweb_input_info_pb',
+      ],
+      'includes': [
+        'protoc.gypi',
+      ],
+    },
+    {
       'target_name': 'instaweb_flush_early_pb',
       'variables': {
         'instaweb_protoc_subdir': 'net/instaweb/rewriter',
@@ -1155,21 +1067,6 @@
       ],
       'dependencies': [
         '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_http_pb',
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
-    {
-      'target_name': 'instaweb_critical_css_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/critical_css.pb.cc',
-        'rewriter/critical_css.proto',
-      ],
-      'dependencies': [
       ],
       'includes': [
         'protoc.gypi',
@@ -1221,88 +1118,25 @@
         'protoc.gypi',
       ],
     },
-    {
-      'target_name': 'instaweb_critical_line_info_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/critical_line_info.pb.cc',
-        'rewriter/critical_line_info.proto',
-      ],
-      'dependencies': [
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
-    {
-      'target_name': 'instaweb_cache_html_info_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        'rewriter/cache_html_info.proto',
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/cache_html_info.pb.cc',
-      ],
-      'dependencies': [
-        '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_http_pb',
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
-    {
-      'target_name': 'instaweb_mobilize_cached_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/mobilize_cached.pb.cc',
-        'rewriter/mobilize_cached.proto',
-      ],
-      'dependencies': [
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
-    {
-      'target_name': 'instaweb_mobilize_labeling_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/mobilize_labeling.pb.cc',
-        'rewriter/mobilize_labeling.proto',
-      ],
-      'dependencies': [
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
-    {
-      'target_name': 'instaweb_mobilize_menu_pb',
-      'variables': {
-        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
-      },
-      'sources': [
-        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/mobilize_menu.pb.cc',
-        'rewriter/mobilize_menu.proto',
-      ],
-      'dependencies': [
-      ],
-      'includes': [
-        'protoc.gypi',
-      ],
-    },
 
     {
       'target_name': 'instaweb_http',
       'type': '<(library)',
       'dependencies': [
         '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_http',
+      ],
+    },
+    {
+      'target_name': 'instaweb_input_info_pb',
+      'variables': {
+        'instaweb_protoc_subdir': 'net/instaweb/rewriter',
+      },
+      'sources': [
+        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/input_info.pb.cc',
+        'rewriter/input_info.proto',
+      ],
+      'includes': [
+        'protoc.gypi',
       ],
     },
     {
@@ -1315,6 +1149,8 @@
         'rewriter/cached_result.proto',
       ],
       'dependencies': [
+        'instaweb_dependencies_pb',
+        'instaweb_input_info_pb',
         'instaweb_spriter_pb',
       ],
       'includes': [
@@ -1332,6 +1168,21 @@
       'dependencies': [
         '<(DEPTH)/pagespeed/kernel.gyp:util',
         '<(DEPTH)/pagespeed/kernel.gyp:proto_util',
+      ],
+      'includes': [
+        'gperf.gypi',
+      ],
+    },
+    {
+      'target_name': 'instaweb_rewriter_csp_gperf',
+      'variables': {
+        'instaweb_gperf_subdir': 'net/instaweb/rewriter',
+      },
+      'sources': [
+        'rewriter/csp_directive.gperf',
+      ],
+      'dependencies': [
+        '<(DEPTH)/pagespeed/kernel.gyp:util',
       ],
       'includes': [
         'gperf.gypi',
@@ -1487,16 +1338,13 @@
       ],
       'sources': [
         'config/rewrite_options_manager.cc',
+        'config/measurement_proxy_rewrite_options_manager.cc',
         'rewriter/beacon_critical_images_finder.cc',
-        'rewriter/beacon_critical_line_info_finder.cc',
-        'rewriter/cache_html_info_finder.cc',
         'rewriter/critical_images_finder.cc',
-        'rewriter/critical_line_info_finder.cc',
         'rewriter/device_properties.cc',
         'rewriter/domain_lawyer.cc',
         'rewriter/downstream_cache_purger.cc',
         'rewriter/downstream_caching_directives.cc',
-        'rewriter/flush_early_info_finder.cc',
         'rewriter/inline_output_resource.cc',
         'rewriter/output_resource.cc',
         'rewriter/request_properties.cc',
@@ -1656,7 +1504,6 @@
         'instaweb_add_instrumentation_data2c',
         'instaweb_add_instrumentation_opt_data2c',
         'instaweb_admin_site_css_data2c',
-        'instaweb_cache_html_info_pb',
         'instaweb_caches_css_data2c',
         'instaweb_caches_js_data2c',
         'instaweb_caches_js_opt_data2c',
@@ -1670,12 +1517,10 @@
         'instaweb_critical_css_beacon_opt_data2c',
         'instaweb_critical_css_loader_data2c',
         'instaweb_critical_css_loader_opt_data2c',
-        'instaweb_critical_css_pb',
         'instaweb_critical_images_beacon_data2c',
         'instaweb_critical_images_beacon_opt_data2c',
         'instaweb_critical_images_pb',
         'instaweb_critical_keys_pb',
-        'instaweb_critical_line_info_pb',
         'instaweb_dedup_inlined_images_data2c',
         'instaweb_dedup_inlined_images_opt_data2c',
         'instaweb_defer_iframe_data2c',
@@ -1684,12 +1529,12 @@
         'instaweb_delay_images_inline_data2c',
         'instaweb_delay_images_inline_opt_data2c',
         'instaweb_delay_images_opt_data2c',
+        'instaweb_dependencies_pb',
         'instaweb_deterministic_data2c',
         'instaweb_deterministic_opt_data2c',
         'instaweb_extended_instrumentation_data2c',
         'instaweb_extended_instrumentation_opt_data2c',
         'instaweb_flush_early_pb',
-        'instaweb_ghost_click_buster_opt_data2c',
         'instaweb_graphs_css_data2c',
         'instaweb_graphs_js_data2c',
         'instaweb_graphs_js_opt_data2c',
@@ -1701,31 +1546,22 @@
         'instaweb_local_storage_cache_opt_data2c',
         'instaweb_messages_js_data2c',
         'instaweb_messages_js_opt_data2c',
-        'instaweb_mobilize_cached_pb',
-        'instaweb_mobilize_labeling_pb',
-        'instaweb_mobilize_menu_pb',
-        'instaweb_panel_loader_opt_data2c',
         'instaweb_responsive_js_data2c',
         'instaweb_responsive_js_opt_data2c',
         'instaweb_rewriter_base',
+        'instaweb_rewriter_csp_gperf',
         'instaweb_rewriter_css',
         'instaweb_rewriter_image',
         'instaweb_rewriter_javascript',
-        'instaweb_split_html_beacon_data2c',
-        'instaweb_split_html_beacon_opt_data2c',
+        'instaweb_rewriter_pb',
         'instaweb_spriter',
         'instaweb_statistics_css_data2c',
         'instaweb_statistics_js_data2c',
         'instaweb_statistics_js_opt_data2c',
         'instaweb_util',
         '<(DEPTH)/base/base.gyp:base',
+        '<(DEPTH)/pagespeed/controller.gyp:pagespeed_controller',
         '<(DEPTH)/pagespeed/kernel.gyp:pagespeed_http',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_css_data2c',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_js_data2c',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_js_opt_data2c',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_layout_css_data2c',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_xhr_js_data2c',
-        '<(DEPTH)/pagespeed/opt.gyp:instaweb_mobilize_xhr_js_opt_data2c',
         '<(DEPTH)/pagespeed/opt.gyp:pagespeed_ads_util',
         '<(DEPTH)/third_party/css_parser/css_parser.gyp:css_parser',
       ],
@@ -1734,20 +1570,11 @@
         'rewriter/add_ids_filter.cc',
         'rewriter/add_instrumentation_filter.cc',
         'rewriter/base_tag_filter.cc',
-        'rewriter/blink_util.cc',
         'rewriter/cache_extender.cc',
-        'rewriter/cache_html_filter.cc',
         'rewriter/cacheable_resource_base.cc',
-        'rewriter/central_controller.cc',
-        'rewriter/central_controller_interface_adapter.cc',
-        'rewriter/collect_flush_early_content_filter.cc',
+        'rewriter/collect_dependencies_filter.cc',
         'rewriter/common_filter.cc',
-        'rewriter/compatible_central_controller.cc',
-        'rewriter/compute_visible_text_filter.cc',
-        'rewriter/content_decision_tree.cc',
         'rewriter/critical_css_beacon_filter.cc',
-        'rewriter/critical_css_filter.cc',
-        'rewriter/critical_css_finder.cc',
         'rewriter/critical_finder_support_util.cc',
         'rewriter/critical_images_beacon_filter.cc',
         'rewriter/critical_selector_filter.cc',
@@ -1756,12 +1583,13 @@
         'rewriter/css_move_to_head_filter.cc',
         'rewriter/css_outline_filter.cc',
         'rewriter/css_tag_scanner.cc',
+        'rewriter/csp.cc',
         'rewriter/data_url_input_resource.cc',
         'rewriter/debug_filter.cc',
-        'rewriter/decision_tree.cc',
         'rewriter/decode_rewritten_urls_filter.cc',
         'rewriter/dedup_inlined_images_filter.cc',
         'rewriter/defer_iframe_filter.cc',
+        'rewriter/dependency_tracker.cc',
         'rewriter/responsive_image_filter.cc',
         'rewriter/delay_images_filter.cc',
         'rewriter/deterministic_js_filter.cc',
@@ -1774,19 +1602,18 @@
         'rewriter/file_load_policy.cc',
         'rewriter/file_load_rule.cc',
         'rewriter/fix_reflow_filter.cc',
-        'rewriter/flush_early_content_writer_filter.cc',
         'rewriter/flush_html_filter.cc',
         'rewriter/google_analytics_filter.cc',
         'rewriter/google_font_css_inline_filter.cc',
         'rewriter/google_font_service_input_resource.cc',
         'rewriter/handle_noscript_redirect_filter.cc',
-        'rewriter/header_decision_tree.cc',
-        'rewriter/iframe_fetcher.cc',
         'rewriter/image_rewrite_filter.cc',
         'rewriter/in_place_rewrite_context.cc',
         'rewriter/inline_attribute_slot.cc',
         'rewriter/inline_resource_slot.cc',
         'rewriter/inline_rewrite_context.cc',
+        'rewriter/input_info_utils.cc',
+        'rewriter/insert_amp_link_filter.cc',
         'rewriter/insert_dns_prefetch_filter.cc',
         'rewriter/insert_ga_filter.cc',
         'rewriter/js_combine_filter.cc',
@@ -1797,19 +1624,13 @@
         'rewriter/js_replacer.cc',
         'rewriter/lazyload_images_filter.cc',
         'rewriter/local_storage_cache_filter.cc',
+        'rewriter/measurement_proxy_url_namer.cc',
         'rewriter/make_show_ads_async_filter.cc',
         'rewriter/meta_tag_filter.cc',
-        'rewriter/mobilize_cached_finder.cc',
-        'rewriter/mobilize_filter_base.cc',
-        'rewriter/mobilize_label_filter.cc',
-        'rewriter/mobilize_menu_filter.cc',
-        'rewriter/mobilize_menu_render_filter.cc',
-        'rewriter/mobilize_rewrite_filter.cc',
-        'rewriter/navigational_decision_tree.cc',
         'rewriter/pedantic_filter.cc',
         'rewriter/property_cache_util.cc',
+        'rewriter/push_preload_filter.cc',
         'rewriter/redirect_on_size_limit_filter.cc',
-        'rewriter/render_blocking_html_computation.cc',
         'rewriter/resource_combiner.cc',
         'rewriter/resource_fetch.cc',
         'rewriter/resource_slot.cc',
@@ -1826,15 +1647,10 @@
         'rewriter/script_tag_scanner.cc',
         'rewriter/simple_text_filter.cc',
         'rewriter/single_rewrite_context.cc',
-        'rewriter/split_html_beacon_filter.cc',
-        'rewriter/split_html_config.cc',
-        'rewriter/split_html_filter.cc',
-        'rewriter/split_html_helper_filter.cc',
-        'rewriter/strip_non_cacheable_filter.cc',
+        'rewriter/srcset_slot.cc',
         'rewriter/strip_scripts_filter.cc',
         'rewriter/strip_subresource_hints_filter.cc',
         'rewriter/support_noscript_filter.cc',
-        'rewriter/suppress_prehead_filter.cc',
         'rewriter/url_input_resource.cc',
         'rewriter/url_left_trim_filter.cc',
         'rewriter/url_partnership.cc',
@@ -1856,10 +1672,7 @@
       'target_name': 'instaweb_automatic',
       'type': '<(library)',
       'dependencies': [
-        'instaweb_cache_html_info_pb',
-        'instaweb_critical_css_pb',
         'instaweb_critical_keys_pb',
-        'instaweb_critical_line_info_pb',
         'instaweb_flush_early_pb',
         'instaweb_rewriter',
         'instaweb_util',
@@ -1867,8 +1680,6 @@
         '<(DEPTH)/pagespeed/kernel.gyp:jsminify',
       ],
       'sources': [
-        '<(DEPTH)/pagespeed/automatic/cache_html_flow.cc',
-        '<(DEPTH)/pagespeed/automatic/flush_early_flow.cc',
         '<(DEPTH)/pagespeed/automatic/html_detector.cc',
         '<(DEPTH)/pagespeed/automatic/proxy_fetch.cc',
         '<(DEPTH)/pagespeed/automatic/proxy_interface.cc',
@@ -1885,12 +1696,17 @@
         '<(DEPTH)/third_party/apr/apr.gyp:include',
         '<(DEPTH)/third_party/aprutil/aprutil.gyp:include',
         '<(DEPTH)/third_party/domain_registry_provider/src/domain_registry/domain_registry.gyp:init_registry_tables_lib',
+        '<(DEPTH)/third_party/grpc/grpc.gyp:grpc_cpp',
+        '<(DEPTH)/third_party/hiredis/hiredis.gyp:hiredis',
       ],
       'sources': [
         '<(DEPTH)/pagespeed/system/add_headers_fetcher.cc',
         '<(DEPTH)/pagespeed/system/admin_site.cc',
         '<(DEPTH)/pagespeed/system/apr_mem_cache.cc',
+        '<(DEPTH)/pagespeed/system/redis_cache.cc',
         '<(DEPTH)/pagespeed/system/apr_thread_compatible_pool.cc',
+        '<(DEPTH)/pagespeed/system/controller_manager.cc',
+        '<(DEPTH)/pagespeed/system/external_server_spec.cc',
         '<(DEPTH)/pagespeed/system/in_place_resource_recorder.cc',
         '<(DEPTH)/pagespeed/system/loopback_route_fetcher.cc',
         '<(DEPTH)/pagespeed/system/serf_url_async_fetcher.cc',

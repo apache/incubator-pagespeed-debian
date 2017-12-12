@@ -21,8 +21,8 @@
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/http/domain_registry.h"
 #include "pagespeed/kernel/js/js_tokenizer.h"
-#include "pagespeed/kernel/util/gflags.h"
 
+#include "base/at_exit.h"
 #include "google/protobuf/stubs/common.h"
 using namespace google;  // NOLINT
 
@@ -38,6 +38,10 @@ int construction_count = 0;
 
 namespace net_instaweb {
 
+namespace {
+base::AtExitManager* at_exit_manager = NULL;
+}
+
 ProcessContext::ProcessContext()
     : js_tokenizer_patterns_(new pagespeed::js::JsTokenizerPatterns) {
   ++construction_count;
@@ -51,16 +55,14 @@ ProcessContext::ProcessContext()
   // thread-unsafe way and so it must be explicitly initialized prior to thread
   // creation, and explicitly terminated after thread quiescence.
   url::Initialize();
+
+  if (at_exit_manager == NULL) {
+    at_exit_manager = new base::AtExitManager;
+  }
 }
 
 ProcessContext::~ProcessContext() {
   // Clean up statics from third_party code first.
-
-  // The command-line flags structures are lazily initialized, but
-  // they are done so in static constructors resulting from DEFINE_int32
-  // and other similar macros.  So they must happen prior to threads
-  // starting up.
-  ShutDownCommandLineFlags();
 
   // The protobuf shutdown infrastructure is lazily initialized in a threadsafe
   // manner.  See third_party/protobuf/src/google/protobuf/stubs/common.cc,
@@ -69,6 +71,10 @@ ProcessContext::~ProcessContext() {
 
   url::Shutdown();
   HtmlKeywords::ShutDown();
+  if (at_exit_manager != NULL) {
+    delete at_exit_manager;
+    at_exit_manager = NULL;
+  }
 }
 
 }  // namespace net_instaweb

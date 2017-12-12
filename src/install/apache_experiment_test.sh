@@ -1,6 +1,19 @@
 #!/bin/bash
 #
-# Copyright 2012 Google Inc. All Rights Reserved.
+# Copyright 2012 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 # Author: jefftk@google.com (Jeff Kaufman)
 #
 # Runs all Apache-specific experiment framework tests that don't depend on
@@ -89,8 +102,7 @@ check [ $(grep -c "src=\"introspection.js\"" $FETCH_UNTIL_OUTFILE) = 1 ]
 
 # For id 7 ARIS is off.  Repeat this test, expecting it to get renamed.
 WGET_ARGS="--header Cookie:PageSpeedExperiment=7" fetch_until -save $ARIS \
-  'grep -c "src=\"normal.js\""' 0
-check [ $(grep -c "src=\"introspection.js\"" $FETCH_UNTIL_OUTFILE) = 0 ]
+  'grep -c "src=\"introspection.js\""' 0
 
 start_test Images are different when the url specifies different experiments.
 # While the images are the same, image B should be smaller because in the config

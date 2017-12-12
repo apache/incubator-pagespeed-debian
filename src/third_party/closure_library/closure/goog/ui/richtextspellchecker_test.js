@@ -16,6 +16,7 @@ goog.provide('goog.ui.RichTextSpellCheckerTest');
 goog.setTestOnly('goog.ui.RichTextSpellCheckerTest');
 
 goog.require('goog.dom.Range');
+goog.require('goog.dom.TagName');
 goog.require('goog.dom.classlist');
 goog.require('goog.events.KeyCodes');
 goog.require('goog.object');
@@ -81,13 +82,6 @@ function waitForSpellCheckToFinish() {
 
 
 /**
- * @typedef {!Array<string><string>>}
- * @suppress {missingProvide}
- */
-var lookupWordEntry;
-
-
-/**
  * Function to use for word lookup by the spell check handler. This function is
  * supplied as a constructor parameter for the spell check handler.
  * @param {!Array<string>} words Unknown words that need to be looked up.
@@ -110,8 +104,8 @@ function localSpellCheckingFunction(words, spellChecker, callback) {
     if (found) {
       results.push([word, goog.spell.SpellCheck.WordStatus.VALID]);
     } else {
-      results.push([word, goog.spell.SpellCheck.WordStatus.INVALID,
-        SUGGESTIONS]);
+      results.push(
+          [word, goog.spell.SpellCheck.WordStatus.INVALID, SUGGESTIONS]);
     }
   }
   callback.call(spellChecker, results);
@@ -133,8 +127,9 @@ function testDocumentIntegrity() {
   spellChecker.resume();
   waitForSpellCheckToFinish();
 
-  assertEquals('Spell checker run should not change the underlying element.',
-               el2.innerHTML, el.innerHTML);
+  assertEquals(
+      'Spell checker run should not change the underlying element.',
+      el2.innerHTML, el.innerHTML);
 }
 
 function testExcludeMarkers() {
@@ -142,9 +137,10 @@ function testExcludeMarkers() {
   spellChecker.decorate(el);
   spellChecker.setExcludeMarker(
       ['DIV.goog-quote', 'goog-comment', 'SPAN.goog-note']);
-  assertArrayEquals(['goog-quote', 'goog-comment', 'goog-note'],
-      spellChecker.excludeMarker);
-  assertArrayEquals(['DIV', undefined, 'SPAN'],
+  assertArrayEquals(
+      ['goog-quote', 'goog-comment', 'goog-note'], spellChecker.excludeMarker);
+  assertArrayEquals(
+      [String(goog.dom.TagName.DIV), undefined, String(goog.dom.TagName.SPAN)],
       spellChecker.excludeTags);
   el.innerHTML = '<div class="goog-quote">misspelling</div>' +
       '<div class="goog-yes">misspelling</div>' +
@@ -168,8 +164,9 @@ function testBiggerDocument() {
   spellChecker.resume();
   waitForSpellCheckToFinish();
 
-  assertEquals('Spell checker run should not change the underlying element.',
-               el2.innerHTML, el.innerHTML);
+  assertEquals(
+      'Spell checker run should not change the underlying element.',
+      el2.innerHTML, el.innerHTML);
 }
 
 function testElementOverflow() {
@@ -186,8 +183,9 @@ function testElementOverflow() {
   spellChecker.resume();
   waitForSpellCheckToFinish();
 
-  assertEquals('Spell checker run should not change the underlying element.',
-               el2.innerHTML, el.innerHTML);
+  assertEquals(
+      'Spell checker run should not change the underlying element.',
+      el2.innerHTML, el.innerHTML);
 }
 
 function testKeyboardNavigateNext() {
@@ -202,14 +200,15 @@ function testKeyboardNavigateNext() {
   waitForSpellCheckToFinish();
 
   // First call just moves focus to first misspelled word.
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
-  // Test moving from first to second mispelled word.
-  var defaultExecuted = goog.testing.events.fireKeySequence(el,
-      goog.events.KeyCodes.RIGHT, keyEventProperties);
+  // Test moving from first to second misspelled word.
+  var defaultExecuted = goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
-  assertFalse('The default action should be prevented for the key event',
+  assertFalse(
+      'The default action should be prevented for the key event',
       defaultExecuted);
   assertCursorAtElement(spellChecker.makeElementId(2));
 
@@ -228,18 +227,19 @@ function testKeyboardNavigateNextOnLastWord() {
   waitForSpellCheckToFinish();
 
   // Move to the last invalid word.
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
   // Test moving to the next invalid word. Should have no effect.
-  var defaultExecuted = goog.testing.events.fireKeySequence(el,
-      goog.events.KeyCodes.RIGHT, keyEventProperties);
+  var defaultExecuted = goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
-  assertFalse('The default action should be prevented for the key event',
+  assertFalse(
+      'The default action should be prevented for the key event',
       defaultExecuted);
   assertCursorAtElement(spellChecker.makeElementId(3));
 
@@ -259,19 +259,22 @@ function testKeyboardNavigateOpenSuggestions() {
 
   var suggestionMenu = spellChecker.getMenu();
 
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
-  assertFalse('The suggestion menu should not be visible yet.',
+  assertFalse(
+      'The suggestion menu should not be visible yet.',
       suggestionMenu.isVisible());
 
   keyEventProperties.ctrlKey = false;
-  var defaultExecuted = goog.testing.events.fireKeySequence(el,
-      goog.events.KeyCodes.DOWN, keyEventProperties);
+  var defaultExecuted = goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.DOWN, keyEventProperties);
 
-  assertFalse('The default action should be prevented for the key event',
+  assertFalse(
+      'The default action should be prevented for the key event',
       defaultExecuted);
-  assertTrue('The suggestion menu should be visible after the key event.',
+  assertTrue(
+      'The suggestion menu should be visible after the key event.',
       suggestionMenu.isVisible());
 
   spellChecker.resume();
@@ -289,17 +292,18 @@ function testKeyboardNavigatePrevious() {
   waitForSpellCheckToFinish();
 
   // Move to the third element, so we can test the move back to the second.
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
-  var defaultExecuted = goog.testing.events.fireKeySequence(el,
-      goog.events.KeyCodes.LEFT, keyEventProperties);
+  var defaultExecuted = goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.LEFT, keyEventProperties);
 
-  assertFalse('The default action should be prevented for the key event',
+  assertFalse(
+      'The default action should be prevented for the key event',
       defaultExecuted);
   assertCursorAtElement(spellChecker.makeElementId(2));
 
@@ -318,14 +322,15 @@ function testKeyboardNavigatePreviousOnLastWord() {
   waitForSpellCheckToFinish();
 
   // Move to the first invalid word.
-  goog.testing.events.fireKeySequence(el, goog.events.KeyCodes.RIGHT,
-      keyEventProperties);
+  goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.RIGHT, keyEventProperties);
 
   // Test moving to the previous invalid word. Should have no effect.
-  var defaultExecuted = goog.testing.events.fireKeySequence(el,
-      goog.events.KeyCodes.LEFT, keyEventProperties);
+  var defaultExecuted = goog.testing.events.fireKeySequence(
+      el, goog.events.KeyCodes.LEFT, keyEventProperties);
 
-  assertFalse('The default action should be prevented for the key event',
+  assertFalse(
+      'The default action should be prevented for the key event',
       defaultExecuted);
   assertCursorAtElement(spellChecker.makeElementId(1));
 
@@ -349,8 +354,9 @@ function assertCursorAtElement(expectedId) {
     }
   }
 
-  assertEquals('The cursor is not at the expected misspelled word.',
-      expectedId, focusedElementId);
+  assertEquals(
+      'The cursor is not at the expected misspelled word.', expectedId,
+      focusedElementId);
 }
 
 function isCaret(range) {
@@ -358,8 +364,7 @@ function isCaret(range) {
 }
 
 function isMisspelledWordElement(element) {
-  return goog.dom.classlist.contains(
-      element, 'goog-spellcheck-word');
+  return goog.dom.classlist.contains(element, 'goog-spellcheck-word');
 }
 
 function isCursorAtEndOfStartNode(range) {

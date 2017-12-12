@@ -57,6 +57,14 @@ class JsInlineFilter::Context : public InlineRewriteContext {
 
   virtual const char* id() const { return RewriteOptions::kJavascriptInlineId; }
 
+  bool PolicyPermitsRendering() const override {
+    return Driver()->content_security_policy().PermitsInlineScript();
+  }
+
+  RewriteDriver::InputRole InputRole() const override {
+    return RewriteDriver::InputRole::kScript;
+  }
+
  private:
   JsInlineFilter* filter_;
   DISALLOW_COPY_AND_ASSIGN(Context);
@@ -207,7 +215,7 @@ void JsInlineFilter::RenderInline(
   // sometimes interpreted as HTML (which will ignore CDATA delimiters),
   // we have to hide the CDATA delimiters behind Javascript comments.
   // See http://lachy.id.au/log/2006/11/xhtml-script
-  // and http://code.google.com/p/modpagespeed/issues/detail?id=125
+  // and http://github.com/pagespeed/mod_pagespeed/issues/125
   if (driver()->MimeTypeXhtmlStatus() != RewriteDriver::kIsNotXhtml) {
     // CDATA sections cannot be nested because they end with the first
     // occurrence of "]]>", so if the script contains that string

@@ -20,6 +20,7 @@
 
 #include <errno.h>
 #include <sys/stat.h>
+#include <utime.h>
 #ifdef WIN32
 #include <direct.h>
 #include <io.h>
@@ -31,7 +32,6 @@
 #include <unistd.h>
 #endif  // WIN32
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -117,13 +117,15 @@ class StdioInputFile : public FileSystem::InputFile {
       : file_helper_(f, filename, fs) {
   }
 
-  virtual bool ReadFile(GoogleString* buf, MessageHandler* message_handler) {
+  bool ReadFile(GoogleString* buf, int64 max_file_size,
+                MessageHandler* message_handler) override {
     bool ret = false;
     struct stat statbuf;
     file_helper_.StartTimer();
     if ((fstat(fileno(file_helper_.file_), &statbuf) < 0)) {
       file_helper_.ReportError(message_handler, "stating file");
-    } else {
+    } else if (max_file_size == FileSystem::kUnlimitedSize ||
+               statbuf.st_size <= max_file_size) {
       buf->resize(statbuf.st_size);
       int nread = fread(&(*buf)[0], 1, statbuf.st_size, file_helper_.file_);
       if (nread != statbuf.st_size) {
@@ -136,7 +138,7 @@ class StdioInputFile : public FileSystem::InputFile {
     return ret;
   }
 
-  virtual int Read(char* buf, int size, MessageHandler* message_handler) {
+  int Read(char* buf, int size, MessageHandler* message_handler) override {
     file_helper_.StartTimer();
     int ret = fread(buf, 1, size, file_helper_.file_);
     if ((ret == 0) && (ferror(file_helper_.file_) != 0)) {
@@ -146,11 +148,11 @@ class StdioInputFile : public FileSystem::InputFile {
     return ret;
   }
 
-  virtual bool Close(MessageHandler* message_handler) {
+  bool Close(MessageHandler* message_handler) override {
     return file_helper_.Close(message_handler);
   }
 
-  virtual const char* filename() { return file_helper_.filename_.c_str(); }
+  const char* filename() override { return file_helper_.filename_.c_str(); }
 
  private:
   StdioFileHelper file_helper_;
@@ -510,7 +512,7 @@ bool StdioFileSystem::ListContents(const StringPiece& dir, StringVector* files,
 }
 
 bool StdioFileSystem::Stat(const StringPiece& path, struct stat* statbuf,
-                           MessageHandler* handler) {
+                           MessageHandler* handler) const {
   const GoogleString path_string = path.as_string();
   const char* path_str = path_string.c_str();
   if (stat(path_str, statbuf) == 0) {
@@ -547,7 +549,7 @@ bool StdioFileSystem::Mtime(const StringPiece& path, int64* timestamp_sec,
 }
 
 bool StdioFileSystem::Size(const StringPiece& path, int64* size,
-                           MessageHandler* handler) {
+                           MessageHandler* handler) const {
   struct stat statbuf;
   bool ret = Stat(path, &statbuf, handler);
   if (ret) {
@@ -600,7 +602,7 @@ BoolOrError StdioFileSystem::TryLockWithTimeout(const StringPiece& lock_name,
   int64 now_us = timer->NowUs();
   int64 elapsed_since_lock_us = now_us - Timer::kSecondUs * m_time_sec;
   int64 timeout_us = Timer::kMsUs * timeout_ms;
-  if (elapsed_since_lock_us < timeout_us) {
+  if (elapsed_since_lock_us <= timeout_us) {
     // The lock is held and timeout hasn't elapsed.
     return BoolOrError(false);
   }
@@ -633,6 +635,17 @@ BoolOrError StdioFileSystem::TryLockWithTimeout(const StringPiece& lock_name,
     handler->Info(lock_str, 0, "Failed to take lock after breaking it!");
   }
   return result;
+}
+
+bool StdioFileSystem::BumpLockTimeout(const StringPiece& lock_name,
+                                      MessageHandler* handler) {
+  bool success = utime(lock_name.as_string().c_str(),
+                       NULL /* update mtime to current time */) == 0;
+  if (!success) {
+    handler->Info(lock_name.as_string().c_str(), 0,
+                  "Failed to bump lock: %s", strerror(errno));
+  }
+  return success;
 }
 
 bool StdioFileSystem::Unlock(const StringPiece& lock_name,

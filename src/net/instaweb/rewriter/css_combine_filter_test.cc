@@ -22,7 +22,6 @@
 #include <vector>
 
 #include "base/logging.h"
-#include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/mock_callback.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/cache_extender.h"
@@ -42,7 +41,6 @@
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/cache/lru_cache.h"
 #include "pagespeed/kernel/html/html_parse_test_base.h"
@@ -52,7 +50,6 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
-#include "pagespeed/kernel/util/gzip_inflater.h"
 
 namespace net_instaweb {
 
@@ -567,10 +564,8 @@ TEST_F(CssCombineFilterCustomOptions, CssCombineAcrossProxyDomains) {
   // Proxy http://kProxyMapDomain/ onto http://kTestDomain/proxied/
   DomainLawyer* lawyer = options()->WriteableDomainLawyer();
   GoogleString proxy_target = StrCat(kTestDomain, "proxied/");
-  ASSERT_TRUE(lawyer->AddProxyDomainMapping(proxy_target,
-                                            kProxyMapDomain,
-                                            NULL,
-                                            &message_handler_));
+  ASSERT_TRUE(lawyer->AddProxyDomainMapping(proxy_target, kProxyMapDomain,
+                                            StringPiece(), &message_handler_));
   CssCombineFilterTest::SetUp();
   SetHtmlMimetype();
 
@@ -666,14 +661,14 @@ TEST_F(CssCombineFilterTest, CombineCssRecombine) {
 }
 
 
-// http://code.google.com/p/modpagespeed/issues/detail?q=css&id=39
+// https://github.com/pagespeed/mod_pagespeed/issues/39
 TEST_F(CssCombineFilterTest, DealWithParams) {
   SetHtmlMimetype();
   CombineCssWithNames("with_params", "", "", false, "a.css?U", "b.css?rev=138",
                       true);
 }
 
-// http://code.google.com/p/modpagespeed/issues/detail?q=css&id=252
+// https://github.com/pagespeed/mod_pagespeed/issues/252
 TEST_F(CssCombineFilterTest, ClaimsXhtmlButHasUnclosedLink) {
   // XHTML text should not have unclosed links.  But if they do, like
   // in Issue 252, then we should leave them alone.
@@ -706,7 +701,7 @@ TEST_F(CssCombineFilterTest, ClaimsXhtmlButHasUnclosedLink) {
                    StringPrintf(html_format, kXhtmlDtd, combination.c_str()));
 }
 
-// http://code.google.com/p/modpagespeed/issues/detail?id=306
+// http://github.com/pagespeed/mod_pagespeed/issues/306
 TEST_F(CssCombineFilterTest, XhtmlCombineLinkClosed) {
   // XHTML text should not have unclosed links.  But if they do, like
   // in Issue 252, then we should leave them alone.
@@ -835,6 +830,71 @@ TEST_F(CssCombineFilterWithDebugTest, NonStandardAttributesBarrier) {
   CombineCss("non_standard_attributes_barrier", kBarrier,
              "<!--combine_css: Could not combine over barrier: "
              "potentially non-combinable attribute: &#39;foo&#39;-->", true);
+}
+
+TEST_F(CssCombineFilterTest, NonStandardAttributesBarrierWithId) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='a.css' foo='bar' id=baz>";
+  UseMd5Hasher();
+  CombineCss("non_standard_attributes_with_id_barrier", kBarrier, "", true);
+}
+
+TEST_F(CssCombineFilterWithDebugTest,
+       NonStandardAttributesBarrierWithId) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='a.css' foo='bar' id=baz>";
+  UseMd5Hasher();
+  CombineCss("non_standard_attributes_with_id_barrier", kBarrier,
+             "<!--combine_css: Could not combine over barrier: "
+             "potentially non-combinable attributes: &#39;foo&#39;"
+             " and &#39;id&#39;-->", true);
+}
+
+TEST_F(CssCombineFilterTest, NonStandardAttributesBarrierWithAllowedId) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='a.css' foo='bar' id=baz>";
+  UseMd5Hasher();
+  options()->ClearSignatureForTesting();
+  options()->AddCssCombiningWildcard("b?z");
+  server_context()->ComputeSignature(options());
+  CombineCss("non_standard_attributes_with_allowed_id_barrier",
+             kBarrier, "", true);
+}
+
+TEST_F(CssCombineFilterWithDebugTest,
+       NonStandardAttributesBarrierWithAllowedId) {
+  SetHtmlMimetype();
+  static const char kBarrier[] =
+      "<link rel='stylesheet' type='text/css' href='a.css' foo='bar' id=baz>";
+  UseMd5Hasher();
+  options()->ClearSignatureForTesting();
+  options()->AddCssCombiningWildcard("b?z");
+  server_context()->ComputeSignature(options());
+  CombineCss("non_standard_attributes_with_allowed_id_barrier", kBarrier,
+             "<!--combine_css: Could not combine over barrier: "
+             "potentially non-combinable attribute: &#39;foo&#39;-->", true);
+}
+
+TEST_F(CssCombineFilterTest, IdAloneIsNoBarrier) {
+  SetHtmlMimetype();
+  static const char kInput[] =
+      "<link rel='stylesheet' type='text/css' href='a.css' id=baz>"
+      "<link rel='stylesheet' type='text/css' href='b.css'>";
+  UseMd5Hasher();
+  options()->ClearSignatureForTesting();
+  options()->AddCssCombiningWildcard("b?z");
+  server_context()->ComputeSignature(options());
+
+  SetupCssResources("a.css", "b.css");
+
+  ParseUrl(StrCat(kDomain, "index.html"), kInput);
+
+  StringVector css_urls;
+  CollectCssLinks("id_alone_is_no_barrier", output_buffer_, &css_urls);
+  EXPECT_EQ(1UL, css_urls.size());
 }
 
 TEST_F(CssCombineFilterTest, CombineCssWithImportInFirst) {
@@ -1553,23 +1613,12 @@ TEST_F(CssCombineFilterTest, RobustnessUnclosedString) {
   SetResponseWithDefaultHeaders(kCssB, kContentTypeCss,
                                 "h2 { color: blue; }", 100);
 
-  // No combination would also be a valid outcome.
   GoogleString combined_url =
       Encode("", RewriteOptions::kCssCombinerId, "0",
              MultiUrl(kCssA, kCssB), "css");
 
-  ValidateExpected("unterm_str",
-                   StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)),
-                   StrCat("<link rel=stylesheet href=", combined_url,
-                          " />"));
-
-  GoogleString out;
-  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, combined_url),  &out));
-  // The key thing here is the newline after first fragment, which means the
-  // " will get closed right there by error recovery, rather than extending
-  // into the next file.
-  EXPECT_EQ("q::before {padding: 0px; \"content: foo;}\nh2 { color: blue; }",
-            out);
+  ValidateNoChanges("unterm_str",
+                    StrCat(CssLinkHref(kCssA), CssLinkHref(kCssB)));
 }
 
 // See: http://www.alistapart.com/articles/alternate/
@@ -1746,7 +1795,6 @@ class CssFilterWithCombineTest : public CssCombineFilterTest {
     // CSS filter is created aware of these.
     options()->EnableFilter(RewriteOptions::kRewriteCss);
     CssCombineFilterTest::SetUp();
-    http_cache()->SetCompressionLevel(9);
   }
 
   GoogleString CssOut() {
@@ -1781,11 +1829,6 @@ TEST_F(CssFilterWithCombineTest, FetchCombinedMinifiedWithGzip) {
   SetHtmlMimetype();
   SetupResources();
 
-  GoogleString gzipped_optimized_response;
-  StringWriter writer(&gzipped_optimized_response);
-  ASSERT_TRUE(GzipInflater::Deflate(OptimizedContent(), GzipInflater::kGzip, 9,
-                                    &writer));
-
   // TODO(jcrowell): The test here shows suboptimial behavior.  We have computed
   // the gzip -9 response and put it in the cache.  However, we have then
   // uncompressed that response and returned it to the client, even though the
@@ -1795,29 +1838,35 @@ TEST_F(CssFilterWithCombineTest, FetchCombinedMinifiedWithGzip) {
   // proxies (!).
   GoogleString content;
   ResponseHeaders response_headers;
-  AddRequestAttribute(HttpAttributes::kAcceptEncoding, "gzip");
   EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content,
                                &response_headers));
   EXPECT_STREQ(OptimizedContent(), content) << "uncached";
-  EXPECT_FALSE(response_headers.HasValue(
-      HttpAttributes::kContentEncoding, "gzip"));
+  EXPECT_FALSE(WasGzipped(response_headers));
 
   response_headers.Clear();
-  AddRequestAttribute(HttpAttributes::kAcceptEncoding, "gzip");
   EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content,
                                &response_headers));
-  EXPECT_STREQ(gzipped_optimized_response, content) << "cached";
-  EXPECT_TRUE(response_headers.HasValue(
-      HttpAttributes::kContentEncoding, "gzip"));
+  EXPECT_STREQ(OptimizedContent(), content) << "cached";
+  EXPECT_TRUE(WasGzipped(response_headers));
 }
 
 TEST_F(CssFilterWithCombineTest, FetchCombinedMinifiedWithoutGzip) {
+  DisableGzip();
   SetHtmlMimetype();
   SetupResources();
 
   GoogleString content;
-  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content));
-  EXPECT_STREQ(OptimizedContent(), content);
+  ResponseHeaders response_headers;
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content,
+                               &response_headers));
+  EXPECT_STREQ(OptimizedContent(), content) << "uncached";
+  EXPECT_FALSE(WasGzipped(response_headers));
+
+  response_headers.Clear();
+  EXPECT_TRUE(FetchResourceUrl(StrCat(kTestDomain, CssOut()), &content,
+                               &response_headers));
+  EXPECT_STREQ(OptimizedContent(), content) << "cached";
+  EXPECT_FALSE(WasGzipped(response_headers));
 }
 
 class CssFilterWithCombineTestUrlNamer : public CssFilterWithCombineTest {
@@ -1983,6 +2032,7 @@ TEST_F(CssCombineMaxSizeTest, ReconstructedResourceExpectedHeaders) {
       "Cache-Control: max-age=31536000\r\n"
       "Etag: W/\"0\"\r\n"
       "Last-Modified: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "X-Original-Content-Length: 85\r\n"
       "\r\n",
       headers.ToString());
 }
@@ -2008,9 +2058,11 @@ TEST_F(CssCombineMaxSizeTest, ReconstructedResourceExpectedHeadersNoStore) {
       "in_all_3: abc\r\n"
       "Content-Type: text/css\r\n"
       "Last-Modified: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
+      "X-Original-Content-Length: 85\r\n"
       "Date: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
       "Expires: Tue, 02 Feb 2010 18:51:26 GMT\r\n"
-      "Cache-Control: max-age=0,no-cache,no-store\r\n\r\n",
+      "Cache-Control: max-age=0,no-cache,no-store\r\n"
+      "\r\n",
       headers.ToString());
 }
 

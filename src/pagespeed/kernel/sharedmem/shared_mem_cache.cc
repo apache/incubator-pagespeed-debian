@@ -133,6 +133,7 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/hasher.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/proto_util.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -143,6 +144,7 @@
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache_data.h"
 #include "pagespeed/kernel/sharedmem/shared_mem_cache_snapshot.pb.h"
+#include "pagespeed/kernel/thread/slow_worker.h"
 
 namespace net_instaweb {
 
@@ -157,6 +159,10 @@ using SharedMemCacheData::kInvalidEntry;
 using SharedMemCacheData::kHashSize;
 
 namespace {
+
+// Increase this number if making backwards incompatible changes to the dump
+// format.
+const int kSnapshotVersion = 1;
 
 bool IsAllNil(const StringPiece& raw_hash) {
   bool all_nil = true;
@@ -190,6 +196,8 @@ GoogleString DebugTextHash(CacheEntry* entry, size_t size) {
 
 }  // namespace
 
+// If you add any new parameters also include them in SnapshotCacheKey() or else
+// people will restore invalid snapshots and have a corrupt cache.
 template<size_t kBlockSize>
 SharedMemCache<kBlockSize>::SharedMemCache(
     AbstractSharedMem* shm_runtime, const GoogleString& filename,
@@ -202,7 +210,10 @@ SharedMemCache<kBlockSize>::SharedMemCache(
       num_sectors_(sectors),
       entries_per_sector_(entries_per_sector),
       blocks_per_sector_(blocks_per_sector),
-      handler_(handler) {
+      checkpoint_interval_sec_(-1),
+      handler_(handler),
+      snapshot_path_(""),
+      file_cache_(NULL) {
 }
 
 template<size_t kBlockSize>
@@ -270,7 +281,11 @@ bool SharedMemCache<kBlockSize>::InitCache(bool parent) {
 
 template<size_t kBlockSize>
 bool SharedMemCache<kBlockSize>::Initialize() {
-  return InitCache(true);
+  bool ok = InitCache(true);
+  if (ok) {
+    RestoreFromDisk();
+  }
+  return ok;
 }
 
 template<size_t kBlockSize>
@@ -320,9 +335,8 @@ template<size_t kBlockSize>
 GoogleString SharedMemCache<kBlockSize>::DumpStats() {
   SectorStats aggregate;
   for (size_t c = 0; c < sectors_.size(); ++c) {
-    sectors_[c]->mutex()->Lock();
+    ScopedMutex lock(sectors_[c]->mutex());
     aggregate.Add(*sectors_[c]->sector_stats());
-    sectors_[c]->mutex()->Unlock();
   }
 
   return aggregate.Dump(entries_per_sector_* num_sectors_,
@@ -330,13 +344,19 @@ GoogleString SharedMemCache<kBlockSize>::DumpStats() {
 }
 
 template<size_t kBlockSize>
-void SharedMemCache<kBlockSize>::AddSectorToSnapshot(
-    int sector_num, SharedMemCacheDump* dest) {
+bool SharedMemCache<kBlockSize>::AddSectorToSnapshot(
+    int sector_num, int64 last_checkpoint_ms, SharedMemCacheDump* dest) {
   CHECK_LE(0, sector_num);
   CHECK_LT(sector_num, num_sectors_);
 
   Sector<kBlockSize>* sector = sectors_[sector_num];
-  sector->mutex()->Lock();
+  SectorStats* stats = sector->sector_stats();
+  ScopedMutex lock(sector->mutex());
+  DCHECK(!(last_checkpoint_ms > stats->last_checkpoint_ms));
+  if (last_checkpoint_ms < stats->last_checkpoint_ms) {
+    // Another thread already snapshotted this sector; do nothing.
+    return false;
+  }
 
   EntryNum cur = sector->OldestEntryNum();
   while (cur != kInvalidEntry) {
@@ -366,7 +386,8 @@ void SharedMemCache<kBlockSize>::AddSectorToSnapshot(
     cur = cur_entry->lru_prev;
   }
 
-  sector->mutex()->Unlock();
+  stats->last_checkpoint_ms = timer_->NowMs();
+  return true;
 }
 
 template<size_t kBlockSize>
@@ -382,7 +403,8 @@ void SharedMemCache<kBlockSize>::RestoreSnapshot(
     }
 
     SharedString value(entry.value());
-    PutRawHash(entry.raw_key(), entry.last_use_timestamp_ms(), &value);
+    PutRawHash(entry.raw_key(), entry.last_use_timestamp_ms(), value,
+               false /* don't trigger checkpointing */);
   }
 }
 
@@ -397,32 +419,47 @@ void SharedMemCache<kBlockSize>::MarshalSnapshot(
 
 template<size_t kBlockSize>
 void SharedMemCache<kBlockSize>::DemarshalSnapshot(
-    const GoogleString& marshaled, SharedMemCacheDump* out) {
+    const StringPiece& marshaled, SharedMemCacheDump* out) {
   ArrayInputStream input(marshaled.data(), marshaled.size());
   out->ParseFromZeroCopyStream(&input);
 }
 
 template<size_t kBlockSize>
 void SharedMemCache<kBlockSize>::Put(const GoogleString& key,
-                                     SharedString* value) {
+                                     const SharedString& value) {
   int64 now_ms = timer_->NowMs();
   GoogleString raw_hash = ToRawHash(key);
-  PutRawHash(raw_hash, now_ms, value);
+  PutRawHash(raw_hash, now_ms, value, true /* may trigger checkpointing */);
 }
 
 template<size_t kBlockSize>
-void SharedMemCache<kBlockSize>::PutRawHash(
-    const GoogleString& raw_hash,
-    int64 last_use_timestamp_ms,
-    SharedString* value) {
+void SharedMemCache<kBlockSize>:: ScheduleSnapshotIfNecessary(
+    bool checkpoint_ok, int64 last_use_timestamp_ms, int64 last_checkpoint_ms,
+    int sector_num) {
+  if (checkpoint_ok /* not restoring, ok to checkpoint */ &&
+      checkpoint_interval_sec_ > 0 /* checkpointing enabled */) {
+    int64 now_ms = last_use_timestamp_ms;
+
+    if (now_ms - last_checkpoint_ms >
+        (checkpoint_interval_sec_ * Timer::kSecondMs)) {
+      ScheduleSnapshot(sector_num, last_checkpoint_ms);
+    }
+  }
+}
+
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::PutRawHash(const GoogleString& raw_hash,
+                                            int64 last_use_timestamp_ms,
+                                            const SharedString& value,
+                                            bool checkpoint_ok) {
   // See also ::ComputeDimensions
   const size_t kMaxSize = MaxValueSize();
 
-  size_t value_size = static_cast<size_t>(value->size());
+  size_t value_size = static_cast<size_t>(value.size());
   if (value_size > kMaxSize) {
     handler_->Message(
       kInfo, "Unable to insert object of size: %s, cache limit is: %s",
-      FormatSize(value->size()).c_str(),
+      FormatSize(value.size()).c_str(),
       FormatSize(kMaxSize).c_str());
     return;
   }
@@ -432,8 +469,10 @@ void SharedMemCache<kBlockSize>::PutRawHash(
 
   Sector<kBlockSize>* sector = sectors_[pos.sector];
   SectorStats* stats = sector->sector_stats();
-  sector->mutex()->Lock();
+
+  ScopedMutex lock(sector->mutex());
   ++stats->num_put;
+  int64 last_checkpoint_ms = stats->last_checkpoint_ms;
 
   // See if our key already exists. Note that if it does, we will attempt to
   // write even if there are readers (we will wait for them to finish);
@@ -448,9 +487,10 @@ void SharedMemCache<kBlockSize>::PutRawHash(
         ++stats->num_put_update;
         EnsureReadyForWriting(sector, cand);
         PutIntoEntry(sector, cand_key, last_use_timestamp_ms, value);
+        ScheduleSnapshotIfNecessary(checkpoint_ok, last_use_timestamp_ms,
+                                    last_checkpoint_ms, pos.sector);
       } else {
         ++stats->num_put_concurrent_create;
-        sector->mutex()->Unlock();
       }
       return;
     }
@@ -476,7 +516,6 @@ void SharedMemCache<kBlockSize>::PutRawHash(
   if (best_key == kInvalidEntry) {
     // All slots busy. Giving up.
     ++stats->num_put_concurrent_full_set;
-    sector->mutex()->Unlock();
     return;
   }
 
@@ -489,20 +528,121 @@ void SharedMemCache<kBlockSize>::PutRawHash(
   EnsureReadyForWriting(sector, best);
   std::memcpy(best->hash_bytes, raw_hash.data(), kHashSize);
   PutIntoEntry(sector, best_key, last_use_timestamp_ms, value);
+
+  ScheduleSnapshotIfNecessary(checkpoint_ok, last_use_timestamp_ms,
+                              last_checkpoint_ms, pos.sector);
 }
 
 template<size_t kBlockSize>
+class SharedMemCache<kBlockSize>::WriteOutSnapshotFunction : public Function {
+ public:
+  WriteOutSnapshotFunction(SharedMemCache<kBlockSize>* cache,
+                           int sector_num, int64 last_checkpoint_ms)
+      : cache_(cache),
+        sector_num_(sector_num),
+        last_checkpoint_ms_(last_checkpoint_ms) {}
+  ~WriteOutSnapshotFunction() override {}
+  void Run() override {
+    cache_->WriteOutSnapshotFromWorkerThread(sector_num_, last_checkpoint_ms_);
+  }
+
+ private:
+  SharedMemCache<kBlockSize>* cache_;
+  int sector_num_;
+  int64 last_checkpoint_ms_;
+  DISALLOW_COPY_AND_ASSIGN(WriteOutSnapshotFunction);
+};
+
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::ScheduleSnapshot(int sector_num,
+                                                  int64 last_checkpoint_ms) {
+  // We're being called from whatever thread called Put() but snapshotting can
+  // take a while so we need to move to the slow worker thread.  We use whatever
+  // worker the file cache uses.
+  CHECK(file_cache_ != NULL);
+  SlowWorker* worker = file_cache_->worker();
+  CHECK(worker != NULL);
+  worker->Start();
+  worker->RunIfNotBusy(
+      new WriteOutSnapshotFunction(this, sector_num, last_checkpoint_ms));
+  // If the worker chose not to run the snapshotter, because it was busy, we'll
+  // try again after the next Put() for this sector.
+}
+
+template<size_t kBlockSize>
+GoogleString SharedMemCache<kBlockSize>::SnapshotCacheKey(
+    int sector_num) const {
+  // Important: everything that determines whether it is legitimate to restore a
+  // shared memory cache needs to be included in the key here.
+  return StrCat("shm_metadata_cache/snapshot/",
+                filename_, "/",
+                IntegerToString(kSnapshotVersion), "/",
+                StrCat(IntegerToString(kBlockSize), "/",
+                       IntegerToString(blocks_per_sector_), "/",
+                       IntegerToString(num_sectors_), "/",
+                       IntegerToString(sector_num)));
+}
+
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::WriteOutSnapshotFromWorkerThread(
+    int sector_num, int64 last_checkpoint_ms) {
+  SharedMemCacheDump snapshot;
+  bool updated = AddSectorToSnapshot(sector_num, last_checkpoint_ms, &snapshot);
+  if (!updated) {
+    return;  // Another thread updated it first.  Nothing needs doing.
+  }
+  GoogleString snapshot_s;
+  MarshalSnapshot(snapshot, &snapshot_s);
+  SharedString snapshot_s_shared(snapshot_s);
+
+  CHECK(file_cache_ != NULL);
+  // It's safe for us to use the file cache from an arbitrary thread because
+  // the file cache is thread-agnostic, having no writable member variables.
+  file_cache_->Put(SnapshotCacheKey(sector_num), snapshot_s_shared);
+}
+
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::RestoreFromDisk() {
+  if (file_cache_ == NULL) {
+    // RegisterSnapshotFileCache was never called, which should only happen in
+    // test code.
+    handler_->Message(
+        kWarning,
+        "SharedMemCache: RegisterSnapshotFileCache() not called for %s",
+        filename_.c_str());
+    return;  // Don't try to restore.
+  }
+
+  // We want to delay forking until these snapshots are all loaded, so we rely
+  // on the file cache being a synchronous cache.
+  CHECK(file_cache_->IsBlocking());
+  for (int sector_num = 0; sector_num < num_sectors_; ++sector_num) {
+    CacheInterface::SynchronousCallback callback;
+    file_cache_->Get(SnapshotCacheKey(sector_num), &callback);
+    CHECK(callback.called());
+    if (callback.state() == CacheInterface::kAvailable) {
+      SharedMemCacheDump snapshot;
+      DemarshalSnapshot(callback.value().Value(), &snapshot);
+      RestoreSnapshot(snapshot);
+    }
+  }
+  // Some of these may have failed, or there may not have been any in the file
+  // cache at all.  This is fine; restoring the snapshots is best-effort.
+}
+
+// Expects sector->mutex() held on entry, leaves it held on exit.
+template<size_t kBlockSize>
 void SharedMemCache<kBlockSize>::PutIntoEntry(
     Sector<kBlockSize>* sector, EntryNum entry_num,
-    int64 last_use_timestamp_ms, SharedString* value) {
-  const char* data = value->data();
+    int64 last_use_timestamp_ms, const SharedString& value) {
+  const char* data = value.data();
 
   CacheEntry* entry = sector->EntryAt(entry_num);
   DCHECK(entry->creating);
   DCHECK_EQ(0u, entry->open_count);
 
   // Adjust space allocation....
-  size_t want_blocks = sector->DataBlocksForSize(value->size());
+  size_t want_blocks = sector->DataBlocksForSize(value.size());
   BlockVector blocks;
   sector->BlockListForEntry(entry, &blocks);
 
@@ -516,7 +656,6 @@ void SharedMemCache<kBlockSize>::PutIntoEntry(
       sector->ReturnBlocksToFreeList(blocks);
       entry->creating = false;
       MarkEntryFree(sector, entry_num);
-      sector->mutex()->Unlock();
       return;
     }
   }
@@ -531,7 +670,7 @@ void SharedMemCache<kBlockSize>::PutIntoEntry(
     sector->ReturnBlocksToFreeList(extras);
   }
 
-  entry->byte_size = value->size();
+  entry->byte_size = value.size();
   TouchEntry(sector, last_use_timestamp_ms, entry_num);
 
   // Write out successor list for the blocks we use, and point the entry to it.
@@ -543,21 +682,18 @@ void SharedMemCache<kBlockSize>::PutIntoEntry(
     entry->first_block = kInvalidBlock;
   }
 
-  sector->mutex()->Unlock();
-
-  // Now we can write out the data. We can do it w/o the lock held
+  // Now we can write out the data. We can release the lock while we do that,
   // since we've already removed them from the freelist, and the LRU/directory
   // entry is locked, so can't be concurrently freed.
-
+  sector->mutex()->Unlock();
   for (size_t b = 0; b < want_blocks; ++b) {
     size_t bytes = sector->BytesInPortion(entry->byte_size, b, want_blocks);
     std::memcpy(sector->BlockBytes(blocks[b]), data + b * kBlockSize, bytes);
   }
+  sector->mutex()->Lock();
 
   // We're done, clear creating bit.
-  sector->mutex()->Lock();
   entry->creating = false;
-  sector->mutex()->Unlock();
 }
 
 template<size_t kBlockSize>
@@ -566,27 +702,30 @@ void SharedMemCache<kBlockSize>::Get(const GoogleString& key,
   GoogleString raw_hash = ToRawHash(key);
   Position pos;
   ExtractPosition(raw_hash, &pos);
+  CacheInterface::KeyState key_state = kNotFound;
   Sector<kBlockSize>* sector = sectors_[pos.sector];
-  sector->mutex()->Lock();
-  SectorStats* stats = sector->sector_stats();
-  ++stats->num_get;
+  {
+    ScopedMutex lock(sector->mutex());
+    SectorStats* stats = sector->sector_stats();
+    ++stats->num_get;
 
-  for (int p = 0; p < kAssociativity; ++p) {
-    EntryNum cand_key = pos.keys[p];
-    CacheEntry* cand = sector->EntryAt(cand_key);
-    if (KeyMatch(cand, raw_hash)) {
-      ++stats->num_get_hit;
-      GetFromEntry(key, sector, cand_key, callback);
-      return;
+    for (int p = 0; p < kAssociativity; ++p) {
+      EntryNum cand_key = pos.keys[p];
+      CacheEntry* cand = sector->EntryAt(cand_key);
+      if (KeyMatch(cand, raw_hash)) {
+        ++stats->num_get_hit;
+        key_state = GetFromEntry(key, sector, cand_key, callback);
+        break;
+      }
     }
   }
 
-  sector->mutex()->Unlock();
-  ValidateAndReportResult(key, kNotFound, callback);
+  ValidateAndReportResult(key, key_state, callback);
 }
 
+// Expects sector->mutex() held on entry, leaves it held on exit.
 template<size_t kBlockSize>
-void SharedMemCache<kBlockSize>::GetFromEntry(
+CacheInterface::KeyState SharedMemCache<kBlockSize>::GetFromEntry(
     const GoogleString& key,
     Sector<kBlockSize>* sector,
     EntryNum entry_num,
@@ -594,9 +733,7 @@ void SharedMemCache<kBlockSize>::GetFromEntry(
   CacheEntry* entry = sector->EntryAt(entry_num);
   if (entry->creating) {
     // For now, consider concurrent creation a miss.
-    sector->mutex()->Unlock();
-    ValidateAndReportResult(key, kNotFound, callback);
-    return;
+    return kNotFound;
   }
   ++entry->open_count;
 
@@ -605,28 +742,28 @@ void SharedMemCache<kBlockSize>::GetFromEntry(
   BlockVector blocks;
   sector->BlockListForEntry(entry, &blocks);
 
-  // Drop the lock as the entry is now opened for reading.
+  // We can release the lock while we do the read, as the entry is now open for
+  // reading.
   sector->mutex()->Unlock();
 
-  // Collect the contents.
-  SharedString* out = callback->value();
-  out->DetachAndClear();
-  out->Extend(entry->byte_size);
+  SharedString str;
+  str.Extend(entry->byte_size);
 
   size_t total_blocks = blocks.size();
   int pos = 0;
   for (size_t b = 0; b < total_blocks; ++b) {
     int bytes = sector->BytesInPortion(entry->byte_size, b, total_blocks);
-    out->WriteAt(pos, sector->BlockBytes(blocks[b]), bytes);
+    str.WriteAt(pos, sector->BlockBytes(blocks[b]), bytes);
     pos += bytes;
   }
+  sector->mutex()->Lock();
 
   // Now reduce the reference count.
-  // TODO(morlovich): atomic ops?
-  sector->mutex()->Lock();
   --entry->open_count;
-  sector->mutex()->Unlock();
-  ValidateAndReportResult(key, kAvailable, callback);
+
+  callback->set_value(str);
+
+  return kAvailable;
 }
 
 template<size_t kBlockSize>
@@ -636,7 +773,7 @@ void SharedMemCache<kBlockSize>::Delete(const GoogleString& key) {
   ExtractPosition(raw_hash, &pos);
 
   Sector<kBlockSize>* sector = sectors_[pos.sector];
-  sector->mutex()->Lock();
+  ScopedMutex lock(sector->mutex());
 
   for (int p = 0; p < kAssociativity; ++p) {
     EntryNum cand_key = pos.keys[p];
@@ -645,10 +782,9 @@ void SharedMemCache<kBlockSize>::Delete(const GoogleString& key) {
       return;
     }
   }
-
-  sector->mutex()->Unlock();
 }
 
+// Called with lock held.
 template<size_t kBlockSize>
 void SharedMemCache<kBlockSize>::DeleteEntry(Sector<kBlockSize>* sector,
                                              EntryNum entry_num) {
@@ -657,7 +793,6 @@ void SharedMemCache<kBlockSize>::DeleteEntry(Sector<kBlockSize>* sector,
     // A multiple writers (Put or Delete) race. Let the other one proceed,
     // drop this one. (Call to EnsureReadyForWriting below will deal with any
     // outstanding readers).
-    sector->mutex()->Unlock();
     return;
   }
   EnsureReadyForWriting(sector, entry);
@@ -666,14 +801,13 @@ void SharedMemCache<kBlockSize>::DeleteEntry(Sector<kBlockSize>* sector,
   sector->ReturnBlocksToFreeList(blocks);
   entry->creating = false;
   MarkEntryFree(sector, entry_num);
-  sector->mutex()->Unlock();
 }
 
 template<size_t kBlockSize>
 void SharedMemCache<kBlockSize>::SanityCheck() {
   for (int i = 0; i < num_sectors_; ++i) {
     Sector<kBlockSize>* sector = sectors_[i];
-    sector->mutex()->Lock();
+    ScopedMutex lock(sector->mutex());
 
     // Make sure that all blocks are accounted for exactly once.
 
@@ -701,8 +835,32 @@ void SharedMemCache<kBlockSize>::SanityCheck() {
          i != block_occur.end(); ++i) {
       CHECK_EQ(1, i->second);
     }
+  }
+}
 
-    sector->mutex()->Unlock();
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::RegisterSnapshotFileCache(
+    FileCache* potential_file_cache, int checkpoint_interval_sec) {
+  if (snapshot_path_ == filename_) {
+    return;  // Already set to the best choice.
+  }
+  StringPiece potential_snapshot_path = potential_file_cache->path();
+  if (potential_snapshot_path.empty()) {
+    // We get empty paths when some vhosts have set us to unplugged.  That's
+    // not a place we can store a snapshot, so don't consider these.
+    return;
+  }
+
+  if (snapshot_path_.empty() ||
+      potential_snapshot_path.compare(snapshot_path_) < 0 ||
+      potential_snapshot_path == filename_) {
+    // The path given is an improvement, because either no path had been set,
+    // this path comes alphabetically earlier, or, if this is an explicitly
+    // configured shared memory cache, this is the file cache that was chosen
+    // in the config to go with this shared memory cache.
+    potential_snapshot_path.CopyToString(&snapshot_path_);
+    file_cache_ = potential_file_cache;
+    checkpoint_interval_sec_ = checkpoint_interval_sec;
   }
 }
 
@@ -831,6 +989,26 @@ void SharedMemCache<kBlockSize>::EnsureReadyForWriting(
     timer_->SleepUs(50);
     sector->mutex()->Lock();
   }
+}
+
+template<size_t kBlockSize>
+int64 SharedMemCache<kBlockSize>::GetLastWriteMsForTesting(int sector_num) {
+  Sector<kBlockSize>* sector = sectors_[sector_num];
+  SectorStats* stats = sector->sector_stats();
+  sector->mutex()->Lock();
+  int64 last_checkpoint_ms = stats->last_checkpoint_ms;
+  sector->mutex()->Unlock();
+  return last_checkpoint_ms;
+}
+
+template<size_t kBlockSize>
+void SharedMemCache<kBlockSize>::SetLastWriteMsForTesting(
+    int sector_num, int64 last_checkpoint_ms) {
+  Sector<kBlockSize>* sector = sectors_[sector_num];
+  SectorStats* stats = sector->sector_stats();
+  sector->mutex()->Lock();
+  stats->last_checkpoint_ms = last_checkpoint_ms;
+  sector->mutex()->Unlock();
 }
 
 template class SharedMemCache<64>;  // metadata ("rname") cache

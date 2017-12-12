@@ -361,7 +361,7 @@ void PrepareForBeaconInsertionHelper(CriticalKeys* proto,
         "You seem to have downstream caching configured on your server. "
         "DownstreamCacheRebeaconingKey should also be set for this to work "
         "correctly. Refer to "
-        "https://developers.google.com/speed/pagespeed/module/"
+        "https://modpagespeed.com/doc/"
         "downstream-caching#beaconing "
         "for more details.");
   }
@@ -397,7 +397,7 @@ bool UpdateCandidateKeys(const StringSet& keys, CriticalKeys* proto,
   bool support_map_changed = false;
   for (StringSet::const_iterator i = keys.begin(), end = keys.end(); i != end;
        ++i) {
-    if (support_map.insert(pair<GoogleString, int>(*i, 0)).second) {
+    if (support_map.insert(std::pair<GoogleString, int>(*i, 0)).second) {
       support_map_changed = true;
     }
   }

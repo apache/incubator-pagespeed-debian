@@ -20,16 +20,15 @@
 #ifndef PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 #define PAGESPEED_APACHE_INSTAWEB_HANDLER_H_
 
-#include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/apache/apache_fetch.h"
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/query_params.h"
@@ -40,17 +39,15 @@
 // The httpd header must be after the instaweb_context.h. Otherwise,
 // the compiler will complain
 // "strtoul_is_not_a_portable_function_use_strtol_instead".
-#include "httpd.h"
+#include "pagespeed/apache/apache_httpd_includes.h"
 
 namespace net_instaweb {
 
+class ApacheConfig;
 class ApacheRequestContext;
 class ApacheRewriteDriverFactory;
 class ApacheServerContext;
 class InPlaceResourceRecorder;
-class RewriteDriver;
-class ServerContext;
-class SystemRewriteOptions;
 
 // Context for handling a request, computing options and request headers in
 // the constructor.
@@ -81,13 +78,17 @@ class InstawebHandler {
     return rewrite_query_.pagespeed_option_cookies();
   }
 
-  void SetupSpdyConnectionIfNeeded();
   void RemoveStrippedResponseHeadersFromApacheRequest();
 
   // Makes a driver from the request_context and options.  Note that
   // this can only be called once, as it potentially mutates the options
-  // as it transfers ownership of custom_options.
+  // as it transfers ownership of custom_options. The driver is owned by
+  // the InstawebHandler and will be cleaned up at destruction, unless you
+  // call DisownDriver().
   RewriteDriver* MakeDriver();
+
+  // Prevent "this" from cleaning up rewrite_driver_ at destruction.
+  void DisownDriver();
 
   // Allocates a Fetch object associated with the current request and
   // the specified URL.  Include in debug_info anything that's cheap to create
@@ -109,6 +110,10 @@ class InstawebHandler {
   // occur, and another handler should take over the request.
   bool HandleAsProxy();
 
+  // Tries to acts as a full-featured proxy, handling both HTML and
+  // resources.
+  void HandleAsProxyForAll();
+
   // Attempts to handle this as an in-place resource. Returns false if
   // the in-place handling didn't occur, and another handler should take
   // over the request.
@@ -118,12 +123,10 @@ class InstawebHandler {
   // whether the result is success or failure.
   void HandleAsPagespeedResource();
 
-  // Waits for an outstanding fetch (obtained by MakeFetch) to complete or time
-  // out.  Returns true if the fetch completes, false if we time out and abandon
-  // the request.  On failure we haven't sent out headers or any other content,
-  // so it's safe to decline this request and another Apache content handler can
-  // look into it.
-  bool WaitForFetch();
+  // Waits for an outstanding fetch (obtained by MakeFetch) to complete.  On
+  // failure, a failure response will be sent to the client.  The request is
+  // handled unconditionally.
+  void WaitForFetch();
 
   // Loads the URL based on the fetchers and other infrastructure in the
   // factory, returning true if the request was handled.  This is used
@@ -142,7 +145,7 @@ class InstawebHandler {
 
   // Returns the options, whether they were custom-computed due to htaccess
   // file, query params, or headers, or were the default options for the vhost.
-  const SystemRewriteOptions* options() { return options_; }
+  const ApacheConfig* options() { return options_; }
 
   // Was this request made by mod_pagespeed itself? If so, we should not try to
   // handle it, just let Apache deal with it like normal.
@@ -251,7 +254,7 @@ class InstawebHandler {
   scoped_ptr<ResponseHeaders> response_headers_;
   GoogleString original_url_;
   GoogleUrl stripped_gurl_;  // Any PageSpeed query params are removed.
-  scoped_ptr<SystemRewriteOptions> custom_options_;
+  scoped_ptr<ApacheConfig> custom_options_;
 
   // These options_ can be in one of three states:
   //   - they can point to the config's global_options
@@ -261,8 +264,9 @@ class InstawebHandler {
   //
   // In all three of these states, the pointer and semantics will always be
   // the same.  Only the ownership changes.
-  const SystemRewriteOptions* options_;
+  const ApacheConfig* options_;
   RewriteDriver* rewrite_driver_;
+  bool driver_owned_;
   int num_response_attributes_;
   RewriteQuery rewrite_query_;
   ApacheFetch* fetch_;

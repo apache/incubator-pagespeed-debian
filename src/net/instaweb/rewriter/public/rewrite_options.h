@@ -87,7 +87,6 @@ class RewriteOptions {
   // them protected while still being used by the Option class hierarchy.
   // Note that iwyu.py incorrectly complains about the template classes but
   // scripts/iwyu manually removes the warning.
-  class PropertyBase;
   template<class ValueType> class Property;
   template<class RewriteOptionsSubclass, class OptionClass> class PropertyLeaf;
 
@@ -110,15 +109,14 @@ class RewriteOptions {
     kAddIds,
     kAddInstrumentation,
     kComputeStatistics,
-    kCachePartialHtml,
+    kCachePartialHtmlDeprecated,
     kCanonicalizeJavascriptLibraries,
     kCollapseWhitespace,
-    kCollectFlushEarlyContentFilter,
     kCombineCss,
     kCombineHeads,
     kCombineJavascript,
     kComputeCriticalCss,
-    kComputeVisibleText,
+    kComputeVisibleTextDeprecated,
     kConvertGifToPng,
     kConvertJpegToProgressive,
     kConvertJpegToWebp,
@@ -137,7 +135,7 @@ class RewriteOptions {
     kDivStructure,
     kElideAttributes,
     kExperimentCollectMobImageInfo,
-    kExperimentSpdy,  // Temporary and will be removed soon.
+    kExperimentHttp2,  // used while developing proper HTTP2 features.
     kExplicitCloseTags,
     kExtendCacheCss,
     kExtendCacheImages,
@@ -148,6 +146,7 @@ class RewriteOptions {
     kFlattenCssImports,
     kFlushSubresources,
     kHandleNoscriptRedirect,
+    kHintPreloadSubresources,
     kHtmlWriterFilter,
     kIncludeJsSourceMaps,
     kInlineCss,
@@ -156,6 +155,7 @@ class RewriteOptions {
     kInlineImportToLink,
     kInlineJavascript,
     kInPlaceOptimizeForBrowser,
+    kInsertAmpLink,
     kInsertDnsPrefetch,
     kInsertGA,
     kInsertImageDimensions,
@@ -195,20 +195,47 @@ class RewriteOptions {
     kSpriteImages,
     kStripImageColorProfile,
     kStripImageMetaData,
-    kStripNonCacheable,
     kStripScripts,
     kEndOfFilters
   };
 
+  // When PageSpeed first started there was just off/on.  Off wasn't entirely
+  // off, though, because:
+  // 1) If you turned it off because it broke something it's helpful to be able
+  //    to turn it back on with query params while testing filter combinations
+  //    to see what you broke.
+  // 2) After turning off PageSpeed you might still get some requests for
+  //    .pagespeed. resources and you'd like to serve them.
+  //
+  // Around when the ngx_pagespeed port was getting started we were having
+  // discussions about how this was a bad setup for security purposes.  Someone
+  // might want to completely disable the module, in a way where attackers
+  // couldn't re-enable it by sending query parameters or .pagespeed. requests.
+  // So we released ngx_pagepeed with "off" as a hard off.  Discussion on this
+  // progressed, and we decided to add "unplugged" for mod_pagespeed which did
+  // the same thing as "off" in ngx_pagespeed.  This left us in a state where
+  // (a) mod_pagespeed and ngx_pagespeed disagreed about what "off" meant and
+  // (b) there was no way to get mod_pagespeed's meaning of "off" in
+  // ngx_pagespeed.
+  //
+  // Since these are central user-controlled configuration knobs, and we don't
+  // want to surprise people by changing what they do, we decided to fix this by
+  // adding "standby" to ngx_pagespeed to do what "off" does in mod_pagespeed.
+  // Now we can tell people to use unplugged / standby / on, for both mps and
+  // nps, with the same meanings.
   enum EnabledEnum {
-    // Don't optimize HTML. Do serve .pagespeed. Can be overridden via query
-    // param.
+    // Deprecated.
+    //   In Apache: equivalent to 'standby' below.
+    //   In Nginx: equivalent to 'unplugged' below.
     kEnabledOff,
     // Pagespeed runs normally.  Can be overridden via query param.
     kEnabledOn,
     // Completely passive. Do not serve .pagespeed. Return from handlers
     // immediately. Cannot be overridden via query param.
     kEnabledUnplugged,
+    // Don't optimize HTML. Do serve .pagespeed. Can be overridden via query
+    // param.
+    kEnabledStandby,
   };
 
   // Any new Option added should have a corresponding name here that must be
@@ -223,14 +250,13 @@ class RewriteOptions {
   static const char kAllowLoggingUrlsInLogRecord[];
   static const char kAllowOptionsToBeSetByCookies[];
   static const char kAllowVaryOn[];
-  static const char kAlwaysMobilize[];
   static const char kAlwaysRewriteCss[];
+  static const char kAmpLinkPattern[];
   static const char kAnalyticsID[];
   static const char kAvoidRenamingIntrospectiveJavascript[];
   static const char kAwaitPcacheLookup[];
   static const char kBeaconReinstrumentTimeSec[];
   static const char kBeaconUrl[];
-  static const char kBlinkMaxHtmlSizeRewritable[];
   static const char kCacheFragment[];
   static const char kCacheSmallImagesUnrewritten[];
   static const char kClientDomainRewrite[];
@@ -238,7 +264,6 @@ class RewriteOptions {
   static const char kContentExperimentID[];
   static const char kContentExperimentVariantID[];
   static const char kCriticalImagesBeaconEnabled[];
-  static const char kCriticalLineConfig[];
   static const char kCssFlattenMaxBytes[];
   static const char kCssImageInlineMaxBytes[];
   static const char kCssInlineMaxBytes[];
@@ -247,10 +272,6 @@ class RewriteOptions {
   static const char kDefaultCacheHtml[];
   static const char kDisableBackgroundFetchesForBots[];
   static const char kDisableRewriteOnNoTransform[];
-  static const char kDistributeFetches[];
-  static const char kDistributedRewriteKey[];
-  static const char kDistributedRewriteServers[];
-  static const char kDistributedRewriteTimeoutMs[];
   static const char kDomainRewriteCookies[];
   static const char kDomainRewriteHyperlinks[];
   static const char kDomainShardCount[];
@@ -258,12 +279,9 @@ class RewriteOptions {
   static const char kDownstreamCacheRebeaconingKey[];
   static const char kDownstreamCacheRewrittenPercentageThreshold[];
   static const char kEnableAggressiveRewritersForMobile[];
-  static const char kEnableBlinkHtmlChangeDetection[];
-  static const char kEnableBlinkHtmlChangeDetectionLogging[];
   static const char kEnableCachePurge[];
   static const char kEnableDeferJsExperimental[];
   static const char kEnableExtendedInstrumentation[];
-  static const char kEnableFlushEarlyCriticalCss[];
   static const char kEnableLazyLoadHighResImages[];
   static const char kEnablePrioritizingScripts[];
   static const char kEnabled[];
@@ -275,11 +293,12 @@ class RewriteOptions {
   static const char kFinderPropertiesCacheRefreshTimeMs[];
   static const char kFlushBufferLimitBytes[];
   static const char kFlushHtml[];
-  static const char kFlushMoreResourcesEarlyIfTimePermits[];
+  static const char kFollowFlushes[];
   static const char kGoogleFontCssInlineMaxBytes[];
   static const char kForbidAllDisabledFilters[];
   static const char kHideRefererUsingMeta[];
   static const char kHttpCacheCompressionLevel[];
+  static const char kHonorCsp[];
   static const char kIdleFlushTimeMs[];
   static const char kImageInlineMaxBytes[];
   // TODO(huibao): Unify terminology for image rewrites. For example,
@@ -310,6 +329,7 @@ class RewriteOptions {
   static const char kInPlacePreemptiveRewriteJavascript[];
   static const char kInPlaceResourceOptimization[];
   static const char kInPlaceRewriteDeadlineMs[];
+  static const char kInPlaceSMaxAgeSec[];
   static const char kInPlaceWaitForOptimized[];
   static const char kJsInlineMaxBytes[];
   static const char kJsOutlineMinBytes[];
@@ -327,36 +347,16 @@ class RewriteOptions {
   static const char kMaxCombinedJsBytes[];
   static const char kMaxHtmlCacheTimeMs[];
   static const char kMaxHtmlParseBytes[];
-  static const char kMaxImageBytesForWebpInCss[];
   static const char kMaxImageSizeLowResolutionBytes[];
   static const char kMaxInlinedPreviewImagesIndex[];
   static const char kMaxLowResImageSizeBytes[];
   static const char kMaxLowResToHighResImageSizePercentage[];
-  static const char kMaxPrefetchJsElements[];
   static const char kMaxRewriteInfoLogSize[];
   static const char kMaxUrlSegmentSize[];
   static const char kMaxUrlSize[];
   static const char kMetadataCacheStalenessThresholdMs[];
-  static const char kMinCacheTtlMs[];
   static const char kMinImageSizeLowResolutionBytes[];
   static const char kMinResourceCacheTimeToRewriteMs[];
-  static const char kMobBeaconCategory[];
-  static const char kMobBeaconUrl[];
-  static const char kMobMapLocation[];
-  static const char kMobPhoneNumber[];
-  static const char kMobConversionId[];
-  static const char kMobMapConversionLabel[];
-  static const char kMobPhoneConversionLabel[];
-  static const char kMobConfig[];
-  static const char kMobIframe[];
-  static const char kMobIframeDisable[];
-  static const char kMobIframeViewport[];
-  static const char kMobLayout[];
-  static const char kMobNav[];
-  static const char kMobLabeledMode[];
-  static const char kMobNavClasses[];
-  static const char kMobStatic[];
-  static const char kMobTheme[];
   static const char kModifyCachingHeaders[];
   static const char kNoop[];
   static const char kNoTransformOptimizedImages[];
@@ -385,8 +385,6 @@ class RewriteOptions {
   static const char kRewriteRandomDropPercentage[];
   static const char kRewriteUncacheableResources[];
   static const char kRunningExperiment[];
-  static const char kServeGhostClickBusterWithSplitHtml[];
-  static const char kServeSplitHtmlInTwoChunks[];
   static const char kServeStaleIfFetchError[];
   static const char kServeStaleWhileRevalidateThresholdSec[];
   static const char kServeXhrAccessControlHeaders[];
@@ -399,8 +397,6 @@ class RewriteOptions {
   static const char kUseExperimentalJsMinifier[];
   static const char kUseFallbackPropertyCacheValues[];
   static const char kUseImageScanlineApi[];
-  static const char kUseSelectorsForCriticalCss[];
-  static const char kUseSmartDiffInBlink[];
   static const char kXModPagespeedHeaderValue[];
   static const char kXPsaBlockingRewrite[];
   // Options that require special handling, e.g. non-scalar values
@@ -408,7 +404,6 @@ class RewriteOptions {
   static const char kBlockingRewriteRefererUrls[];
   static const char kDisableFilters[];
   static const char kDisallow[];
-  static const char kDistributableFilters[];  // For experimentation.
   static const char kDomain[];
   static const char kDownstreamCachePurgeLocationPrefix[];
   static const char kEnableFilters[];
@@ -417,7 +412,9 @@ class RewriteOptions {
   static const char kForbidFilters[];
   static const char kInlineResourcesWithoutExplicitAuthorization[];
   static const char kRetainComment[];
+  static const char kPermitIdsForCssCombining[];
   // 2-argument ones:
+  static const char kAddResourceHeader[];
   static const char kCustomFetchHeader[];
   static const char kLoadFromFile[];
   static const char kLoadFromFileMatch[];
@@ -436,7 +433,6 @@ class RewriteOptions {
   static const char kCacheFlushPollIntervalSec[];
   static const char kCompressMetadataCache[];
   static const char kFetcherProxy[];
-  static const char kFetchFromModSpdy[];
   static const char kFetchHttps[];
   static const char kFileCacheCleanInodeLimit[];
   static const char kFileCacheCleanIntervalMs[];
@@ -635,12 +631,16 @@ class RewriteOptions {
                       // response headers)
     kDirectoryScope,  // customized at directory level (.htaccess, <Directory>)
     kServerScope,     // customized at server level (e.g. VirtualHost)
-    kProcessScope,    // customized at process level only (command-line flags)
-    kProcessScopeStrict,  // as above, but fail startup if included in vhost
+    // Customized at process level only (command-line flags). This is a legacy
+    // value that will make us accept it in a VirtualHost in Apache for
+    // backwards compatibility; it should not be used for new options.
+    kLegacyProcessScope,
+
+    // Customized at process level and enforced as such.
+    kProcessScopeStrict,
   };
 
   static const char kCacheExtenderId[];
-  static const char kCollectFlushEarlyContentFilterId[];
   static const char kCssCombinerId[];
   static const char kCssFilterId[];
   static const char kCssImportFlattenerId[];
@@ -655,8 +655,6 @@ class RewriteOptions {
   static const char kJavascriptMinSourceMapId[];
   static const char kLocalStorageCacheId[];
   static const char kPrioritizeCriticalCssId[];
-
-  static const char kPanelCommentPrefix[];
 
   // Return the appropriate human-readable filter name for the given filter,
   // e.g. "CombineCss".
@@ -691,6 +689,59 @@ class RewriteOptions {
   // parameters), as well as sets of those pairs.
   typedef std::pair<GoogleString, GoogleString> OptionStringPair;
   typedef std::set<OptionStringPair> OptionSet;
+
+  // The base class for a Property.  This class contains fields of
+  // Properties that are independent of type.
+  class PropertyBase {
+   public:
+    PropertyBase(const char* id, StringPiece option_name)
+        : id_(id),
+          help_text_(nullptr),
+          option_name_(option_name),
+          scope_(kDirectoryScope),
+          do_not_use_for_signature_computation_(false),
+          index_(-1) {
+    }
+    virtual ~PropertyBase();
+
+    // Connect the specified RewriteOption to this property.
+    // set_index() must previously have been called on this.
+    virtual void InitializeOption(RewriteOptions* options) const = 0;
+
+    void set_do_not_use_for_signature_computation(bool x) {
+      do_not_use_for_signature_computation_ = x;
+    }
+    bool is_used_for_signature_computation() const {
+      return !do_not_use_for_signature_computation_;
+    }
+
+    void set_scope(OptionScope x) { scope_ = x; }
+    OptionScope scope() const { return scope_; }
+
+    void set_help_text(const char* x) { help_text_ = x; }
+    const char* help_text() const { return help_text_; }
+
+    void set_index(int index) { index_ = index; }
+    const char* id() const { return id_; }
+    StringPiece option_name() const { return option_name_; }
+    int index() const { return index_; }
+
+    bool safe_to_print() const { return safe_to_print_; }
+    void set_safe_to_print(bool safe_to_print) {
+      safe_to_print_ = safe_to_print;
+    }
+
+   private:
+    const char* id_;
+    const char* help_text_;
+    StringPiece option_name_;  // Key into all_options_.
+    OptionScope scope_;
+    bool do_not_use_for_signature_computation_;  // Default is false.
+    bool safe_to_print_;  // Safe to print in debug filter output.
+    int index_;
+
+    DISALLOW_COPY_AND_ASSIGN(PropertyBase);
+  };
 
   typedef std::vector<PropertyBase*> PropertyVector;
 
@@ -767,7 +818,6 @@ class RewriteOptions {
 
   static const char kDefaultAllowVaryOn[];
   static const int kDefaultBeaconReinstrumentTimeSec;
-  static const int64 kDefaultBlinkMaxHtmlSizeRewritable;
   static const int64 kDefaultCssFlattenMaxBytes;
   static const int64 kDefaultCssImageInlineMaxBytes;
   static const int64 kDefaultCssInlineMaxBytes;
@@ -780,7 +830,6 @@ class RewriteOptions {
   static const int64 kDefaultMaxCacheableResponseContentLength;
   static const int64 kDefaultMaxHtmlCacheTimeMs;
   static const int64 kDefaultMaxHtmlParseBytes;
-  static const int64 kDefaultMaxImageBytesForWebpInCss;
   static const int64 kDefaultMaxLowResImageSizeBytes;
   static const int kDefaultMaxLowResToFullResImageSizePercentage;
   static const int64 kDefaultMetadataInputErrorsCacheTtlMs;
@@ -790,7 +839,6 @@ class RewriteOptions {
   static const int64 kDefaultIdleFlushTimeMs;
   static const int64 kDefaultFlushBufferLimitBytes;
   static const int64 kDefaultImplicitCacheTtlMs;
-  static const int64 kDefaultMinCacheTtlMs;
   static const int64 kDefaultPrioritizeVisibleContentCacheTimeMs;
   static const char kDefaultBeaconUrl[];
   static const int64 kDefaultImageRecompressQuality;
@@ -808,8 +856,6 @@ class RewriteOptions {
   static const int64 kDefaultImageWebpRecompressQualityForSmallScreens;
   static const int64 kDefaultImageWebpTimeoutMs;
   static const int kDefaultDomainShardCount;
-  static const int64 kDefaultBlinkHtmlChangeDetectionTimeMs;
-  static const int kDefaultMaxPrefetchJsElements;
   static const int64 kDefaultOptionCookiesDurationMs;
   static const int64 kDefaultLoadFromFileCacheTtlMs;
   static const double kDefaultResponsiveImageDensities[];
@@ -820,7 +866,7 @@ class RewriteOptions {
 
   static const int kDefaultImageMaxRewritesAtOnce;
 
-  // See http://code.google.com/p/modpagespeed/issues/detail?id=9
+  // See http://github.com/pagespeed/mod_pagespeed/issues/9
   // Apache evidently limits each URL path segment (between /) to
   // about 256 characters.  This is not fundamental URL limitation
   // but is Apache specific.
@@ -828,9 +874,6 @@ class RewriteOptions {
 
   // Default time to wait for rewrite before returning original resource.
   static const int kDefaultRewriteDeadlineMs;
-
-  // Default time to wait for a distributed rewrite to return.
-  static const int64 kDefaultDistributedTimeoutMs;
 
   // Default number of first N images for which low res image is generated by
   // DelayImagesFilter.
@@ -1142,6 +1185,34 @@ class RewriteOptions {
     set_option(level, &level_);
   }
 
+  // Returns true iff given name and value are valid to set as a http header.
+  // If false is returned, error_message will have a descriptive failure
+  // message set.
+  bool ValidateConfiguredHttpHeader(const GoogleString& name,
+                                    const GoogleString& value,
+                                    GoogleString* error_message);
+
+  // If false was returned, no changes are made, and error_message will be
+  // assigned a failure description. If true was returned, the name/value
+  // passed validation and have been appended to resource_headers_.
+  // Multiple calls to ValidateAndAddResourceHeader with the same name will
+  // result in multiple headers being appended with the same name.
+  bool ValidateAndAddResourceHeader(const StringPiece& name,
+                                    const StringPiece& value,
+                                    GoogleString* error_message);
+
+  // Unconditionally appends the given name / value to resource_headers_. Use
+  // ValidateAndAddResourceHeader if you need validation.
+  void AddResourceHeader(const StringPiece& name, const StringPiece& value);
+
+  const NameValue* resource_header(int i) const {
+    return resource_headers_[i];
+  }
+
+  int num_resource_headers() const {
+    return resource_headers_.size();
+  }
+
   // Specify a header to insert when fetching subresources.
   void AddCustomFetchHeader(const StringPiece& name, const StringPiece& value);
 
@@ -1296,18 +1367,6 @@ class RewriteOptions {
   // Which implies that all filters not listed should be disabled.
   void DisableAllFiltersNotExplicitlyEnabled();
 
-  // Adds a set of filter prefixes (ids) to the set of distributable filters.
-  // The names are not verified and all prefixes will be added.
-  void DistributeFiltersByCommaSeparatedList(const StringPiece& filter_ids,
-                                             MessageHandler* handler);
-  // Adds the filter to the list of distributable filters.
-  // For experimentation, may be removed later.
-  void DistributeFilter(const StringPiece& filter_id);
-
-  // Returns true if the filter is in the list of distributable filters.
-  // For experimentation, may be removed later.
-  bool Distributable(const StringPiece& filter_id) const;
-
   // Adds the filter to the list of enabled filters. However, if the filter
   // is also present in either the list of disabled or forbidden filters,
   // that takes precedence and it is not enabled.
@@ -1357,6 +1416,13 @@ class RewriteOptions {
 
   // Disables all filters that depend on executing custom javascript.
   void DisableFiltersRequiringScriptExecution();
+
+  // Disables all filters that cannot be run in an Ajax call.
+  void DisableFiltersThatCantRunInAjax();
+
+  // Determines whether any filter is enabled that requires a 'head'
+  // element to work.
+  bool RequiresAddHead() const;
 
   // Returns true if any filter benefits from per-origin property cache
   // information.
@@ -1583,12 +1649,6 @@ class RewriteOptions {
   void set_max_html_parse_bytes(int64 x) {
     set_option(x, &max_html_parse_bytes_);
   }
-  int64 max_image_bytes_for_webp_in_css() const {
-    return max_image_bytes_for_webp_in_css_.value();
-  }
-  void set_max_image_bytes_for_webp_in_css(int64 x) {
-    set_option(x, &max_image_bytes_for_webp_in_css_);
-  }
   int64 max_cacheable_response_content_length() const {
     return max_cacheable_response_content_length_.value();
   }
@@ -1619,13 +1679,6 @@ class RewriteOptions {
   }
   void set_override_ie_document_mode(bool x) {
     set_option(x, &override_ie_document_mode_);
-  }
-
-  int64 blink_blacklist_end_timestamp_ms() const {
-    return blink_blacklist_end_timestamp_ms_.value();
-  }
-  void set_blink_blacklist_end_timestamp_ms(int64 x) {
-    set_option(x, &blink_blacklist_end_timestamp_ms_);
   }
 
   bool preserve_subresource_hints() const {
@@ -1677,7 +1730,7 @@ class RewriteOptions {
   // may be invalidated, depending on whether there are wildcards in
   // the pattern, and whether enable_cache_purge() is true.  Note that
   // HTTP cache invalidation is always exactly for the URLs matching
-  // url_pattern.
+  // url_pattern.  This should probably always be set to false.
   void AddUrlCacheInvalidationEntry(StringPiece url_pattern,
                                     int64 timestamp_ms,
                                     bool ignores_metadata_and_pcache);
@@ -1801,6 +1854,9 @@ class RewriteOptions {
   bool unplugged() const {
     return enabled_.value() == kEnabledUnplugged;
   }
+  bool standby() const {
+    return !enabled() && !unplugged();
+  }
 
   void set_add_options_to_urls(bool x) {
     set_option(x, &add_options_to_urls_);
@@ -1849,6 +1905,18 @@ class RewriteOptions {
 
   int in_place_rewrite_deadline_ms() const {
     return in_place_rewrite_deadline_ms_.value();
+  }
+
+  void set_in_place_s_maxage_sec(int x) {
+    set_option(x, &in_place_s_maxage_sec_);
+  }
+
+  int in_place_s_maxage_sec() const {
+    return in_place_s_maxage_sec_.value();
+  }
+
+  int EffectiveInPlaceSMaxAgeSec() const {
+    return modify_caching_headers() ? in_place_s_maxage_sec() : -1;
   }
 
   void set_in_place_preemptive_rewrite_css(bool x) {
@@ -1940,25 +2008,11 @@ class RewriteOptions {
   void set_flush_html(bool x) { set_option(x, &flush_html_); }
   bool flush_html() const { return flush_html_.value(); }
 
-  void set_serve_split_html_in_two_chunks(bool x) {
-    set_option(x, &serve_split_html_in_two_chunks_);
-  }
-  bool serve_split_html_in_two_chunks() const {
-    return serve_split_html_in_two_chunks_.value();
-  }
-
   void set_serve_stale_if_fetch_error(bool x) {
     set_option(x, &serve_stale_if_fetch_error_);
   }
   bool serve_stale_if_fetch_error() const {
     return serve_stale_if_fetch_error_.value();
-  }
-
-  void set_serve_ghost_click_buster_with_split_html(bool x) {
-    set_option(x, &serve_ghost_click_buster_with_split_html_);
-  }
-  bool serve_ghost_click_buster_with_split_html() const {
-    return serve_ghost_click_buster_with_split_html_.value();
   }
 
   void set_serve_xhr_access_control_headers(bool x) {
@@ -1980,20 +2034,6 @@ class RewriteOptions {
   }
   int64 serve_stale_while_revalidate_threshold_sec() const {
     return serve_stale_while_revalidate_threshold_sec_.value();
-  }
-
-  void set_enable_flush_early_critical_css(bool x) {
-    set_option(x, &enable_flush_early_critical_css_);
-  }
-  bool enable_flush_early_critical_css() const {
-    return enable_flush_early_critical_css_.value();
-  }
-
-  void set_use_selectors_for_critical_css(bool x) {
-    set_option(x, &use_selectors_for_critical_css_);
-  }
-  bool use_selectors_for_critical_css() const {
-    return use_selectors_for_critical_css_.value();
   }
 
   void set_default_cache_html(bool x) { set_option(x, &default_cache_html_); }
@@ -2331,26 +2371,8 @@ class RewriteOptions {
     set_option(x, &client_domain_rewrite_);
   }
 
-  void set_flush_more_resources_early_if_time_permits(bool x) {
-    set_option(x, &flush_more_resources_early_if_time_permits_);
-  }
-  bool flush_more_resources_early_if_time_permits() const {
-    return flush_more_resources_early_if_time_permits_.value();
-  }
-
-  void set_flush_more_resources_in_ie_and_firefox(bool x) {
-    set_option(x, &flush_more_resources_in_ie_and_firefox_);
-  }
-  bool flush_more_resources_in_ie_and_firefox() const {
-    return flush_more_resources_in_ie_and_firefox_.value();
-  }
-
-  void set_max_prefetch_js_elements(int x) {
-    set_option(x, &max_prefetch_js_elements_);
-  }
-  int max_prefetch_js_elements() const {
-    return max_prefetch_js_elements_.value();
-  }
+  void set_follow_flushes(bool x) { set_option(x, &follow_flushes_); }
+  bool follow_flushes() const { return follow_flushes_.value(); }
 
   void set_enable_defer_js_experimental(bool x) {
     set_option(x, &enable_defer_js_experimental_);
@@ -2394,34 +2416,6 @@ class RewriteOptions {
     return lazyload_highres_images_.value();
   }
 
-  void set_enable_blink_debug_dashboard(bool x) {
-    set_option(x, &enable_blink_debug_dashboard_);
-  }
-  bool enable_blink_debug_dashboard() const {
-    return enable_blink_debug_dashboard_.value();
-  }
-
-  void set_enable_blink_html_change_detection(bool x) {
-    set_option(x, &enable_blink_html_change_detection_);
-  }
-  bool enable_blink_html_change_detection() const {
-    return enable_blink_html_change_detection_.value();
-  }
-
-  void set_enable_blink_html_change_detection_logging(bool x) {
-    set_option(x, &enable_blink_html_change_detection_logging_);
-  }
-  bool enable_blink_html_change_detection_logging() const {
-    return enable_blink_html_change_detection_logging_.value();
-  }
-
-  void set_use_smart_diff_in_blink(bool x) {
-    set_option(x, &use_smart_diff_in_blink_);
-  }
-  bool use_smart_diff_in_blink() const {
-    return use_smart_diff_in_blink_.value();
-  }
-
   void set_use_fallback_property_cache_values(bool x) {
     set_option(x, &use_fallback_property_cache_values_);
   }
@@ -2441,13 +2435,6 @@ class RewriteOptions {
   }
   bool enable_prioritizing_scripts() const {
     return enable_prioritizing_scripts_.value();
-  }
-
-  void set_blink_html_change_detection_time_ms(int64 x) {
-    set_option(x, &blink_html_change_detection_time_ms_);
-  }
-  int64 blink_html_change_detection_time_ms() const {
-    return blink_html_change_detection_time_ms_.value();
   }
 
   const GoogleString& blocking_rewrite_key() const {
@@ -2528,53 +2515,11 @@ class RewriteOptions {
     return x_header_value_.value();
   }
 
-  void set_distributed_rewrite_key(StringPiece p) {
-      set_option(p.as_string(), &distributed_rewrite_key_);
-  }
-  const GoogleString& distributed_rewrite_key() const {
-    return distributed_rewrite_key_.value();
-  }
-
-  void set_distribute_fetches(bool x) {
-    set_option(x, &distribute_fetches_);
-  }
-  bool distribute_fetches() const {
-    return distribute_fetches_.value();
-  }
-
-  void set_distributed_rewrite_servers(StringPiece p) {
-      set_option(p.as_string(), &distributed_rewrite_servers_);
-  }
-  const GoogleString& distributed_rewrite_servers() const {
-    return distributed_rewrite_servers_.value();
-  }
-
-  void set_distributed_rewrite_timeout_ms(const int64 x) {
-    set_option(x, &distributed_rewrite_timeout_ms_);
-  }
-  int64 distributed_rewrite_timeout_ms() const {
-    return distributed_rewrite_timeout_ms_.value();
-  }
-
   void set_avoid_renaming_introspective_javascript(bool x) {
     set_option(x, &avoid_renaming_introspective_javascript_);
   }
   bool avoid_renaming_introspective_javascript() const {
     return avoid_renaming_introspective_javascript_.value();
-  }
-
-  int64 blink_max_html_size_rewritable() const {
-    return blink_max_html_size_rewritable_.value();
-  }
-  void set_blink_max_html_size_rewritable(int64 x) {
-    set_option(x, &blink_max_html_size_rewritable_);
-  }
-
-  void set_critical_line_config(StringPiece p) {
-      set_option(GoogleString(p.data(), p.size()), &critical_line_config_);
-  }
-  const GoogleString& critical_line_config() const {
-    return critical_line_config_.value();
   }
 
   void set_forbid_all_disabled_filters(bool x) {
@@ -2750,91 +2695,21 @@ class RewriteOptions {
     return responsive_image_densities_.value();
   }
 
-  bool mob_always() const { return mob_always_.value(); }
-  void set_mob_always(bool x) { set_option(x, &mob_always_); }
-  bool mob_config() const { return mob_config_.value(); }
-  bool mob_iframe() const { return mob_iframe_.value(); }
-  const GoogleString& mob_iframe_viewport() const {
-    return mob_iframe_viewport_.value();
+  const GoogleString& amp_link_pattern() const {
+    return amp_link_pattern_.value();
   }
-  bool mob_iframe_disable() const { return mob_iframe_disable_.value(); }
-  bool mob_layout() const { return mob_layout_.value(); }
-  void set_mob_beacon_url(StringPiece x) {
-    set_option(x.as_string(), &mob_beacon_url_);
+  void set_amp_link_pattern(const GoogleString& id) {
+    set_option(id, &amp_link_pattern_);
   }
-  const GoogleString& mob_beacon_url() const { return mob_beacon_url_.value(); }
-  void set_mob_beacon_category(StringPiece x) {
-    set_option(x.as_string(), &mob_beacon_category_);
+
+  bool honor_csp() const {
+    return honor_csp_.value();
   }
-  const GoogleString& mob_beacon_category() const {
-    return mob_beacon_category_.value();
+  void set_honor_csp(bool x) {
+    set_option(x, &honor_csp_);
   }
-  void set_mob_phone_number(StringPiece x) {
-    set_option(x.as_string(), &mob_phone_number_);
-  }
-  const GoogleString& mob_phone_number() const {
-    return mob_phone_number_.value();
-  }
-  void set_mob_map_location(StringPiece x) {
-    set_option(x.as_string(), &mob_map_location_);
-  }
-  const GoogleString& mob_map_location() const {
-    return mob_map_location_.value();
-  }
-  void set_mob_config(bool x) { set_option(x, &mob_config_); }
-  void set_mob_iframe(bool x) { set_option(x, &mob_iframe_); }
-  void set_mob_iframe_disable(bool x) { set_option(x, &mob_iframe_disable_); }
-  void set_mob_iframe_viewport(StringPiece x) {
-    set_option(x.as_string(), &mob_iframe_viewport_);
-  }
-  void set_mob_layout(bool x) { set_option(x, &mob_layout_); }
-  bool mob_nav() const {
-    return CheckMobilizeFiltersOption(mob_nav_);
-  }
-  void set_mob_nav(bool x) { set_option(x, &mob_nav_); }
-  bool mob_labeled_mode() const { return mob_labeled_mode_.value(); }
-  void set_mob_labeled_mode(bool x) { set_option(x, &mob_labeled_mode_); }
-  const GoogleString& mob_nav_classes() const {
-    return mob_nav_classes_.value();
-  }
-  void set_mob_nav_classes(StringPiece p) {
-    set_option(p.as_string(), &mob_nav_classes_);
-  }
-  bool has_mob_nav_classes() const { return mob_nav_classes_.was_set(); }
-  // Should menu extraction be run?
-  bool MobRenderServerSideMenus() const {
-    return (Enabled(kMobilize) && !mob_labeled_mode());
-  }
-  // Should labeling be run in the request flow?
-  bool MobUseLabelFilter() const {
-    // We use the label filter if we're doing mobilization.  But we don't run
-    // it in iframe mode, ever, because that doesn't see the page we'd be
-    // extracting mobilization data from.  We used to not run it if we were
-    // doing nav server side, and should consider doing that again -- but if
-    // something goes wrong we can't then fall back to client-side navigation.
-    return (Enabled(kMobilize) && !mob_iframe() && !mob_labeled_mode());
-  }
-  bool mob_static() const { return mob_static_.value(); }
-  void set_mob_static(bool x) { set_option(x, &mob_static_); }
-  const MobTheme& mob_theme() const { return mob_theme_.value(); }
-  void set_mob_theme(const MobTheme& x) {
-    set_option(x, &mob_theme_);
-  }
-  bool has_mob_theme() const { return mob_theme_.was_set(); }
-  int64 mob_conversion_id() const { return mob_conversion_id_.value(); }
-  void set_mob_conversion_id(int64 x) { set_option(x, &mob_conversion_id_); }
-  const GoogleString& mob_map_conversion_label() const {
-    return mob_map_conversion_label_.value();
-  }
-  void set_mob_map_conversion_label(StringPiece x) {
-    set_option(x.as_string(), &mob_map_conversion_label_);
-  }
-  const GoogleString& mob_phone_conversion_label() const {
-    return mob_phone_conversion_label_.value();
-  }
-  void set_mob_phone_conversion_label(StringPiece x) {
-    set_option(x.as_string(), &mob_phone_conversion_label_);
-  }
+
+  virtual bool DisableDomainRewrite() const { return false; }
 
   // Merge src into 'this'.  Generally, options that are explicitly
   // set in src will override those explicitly set in 'this' (except that
@@ -2970,6 +2845,20 @@ class RewriteOptions {
     return lazyload_enabled_classes_->Match(class_name, true);
   }
 
+  // Adds a new comment wildcard pattern to be retained.
+  void AddCssCombiningWildcard(StringPiece id_wildcard) {
+    Modify();
+    css_combining_permitted_ids_.MakeWriteable()->Allow(id_wildcard);
+  }
+
+  bool IsAllowedIdForCssCombining(StringPiece id) const {
+    return css_combining_permitted_ids_->Match(id, false);
+  }
+
+  bool CssCombiningMayPermitIds() const {
+    return !css_combining_permitted_ids_->empty();
+  }
+
   void set_override_caching_ttl_ms(int64 x) {
     set_option(x, &override_caching_ttl_ms_);
   }
@@ -3004,13 +2893,6 @@ class RewriteOptions {
       insert_result.first->second = new FastWildcardGroup;
     }
     insert_result.first->second->Allow(wildcard);
-  }
-
-  void set_min_cache_ttl_ms(int64 x) {
-    set_option(x, &min_cache_ttl_ms_);
-  }
-  int64 min_cache_ttl_ms() const {
-    return min_cache_ttl_ms_.value();
   }
 
   // Determine if the request url needs to be declined based on the url,
@@ -3116,10 +2998,18 @@ class RewriteOptions {
   // Determine if the given option name is valid/known.
   static bool IsValidOptionName(StringPiece name);
 
+  // Determine if this is an option name that used to do things, and which
+  // we may therefore want to accept w/a warning for backwards compatibility.
+  static bool IsDeprecatedOptionName(StringPiece option_name);
+
   // Return the list of all options.  Used to initialize the configuration
   // vector to the Apache configuration system.
   const OptionBaseVector& all_options() const {
     return all_options_;
+  }
+
+  static const Properties* deprecated_properties() {
+    return deprecated_properties_;
   }
 
   // Determines whether this and that are the same.  Uses the signature() to
@@ -3138,6 +3028,10 @@ class RewriteOptions {
   // deal since we don't call it very often and HttpOptions are pretty light,
   // but we might want to reconsider if those assumptions change.
   HttpOptions ComputeHttpOptions() const;
+
+  // Returns true if this configuration turns on options that may need
+  // the dependencies cohort to operate.
+  bool NeedsDependenciesCohort() const;
 
  protected:
   // Helper class to represent an Option, whose value is held in some class T.
@@ -3288,6 +3182,12 @@ class RewriteOptions {
     properties->push_back(property);
   }
 
+  static void AddDeprecatedProperty(StringPiece option_name,
+                                    OptionScope scope) {
+    deprecated_properties_->push_back(
+        new DeprecatedProperty(option_name, scope));
+  }
+
   // Merges properties into all_properties so that
   // RewriteOptions::Merge and SetOptionFromName can work across
   // options from RewriteOptions and all relevant subclasses.
@@ -3355,57 +3255,21 @@ class RewriteOptions {
   Option<GoogleString> x_header_value_;
 
  protected:
-  // The base class for a Property.  This class contains fields of
-  // Properties that are independent of type.
-  class PropertyBase {
+  // Property representing options that got deprecated. Doesn't
+  // actually have a corresponding option.
+  class DeprecatedProperty : public PropertyBase {
    public:
-    PropertyBase(const char* id, StringPiece option_name)
-        : id_(id),
-          help_text_(NULL),
-          option_name_(option_name),
-          scope_(kDirectoryScope),
-          do_not_use_for_signature_computation_(false),
-          index_(-1) {
-    }
-    virtual ~PropertyBase();
-
-    // Connect the specified RewriteOption to this property.
-    // set_index() must previously have been called on this.
-    virtual void InitializeOption(RewriteOptions* options) const = 0;
-
-    void set_do_not_use_for_signature_computation(bool x) {
-      do_not_use_for_signature_computation_ = x;
-    }
-    bool is_used_for_signature_computation() const {
-      return !do_not_use_for_signature_computation_;
+    explicit DeprecatedProperty(StringPiece option_name, OptionScope scope)
+        : PropertyBase("", option_name) {
+      set_do_not_use_for_signature_computation(true);
+      set_help_text("Deprecated. Do not use");
+      set_safe_to_print(false);
+      set_scope(scope);
     }
 
-    void set_scope(OptionScope x) { scope_ = x; }
-    OptionScope scope() const { return scope_; }
-
-    void set_help_text(const char* x) { help_text_ = x; }
-    const char* help_text() const { return help_text_; }
-
-    void set_index(int index) { index_ = index; }
-    const char* id() const { return id_; }
-    StringPiece option_name() const { return option_name_; }
-    int index() const { return index_; }
-
-    bool safe_to_print() const { return safe_to_print_; }
-    void set_safe_to_print(bool safe_to_print) {
-      safe_to_print_ = safe_to_print;
+    void InitializeOption(RewriteOptions* options) const override {
+      CHECK(false) << "Deprecated properties shouldn't back options!";
     }
-
-   private:
-    const char* id_;
-    const char* help_text_;
-    StringPiece option_name_;  // Key into all_options_.
-    OptionScope scope_;
-    bool do_not_use_for_signature_computation_;  // Default is false.
-    bool safe_to_print_;  // Safe to print in debug filter output.
-    int index_;
-
-    DISALLOW_COPY_AND_ASSIGN(PropertyBase);
   };
 
   // Type-specific class of Property.  This subclass of PropertyBase
@@ -3498,6 +3362,8 @@ class RewriteOptions {
 
   static Properties* properties_;          // from RewriteOptions only
   static Properties* all_properties_;      // includes subclass properties
+
+  static Properties* deprecated_properties_;
 
   FRIEND_TEST(RewriteOptionsTest, ExperimentMergeTest);
   FRIEND_TEST(RewriteOptionsTest, LookupOptionByNameTest);
@@ -3623,7 +3489,7 @@ class RewriteOptions {
   static void AddRequestProperty(typename OptionClass::ValueType default_value,
                                  OptionClass RewriteOptions::*offset,
                                  const char* id, bool safe_to_print) {
-    AddProperty(default_value, offset, id, kNullOption, kProcessScope,
+    AddProperty(default_value, offset, id, kNullOption, kProcessScopeStrict,
                 NULL, safe_to_print, properties_);
   }
 
@@ -3650,6 +3516,9 @@ class RewriteOptions {
   static void InitFilterIdToEnumArray();
   static void InitOptionIdToPropertyArray();
   static void InitOptionNameToPropertyArray();
+  // Inits fixed_resource_headers_ to a sorted list of headers not allowed in
+  // AddResourceHeader.
+  static void InitFixedResourceHeaders();
 
   // Helper for converting the result of SetOptionFromNameInternal into
   // a status/message pair. The returned result may be adjusted from the passed
@@ -3786,10 +3655,6 @@ class RewriteOptions {
   FilterSet disabled_filters_;
   FilterSet forbidden_filters_;
 
-  // The set of filters that can be distributed to other tasks.
-  // For experimentation, may be removed later.
-  FilterIdSet distributable_filters_;
-
   // Note: using the template class Option here saves a lot of repeated
   // and error-prone merging code.  However, it is not space efficient as
   // we are alternating int64s and bools in the structure.  If we cared
@@ -3835,8 +3700,6 @@ class RewriteOptions {
   // The maximum number of bytes of HTML that we parse, before redirecting to
   // ?ModPagespeed=off.
   Option<int64> max_html_parse_bytes_;
-  // The maximum size of an image in CSS, which we convert to webp.
-  Option<int64> max_image_bytes_for_webp_in_css_;
   // Resources with Cache-Control TTL less than this will not be rewritten.
   Option<int64> min_resource_cache_time_to_rewrite_ms_;
   Option<int64> idle_flush_time_ms_;
@@ -3881,8 +3744,6 @@ class RewriteOptions {
 
   Option<EnabledEnum> enabled_;
 
-  Option<bool> distributable_;
-
   // Encode relevant rewrite options as URL query-parameters so that resources
   // can be reconstructed on servers without the same configuration file.
   Option<bool> add_options_to_urls_;
@@ -3901,6 +3762,11 @@ class RewriteOptions {
   // Interval to delay serving on the IPRO path while waiting for optimizations.
   // After this interval, the unoptimized resource will be served.
   Option<int> in_place_rewrite_deadline_ms_;
+  // When we have a resource that we haven't optimized in-place yet, we add
+  // s-maxage to the Cache-Control header until we get to optimizing it.  This
+  // option controls how many seconds we set s-maxage to, and -1 disables
+  // setting s-maxage at all.
+  Option<int> in_place_s_maxage_sec_;
   // If set, preemptively rewrite images in CSS files on the HTML serving path
   // when IPRO of CSS is enabled.
   Option<bool> in_place_preemptive_rewrite_css_;
@@ -3928,15 +3794,12 @@ class RewriteOptions {
   Option<bool> respect_vary_;
   Option<bool> respect_x_forwarded_proto_;
   Option<bool> flush_html_;
-  // Should we serve the split html response in two chunks - above the fold and
-  // below the fold. If set to false, we serve the above the fold and below the
-  // fold in a single response.
-  Option<bool> serve_split_html_in_two_chunks_;
+  // If set to true, ProxyFetch will request a flush on its RewriteDriver when
+  // Flush() is called on it.
+  Option<bool> follow_flushes_;
   // Should we serve stale responses if the fetch results in a server side
   // error.
   Option<bool> serve_stale_if_fetch_error_;
-  // Should we serve ghost click buster code when split html is enabled.
-  Option<bool> serve_ghost_click_buster_with_split_html_;
   // Should we serve access control headers in response headers.
   Option<bool> serve_xhr_access_control_headers_;
   // Proactively freshen user facing request if it is about to expire. So, that
@@ -3945,10 +3808,7 @@ class RewriteOptions {
   // Threshold for serving stale responses while revalidating in background.
   // 0 means don't serve stale content.
   Option<int64> serve_stale_while_revalidate_threshold_sec_;
-  // Whether to flush the inlined critical css rules early.
-  Option<bool> enable_flush_early_critical_css_;
-  // Whether to use CriticalSelectorFilter for prioritize_critical_css filter.
-  Option<bool> use_selectors_for_critical_css_;
+
   // When default_cache_html_ is false (default) we do not cache
   // input HTML which lacks Cache-Control headers. But, when set true,
   // we will cache those inputs for the implicit lifetime just like we
@@ -4013,16 +3873,6 @@ class RewriteOptions {
   Option<bool> report_unload_time_;
 
   Option<bool> serve_rewritten_webp_urls_to_any_agent_;
-
-  // Flush more resources if origin is slow to respond.
-  Option<bool> flush_more_resources_early_if_time_permits_;
-
-  // Flush more resources in IE and Firefox.
-  Option<bool> flush_more_resources_in_ie_and_firefox_;
-
-  // Number of script elements to prefetch early. Applicable when defer_js
-  // filter is enabled.
-  Option<int> max_prefetch_js_elements_;
 
   // Enables experimental code in defer js.
   Option<bool> enable_defer_js_experimental_;
@@ -4095,6 +3945,8 @@ class RewriteOptions {
   Option<bool> oblivious_pagespeed_urls_;
 
   // Cache expiration time in msec for properties of finders.
+  // Critical images /flush early information will be valid for the time
+  // specified.
   Option<int64> finder_properties_cache_expiration_time_ms_;
 
   // Cache refresh time in msec for properties of finders. The properties are
@@ -4144,9 +3996,6 @@ class RewriteOptions {
   // Maximum length (in bytes) of response content.
   Option<int64> max_cacheable_response_content_length_;
 
-  // The timestamp when blink blacklist expires.
-  Option<int64> blink_blacklist_end_timestamp_ms_;
-
   // Keep the original subresource hints
   Option<bool> preserve_subresource_hints_;
 
@@ -4156,18 +4005,6 @@ class RewriteOptions {
 
   Option<GoogleString> ga_id_;
 
-  Option<int64> blink_max_html_size_rewritable_;
-  // Time after which we should try to detect if publisher html in blink
-  // has changed.
-  Option<int64> blink_html_change_detection_time_ms_;
-  // Show the blink debug dashboard.
-  Option<bool> enable_blink_debug_dashboard_;
-  // Enable automatic detection of publisher changes in html in blink.
-  Option<bool> enable_blink_html_change_detection_;
-  // Enable logging of publisher changes detected in html in blink flow.
-  Option<bool> enable_blink_html_change_detection_logging_;
-  // Use smart diff to detect publisher changes in html in blink.
-  Option<bool> use_smart_diff_in_blink_;
   // Use fallback values from property cache.
   Option<bool> use_fallback_property_cache_values_;
   // Always wait for property cache lookup to finish.
@@ -4176,21 +4013,6 @@ class RewriteOptions {
   Option<bool> enable_prioritizing_scripts_;
   // Enables rewriting of uncacheable resources.
   Option<bool> rewrite_uncacheable_resources_;
-  // Specification for critical line.
-  Option<GoogleString> critical_line_config_;
-  // The user-provided key used to authenticate requests from one rewrite task
-  // to another.  Right now only used to validate meta-data headers.
-  Option<GoogleString> distributed_rewrite_key_;
-  // A comma delimited list of hosts that can be used to rewrite resources.
-  Option<GoogleString> distributed_rewrite_servers_;
-  // Whether or not to distribute IPRO and .pagespeed. resource fetch requests
-  // from the RewriteDriver before checking the cache.  If this is false,
-  // then a distribution will only occur for a fetch if a nested
-  // RewriteContext is created and its id is distributable.
-  Option<bool> distribute_fetches_;
-  // Time to wait for a distributed rewrite to complete before giving up on the
-  // request.
-  Option<int64> distributed_rewrite_timeout_ms_;
   // Forbid turning on of any disabled (not enabled) filters either via query
   // parameters or request headers or .htaccess for Directory. Note that this
   // is a latch so that setting it at some directory level forces it on for
@@ -4242,11 +4064,6 @@ class RewriteOptions {
   Option<int64> override_caching_ttl_ms_;
   CopyOnWrite<FastWildcardGroup> override_caching_wildcard_;
 
-  // The minimum milliseconds of cache TTL for all resources that are
-  // explicitly cacheable. This overrides the max-age even when it is set on
-  // Cache-Control headers.
-  Option<int64> min_cache_ttl_ms_;
-
   // Whether to allow logging urls as part of LogRecord.
   Option<bool> allow_logging_urls_in_log_record_;
 
@@ -4256,7 +4073,7 @@ class RewriteOptions {
   // Non cacheables used when partial HTML is cached.
   Option<GoogleString> non_cacheables_for_cache_partial_html_;
 
-  // Comma seperated list of origins that are allowed to make cross-origin
+  // Comma separated list of origins that are allowed to make cross-origin
   // requests. These domain requests are served with
   // Access-Control-Allow-Origin header.
   Option<GoogleString> access_control_allow_origins_;
@@ -4298,6 +4115,15 @@ class RewriteOptions {
   // Comma separated list of densities to use for responsive images.
   Option<ResponsiveDensities> responsive_image_densities_;
 
+  // The pattern to use for generating the canonical AMP page link from
+  // the existing URL.
+  // TODO(sjnickerson): Make this Option<AmpLinkPattern> so that parsing and
+  // validation can happen up front.
+  Option<GoogleString> amp_link_pattern_;
+
+  // Whether our CSP support is on or not.
+  Option<bool> honor_csp_;
+
   // If set, how to fragment the http cache.  Otherwise the server's hostname,
   // from the Host header, is used.
   CacheFragmentOption cache_fragment_;
@@ -4331,6 +4157,12 @@ class RewriteOptions {
   int experiment_percent_;  // Total traffic going through experiments.
   std::vector<ExperimentSpec*> experiment_specs_;
 
+  // Headers to add resource responses.
+  // TODO(oschaaf): Wrap this and custom_fetch_headers_ in CopyOnWrite through
+  // a new class. Move header validations over there as well so we can share
+  // them.
+  std::vector<NameValue*> resource_headers_;
+
   // Headers to add to subresource requests.
   std::vector<NameValue*> custom_fetch_headers_;
 
@@ -4339,26 +4171,6 @@ class RewriteOptions {
   scoped_ptr<std::vector<ElementAttributeCategory> > url_valued_attributes_;
 
   Option<ResourceCategorySet> inline_unauthorized_resource_types_;
-
-  Option<bool> mob_always_;
-  Option<bool> mob_config_;
-  Option<bool> mob_iframe_;
-  Option<bool> mob_iframe_disable_;
-  Option<GoogleString> mob_iframe_viewport_;
-  Option<bool> mob_layout_;
-  Option<bool> mob_nav_;
-  Option<bool> mob_labeled_mode_;
-  Option<GoogleString> mob_nav_classes_;
-  Option<bool> mob_static_;
-
-  Option<GoogleString> mob_beacon_url_;
-  Option<GoogleString> mob_beacon_category_;
-  Option<GoogleString> mob_map_location_;
-  Option<GoogleString> mob_phone_number_;
-  Option<int64> mob_conversion_id_;
-  Option<GoogleString> mob_map_conversion_label_;
-  Option<GoogleString> mob_phone_conversion_label_;
-  Option<MobTheme> mob_theme_;
 
   Option<int64> noop_;
 
@@ -4375,6 +4187,7 @@ class RewriteOptions {
   CopyOnWrite<FastWildcardGroup> allow_when_inlining_resources_;
   CopyOnWrite<FastWildcardGroup> retain_comments_;
   CopyOnWrite<FastWildcardGroup> lazyload_enabled_classes_;
+  CopyOnWrite<FastWildcardGroup> css_combining_permitted_ids_;
 
   // When certain url patterns are in the referer we want to do a blocking
   // rewrite.

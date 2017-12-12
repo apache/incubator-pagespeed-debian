@@ -19,7 +19,6 @@
 #ifndef PAGESPEED_KERNEL_IMAGE_GIF_READER_H_
 #define PAGESPEED_KERNEL_IMAGE_GIF_READER_H_
 
-#include <cstddef>
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -31,7 +30,7 @@
 #include "pagespeed/kernel/image/scanline_utils.h"
 
 extern "C" {
-#include "third_party/giflib/lib/gif_lib.h"
+#include "gif_lib.h"
 
 #ifdef USE_SYSTEM_LIBPNG
 #include "png.h"                                               // NOLINT

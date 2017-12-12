@@ -169,7 +169,6 @@
         'kernel/thread/worker_test_base.cc',
         'kernel/util/lock_manager_spammer.cc',
         'kernel/util/mock_nonce_generator.cc',
-        'kernel/util/threadsafe_lock_manager.cc',
       ],
       'all_dependent_settings': {
         'include_dirs': [
@@ -198,6 +197,7 @@
         'kernel/cache/delegating_cache_callback.cc',
         'kernel/cache/fallback_cache.cc',
         'kernel/cache/file_cache.cc',
+        'kernel/cache/in_memory_cache.cc',
         'kernel/cache/key_value_codec.cc',
         'kernel/cache/lru_cache.cc',
         'kernel/cache/purge_context.cc',
@@ -232,6 +232,7 @@
       'target_name': 'pagespeed_html',
       'type': '<(library)',
       'sources': [
+        'kernel/html/amp_document_filter.cc',
         'kernel/html/elide_attributes_filter.cc',
         'kernel/html/collapse_whitespace_filter.cc',
         'kernel/html/doctype.cc',
@@ -307,6 +308,18 @@
       'includes': [
         '../net/instaweb/gperf.gypi',
       ]
+    },
+    {
+      'target_name': 'pagespeed_proto_matcher_test_proto',
+      'variables': {
+        'instaweb_protoc_subdir': 'pagespeed/kernel/base',
+      },
+      'sources': [
+        'kernel/base/proto_matcher_test.proto',
+      ],
+      'includes': [
+        '../net/instaweb/protoc.gypi',
+      ],
     },
     {
       'target_name': 'pagespeed_http_pb',
@@ -392,12 +405,10 @@
         'kernel/util/nonce_generator.cc',
         'kernel/util/simple_random.cc',
         'kernel/util/statistics_logger.cc',
-        'kernel/util/statistics_work_bound.cc',
         'kernel/util/url_escaper.cc',
         'kernel/util/url_multipart_encoder.cc',
         'kernel/util/url_segment_encoder.cc',
         'kernel/util/url_to_filename_encoder.cc',
-        'kernel/util/work_bound.cc',
       ],
       'include_dirs': [
         '<(DEPTH)',
@@ -417,6 +428,7 @@
         'kernel/util/mem_lock.cc',
         'kernel/util/mem_lock_manager.cc',
         'kernel/util/mem_lock_state.cc',
+        'kernel/util/threadsafe_lock_manager.cc',
       ],
       'include_dirs': [
         '<(DEPTH)',
@@ -443,13 +455,72 @@
       ],
     },
     {
+      'target_name': 'redis_cache_cluster_setup_lib',
+      'type': '<(library)',
+      'sources': [
+        'system/redis_cache_cluster_setup.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'dependencies': [
+        'pagespeed_base',
+        'tcp_connection_for_testing',
+        '<(DEPTH)/third_party/apr/apr.gyp:apr',
+      ],
+    },
+    {
+      'target_name': 'redis_cache_cluster_setup',
+      'type': 'executable',
+      'sources': [
+        'system/redis_cache_cluster_setup_main.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'dependencies': [
+        'redis_cache_cluster_setup_lib',
+        '<(DEPTH)/third_party/apr/apr.gyp:apr',
+      ],
+    },
+    {
+      'target_name': 'tcp_connection_for_testing',
+      'type': '<(library)',
+      'sources': [
+        'system/tcp_connection_for_testing.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'dependencies': [
+        'pagespeed_base',
+        '../net/instaweb/instaweb.gyp:instaweb_system',
+        '<(DEPTH)/third_party/apr/apr.gyp:apr',
+      ],
+    },
+    {
+      'target_name': 'tcp_server_thread_for_testing',
+      'type': '<(library)',
+      'sources': [
+        'system/tcp_server_thread_for_testing.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'dependencies': [
+        'pagespeed_base',
+        'kernel_test_util',
+        '<(DEPTH)/third_party/apr/apr.gyp:apr',
+      ],
+    },
+    {
       'target_name': 'pagespeed_image_processing',
       'type': '<(library)',
       'dependencies': [
+        ':pagespeed_image_optimizer_pb',
         ':pagespeed_image_types_pb',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/build/libwebp.gyp:libwebp_enc',
-        '<(DEPTH)/build/libwebp.gyp:libwebp_enc_mux',
         '<(DEPTH)/build/libwebp.gyp:libwebp_dec',
         '<(DEPTH)/third_party/giflib/giflib.gyp:dgiflib',
         '<(DEPTH)/third_party/libjpeg_turbo/libjpeg_turbo.gyp:libjpeg_turbo',
@@ -463,6 +534,7 @@
         'kernel/image/image_analysis.cc',
         'kernel/image/image_converter.cc',
         'kernel/image/image_frame_interface.cc',
+        'kernel/image/image_optimizer.cc',
         'kernel/image/image_resizer.cc',
         'kernel/image/image_util.cc',
         'kernel/image/jpeg_optimizer.cc',
@@ -555,7 +627,9 @@
         'kernel/thread/queued_worker_pool.cc',
         'kernel/thread/scheduler.cc',
         'kernel/thread/scheduler_based_abstract_lock.cc',
+        'kernel/thread/scheduler_sequence.cc',
         'kernel/thread/scheduler_thread.cc',
+        'kernel/thread/sequence.cc',
         'kernel/thread/slow_worker.cc',
         'kernel/thread/thread_synchronizer.cc',
         'kernel/thread/worker.cc',
@@ -616,6 +690,36 @@
       'ldflags': [
         '-lrt',
       ]
+    },
+    {
+      'target_name': 'brotli',
+      'type': '<(library)',
+      'sources': [
+        '<(DEPTH)/pagespeed/kernel/util/brotli_inflater.cc',
+      ],
+      'include_dirs': [
+        '<(DEPTH)',
+      ],
+      'dependencies': [
+        '<(DEPTH)/third_party/brotli/brotli.gyp:brotli_dec',
+        '<(DEPTH)/third_party/brotli/brotli.gyp:brotli_enc',
+      ],
+      'cflags': [
+        '-Wno-sign-compare', # Brotli header has some macros.
+      ],
+    },
+    {
+      'target_name': 'pagespeed_image_optimizer_pb',
+      'variables': {
+        'instaweb_protoc_subdir': 'pagespeed/kernel/image',
+      },
+      'sources': [
+        'kernel/image/image_optimizer.proto',
+        '<(protoc_out_dir)/<(instaweb_protoc_subdir)/image_optimizer.pb.cc',
+      ],
+      'includes': [
+        '../net/instaweb/protoc.gypi',
+      ],
     },
   ],
 }

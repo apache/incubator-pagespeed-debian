@@ -24,12 +24,17 @@
 
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
+#include "net/instaweb/rewriter/public/csp_directive.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
 #include "net/instaweb/rewriter/public/resource_slot.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/controller/schedule_rewrite_callback.h"
+#include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -48,6 +53,12 @@ class RewriteOptions;
 class Statistics;
 class Variable;
 class FreshenMetadataUpdateManager;
+
+enum class RenderOp {
+  kDontRender,
+  kRenderOnlyCspWarning,
+  kRender
+};
 
 // RewriteContext manages asynchronous rewriting of some n >= 1 resources (think
 // CSS, JS, or images) into m >= 0 improved versions (typically, n = m = 1).
@@ -146,13 +157,6 @@ class RewriteContext {
   typedef std::vector<InputInfo*> InputInfoStarVector;
   static const char kNumRewritesAbandonedForLockContention[];
   static const char kNumDeadlineAlarmInvocations[];
-  static const char kNumDistributedRewriteSuccesses[];
-  static const char kNumDistributedRewriteFailures[];
-  static const char kNumDistributedMetadataFailures[];
-  // The extension used for all distributed fetch URLs.
-  static const char kDistributedExt[];
-  // The hash value used for all distributed fetch URLs.
-  static const char kDistributedHash[];
   static const char kHashMismatchMessage[];
 
   // Used to pass the result of the metadata cache lookups. Recipient must
@@ -207,7 +211,7 @@ class RewriteContext {
   // but may also be accessed in ::Render.
   int num_output_partitions() const;
   const CachedResult* output_partition(int i) const;
-  CachedResult* output_partition(int i);
+  CachedResult* mutable_output_partition(int i);
 
   // Returns true if this context is chained to some predecessors, and
   // must therefore be started by a predecessor and not RewriteDriver.
@@ -267,6 +271,10 @@ class RewriteContext {
   // Returns true if this is a child rewriter and its parent has the given
   // id.
   bool IsNestedIn(StringPiece id) const;
+
+  // Checks to make sure that partitions_ is not frozen when it is
+  // about to be modified, calling LOG(DFATAL) if there is a problem.
+  void CheckNotFrozen();
 
   // Allows a nested rewriter to walk up its parent hierarchy.
   RewriteContext* parent() { return parent_; }
@@ -414,6 +422,16 @@ class RewriteContext {
   // overriding this method -- the empty default implementation is fine.
   virtual void Harvest();
 
+  // This method gives the context a chance to verify that rendering the
+  // result is consistent with the current document's (Content Security) Policy,
+  // which may be different than that of the page for which the result was first
+  // computed + cached. Most subclasses can just call AreOutputsAllowedByCsp(),
+  // with appropriate role.
+  virtual bool PolicyPermitsRendering() const = 0;
+
+  // Helper that checks that all output resources are OK with CSP as given role.
+  bool AreOutputsAllowedByCsp(CspDirective role) const;
+
   // Performs rendering activities that span multiple HTML slots.  For
   // example, in a filter that combines N slots to 1, N-1 of the HTML
   // elements might need to be removed.  That can be performed in
@@ -525,22 +543,6 @@ class RewriteContext {
   // calling of base version until that is complete.
   virtual void StartFetchReconstruction();
 
-  // Determines if the given rewrite should be distributed. This is based on
-  // whether distributed servers have been configured, if the current filter is
-  // configured to be distributed, where a filter is in a chain, if a
-  // distributed fetcher is in place, and if distribution has been explicitly
-  // disabled for this context.
-  bool ShouldDistributeRewrite() const;
-
-  // Determines if this rewrite-context is acting on behalf of a distributed
-  // rewrite request from an HTML rewrite. Verifies the distributed rewrite key.
-  bool IsDistributedRewriteForHtml() const;
-
-  // Dispatches the rewrite to another task with a distributed fetcher. Should
-  // not be called without first getting true from ShoulDistributeRewrite() as
-  // it has guards (such as checking the number of slots).
-  void DistributeRewrite();
-
   // Makes the rest of a fetch run in background, not producing
   // a result or invoking callbacks. Will arrange for appropriate
   // memory management with the rewrite driver itself; but the caller
@@ -584,15 +586,6 @@ class RewriteContext {
     notify_driver_on_fetch_done_ = value;
   }
 
-  // Returns true if this context will prevent any attempt at distributing a
-  // rewrite (although its nested context still may be distributed). See
-  // ShouldDistributeRewrite for more detail on when a rewrite should be
-  // distributed.
-  bool block_distribute_rewrite() const { return block_distribute_rewrite_; }
-  void set_block_distribute_rewrite(const bool x) {
-    block_distribute_rewrite_ = x;
-  }
-
   // Note that the following must only be called in the fetch flow.
   AsyncFetch* async_fetch();
 
@@ -622,6 +615,30 @@ class RewriteContext {
   // expected contents.
   virtual bool FailOnHashMismatch() const { return false; }
 
+  // Whether the CentralController should be used to schedule this rewrite.
+  // Expensive RewriteContexts (CSS, Images) should override this to return
+  // true, allowing more intelligent prioritization.
+  virtual bool ScheduleViaCentralController() { return false; }
+
+  // In general, ScheduleViaCentralController() is ignored for nested Contexts.
+  // However, in the case of (at least) IPRO we need to schedule the inner
+  // context via the Controller. This can be overridden by such contexts, which
+  // are DHCHECKed to have at most one nested context.
+  // See longer comment in ObtainLockForCreation implementation.
+  virtual bool ScheduleNestedContextViaCentalController() const {
+    return false;
+  }
+
+  // Obtain a lock to create the resource. callback may not be invoked for an
+  // indeterminate time.
+  void ObtainLockForCreation(ServerContext* server_context, Function* callback);
+
+  // Release whichever lock was obtained above. succeeded will be used to
+  // inform the CentralController if it should retry (when success = false). If
+  // this is not explicitly called, the lock will be released when "this" is
+  // destroyed.
+  void ReleaseCreationLock(bool succeeded);
+
   // Backend to RewriteDriver::LookupMetadataForOutputResource, with
   // the RewriteContext of appropriate type and the OutputResource already
   // created. Takes ownership of rewrite_context.
@@ -634,8 +651,6 @@ class RewriteContext {
       CacheLookupResultCallback* callback);
 
  private:
-  class DistributedRewriteCallback;
-  class DistributedRewriteFetch;
   class OutputCacheCallback;
   class WriteIfChanged;
   class LookupMetadataForOutputResourceCallback;
@@ -646,6 +661,7 @@ class RewriteContext {
   class ResourceRevalidateCallback;
   class InvokeRewriteFunction;
   class RewriteFreshenCallback;
+  class TryLockFunction;
   friend class RewriteDriver;
 
   typedef std::set<RewriteContext*> ContextSet;
@@ -694,6 +710,10 @@ class RewriteContext {
   // Get reference to lock_, lazy-initializing if necessary.
   NamedLock* Lock();
 
+  // Returns a string used to uniquely identify this context in lock
+  // implemntations.
+  GoogleString LockName() const;
+
   // Initiates an asynchronous fetch for the resources associated with
   // each slot, calling ResourceFetchDone() when complete.
   //
@@ -708,35 +728,12 @@ class RewriteContext {
   // Called when we fail to acquire the lock for the output resource.
   void LockFailed();
 
-  // Callback to a distributed rewrite fetch. Queued to run in the high-priority
-  // thread. Fetch path: If the fetch succeeded then the rest of the flow is
-  // skipped and that result is used, otherwise the original resource is fetched
-  // and returned, bypassing rewriting.
-  void DistributeRewriteDone(bool success);
-
-  // If the response_headers have metadata in them, strip the metadata from the
-  // headers, parse them and write them to cache_result.  Returns true if
-  // the parse was successful otherwise false.
-  bool ParseAndRemoveMetadataFromResponseHeaders(
-      ResponseHeaders* response_headers, CacheLookupResult* cache_result);
-
   // Create an OutputResource initialized from CachedResult, response headers,
   // and content.
   bool CreateOutputResourceFromContent(const CachedResult& cached_result,
                                        const ResponseHeaders& response_headers,
                                        StringPiece content,
                                        OutputResourcePtr* output_resource);
-
-  // The distributed rewrite path for HTML rewrites works by converting the
-  // input URL on the ingress task into a .pagespeed. fetch for the distributed
-  // task to reconstruct using the corresponding filter id. This function maps
-  // the given input resource URL into a .pagespeed. URL for reconstruction. It
-  // uses a hash value of 0 and an extension of "distributed". Returns an empty
-  // string if the URL could not be constructed (e.g., was too long).
-  //
-  // Ex. input: http://www.example.com/a.png with an image compression context
-  //    output: http://www.example.com/50x50xa.png.pagespeed.ic.0.distributed
-  GoogleString DistributedFetchUrl(StringPiece url);
 
   // Returns true if this rewrite context was created to fetch a resource (e.g.,
   // IPRO or .pagespeed. URLs) and false otherwise.
@@ -776,7 +773,7 @@ class RewriteContext {
   // particular, each slot must be updated with any rewritten
   // resources, before the successors can be run, independent of
   // whether the slots can be rendered into HTML.
-  void Propagate(bool render_slots);
+  void Propagate(RenderOp render_op);
 
   // With all resources loaded, the rewrite can now be done, writing:
   //    The metadata into the cache
@@ -825,7 +822,7 @@ class RewriteContext {
   // successors if applicable. This is the tail portion of
   // FinalizeRewriteForHtml that must be called even if we didn't
   // actually get as far as computing a partition_key_.
-  void RetireRewriteForHtml(bool permit_render);
+  void RetireRewriteForHtml(RenderOp permit_render);
 
   // Marks this job and any dependents slow as appropriate, notifying the
   // RewriteDriver of any changes.
@@ -916,6 +913,12 @@ class RewriteContext {
   // UrlAsyncFetcher.
 
   bool started_;
+
+  // This is only used in debug, but it's better not to have conditionally
+  // compiled member variables in case someone wants to compile only some
+  // PSOL modules for debug.
+  AtomicBool frozen_;
+
   scoped_ptr<OutputPartitions> partitions_;
   OutputResourceVector outputs_;
   int outstanding_fetches_;
@@ -1041,20 +1044,15 @@ class RewriteContext {
   // Always owned externally.
   RequestTrace* dependent_request_trace_;
 
-  // Set true if this rewrite context should be blocked from distributing its
-  // rewrite.
-  bool block_distribute_rewrite_;
-
-  // Stores the resulting headers and content of a distributed rewrite.
-  scoped_ptr<DistributedRewriteFetch> distributed_fetch_;
-
   // Map to dedup partitions other dependency field.
   StringIntMap other_dependency_map_;
 
+  // Transaction context from CentralController, if
+  // ScheduleViaCentralController() returned true. Communicates back to
+  // CentralController on destruction, or when explicitly invoked.
+  scoped_ptr<ScheduleRewriteContext> schedule_rewrite_context_;
+
   Variable* const num_rewrites_abandoned_for_lock_contention_;
-  Variable* const num_distributed_rewrite_failures_;
-  Variable* const num_distributed_rewrite_successes_;
-  Variable* const num_distributed_metadata_failures_;
   DISALLOW_COPY_AND_ASSIGN(RewriteContext);
 };
 

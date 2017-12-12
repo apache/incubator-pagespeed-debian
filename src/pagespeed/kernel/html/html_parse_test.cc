@@ -1115,6 +1115,8 @@ TEST_F(HtmlAnnotationTest, UnclosedScriptOnlyWithFlush) {
 
 TEST_F(HtmlAnnotationTest, NulInAttrName) {
   // Tests that we don't crash with an embedded NUL in an attribute name.
+  // Without '%compare-lengths' in html_name.gperf, this would fail when built
+  // with asan.
   SetupWriter();
   html_parse_.StartParse("http://test.com/nul_in_attr.html");
   html_parse_.ParseText("<img src");
@@ -1245,6 +1247,7 @@ class HandlerCalledFilter : public HtmlFilter {
   }
 
   virtual bool CanModifyUrls() { return false; }
+  ScriptUsage GetScriptUsage() const override { return kNeverInjectsScripts; }
 
   void SetEnabled(bool enabled_value) {
     enabled_value_  = enabled_value;
@@ -1358,7 +1361,7 @@ TEST_F(HandlerCalledTest, IEDirectiveCalled1) {
 }
 
 TEST_F(HandlerCalledTest, IEDirectiveCalled2) {
-  // See http://code.google.com/p/modpagespeed/issues/detail?id=136 and
+  // See http://github.com/pagespeed/mod_pagespeed/issues/136 and
   // http://msdn.microsoft.com/en-us/library/ms537512(VS.85).aspx#dlrevealed
   Parse("ie_directive_called", "<!--[if lte IE 8]>...<![endif]-->");
   EXPECT_FALSE(handler_called_filter_.called_comment_.Test());
@@ -1881,8 +1884,8 @@ class AttributeManipulationTest : public HtmlParseTest {
     node_->AddAttribute(html_parse_.MakeName(HtmlName::kClass), "search!",
                         HtmlElement::SINGLE_QUOTE);
     // Add a binary attribute (one without value).
-    node_->AddAttribute(html_parse_.MakeName(HtmlName::kSelected), NULL,
-                        HtmlElement::NO_QUOTE);
+    node_->AddAttribute(html_parse_.MakeName(HtmlName::kSelected),
+                        StringPiece(), HtmlElement::NO_QUOTE);
     html_parse_.CloseElement(node_, HtmlElement::BRIEF_CLOSE, 0);
   }
 
@@ -2090,6 +2093,27 @@ TEST_F(HtmlParseTest, DisabledFilterWithReason) {
               UnorderedElementsAre(filter.ExpectedDisabledMessage()));
 }
 
+class DisableFilterOnBody : public EmptyHtmlFilter {
+ public:
+  DisableFilterOnBody(HtmlFilter* filter_to_disable,
+                      HtmlParse* parse)
+      : filter_to_disable_(filter_to_disable),
+        html_parse_(parse) {
+  }
+
+  virtual void StartElement(HtmlElement* element) {
+    if (element->keyword() == HtmlName::kBody) {
+      filter_to_disable_->set_is_enabled(false);
+      HtmlTestingPeer::set_buffer_events(html_parse_, false);
+    }
+  }
+  virtual const char* Name() const { return "DisableFilterOnBody"; }
+
+ private:
+  HtmlFilter* filter_to_disable_;
+  HtmlParse* html_parse_;
+};
+
 class CountingCallbacksFilter : public EmptyHtmlFilter {
  public:
   CountingCallbacksFilter()
@@ -2129,6 +2153,33 @@ class CountingCallbacksFilter : public EmptyHtmlFilter {
 
   DISALLOW_COPY_AND_ASSIGN(CountingCallbacksFilter);
 };
+
+TEST_F(HtmlParseTest, BufferEventsOnEventListener) {
+  CountingCallbacksFilter counter_that_stays_enabled;
+  CountingCallbacksFilter counter_to_disable;
+  html_parse_.AddFilter(&counter_that_stays_enabled);
+  html_parse_.AddFilter(&counter_to_disable);
+  html_parse_.add_event_listener(new DisableFilterOnBody(
+      &counter_to_disable, &html_parse_));
+  static const char kInput[] =
+      "<html><head><title>foo</title><body>hello, world</body></html>";
+  const StringPiece kInputPiece(kInput, STATIC_STRLEN(kInput));
+  for (int i = 0, n = STATIC_STRLEN(kInput); i < n; ++i) {
+    counter_to_disable.set_is_enabled(true);
+    html_parse_.StartParse(StringPrintf("http://example.com/doc_%d.html", i));
+    HtmlTestingPeer::set_buffer_events(&html_parse_, true);
+    html_parse_.ParseText(kInputPiece.substr(0, i));
+    html_parse_.Flush();
+    html_parse_.ParseText(kInputPiece.substr(i));
+    html_parse_.FinishParse();
+    EXPECT_EQ(0, counter_to_disable.num_start_elements());
+    EXPECT_EQ(0, counter_to_disable.num_end_elements());
+    EXPECT_EQ(0, counter_to_disable.num_char_elements());
+    EXPECT_EQ(4, counter_that_stays_enabled.num_start_elements());
+    EXPECT_EQ(4, counter_that_stays_enabled.num_end_elements());
+    EXPECT_EQ(2, counter_that_stays_enabled.num_char_elements());
+  }
+}
 
 // Checks that deleting nodes does not change the expected order of
 // HTML parse events. We delete any node of del_node_type_, but we
@@ -3042,6 +3093,7 @@ class InsertScriptsFilter : public EmptyHtmlFilter {
   virtual void StartElement(HtmlElement* element) { Insert(true, element); }
   virtual void EndElement(HtmlElement* element) { Insert(false, element); }
   virtual const char* Name() const { return "InsertScriptsFilter"; }
+  ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
  private:
   void Insert(bool at_start, HtmlElement* element) {
@@ -3055,7 +3107,6 @@ class InsertScriptsFilter : public EmptyHtmlFilter {
       }
     }
   }
-
 
  private:
   HtmlParse* html_parse_;
@@ -3161,5 +3212,6 @@ TEST_F(HtmlParseTestNoBody, InsertExternalScriptAfterEndOfHead) {
                    "<head>text</head>",
                    "<head>text</head><script src=\"inserted\"></script>");
 }
+
 
 }  // namespace net_instaweb

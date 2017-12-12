@@ -41,6 +41,13 @@ bool ResourceSlot::DirectSetUrl(const StringPiece& url) {
   return false;
 }
 
+void ResourceSlot::ReportInput(const InputInfo& input) {
+  if (inputs_ == nullptr) {
+    inputs_.reset(new std::vector<InputInfo>);
+  }
+  inputs_->push_back(input);
+}
+
 RewriteContext* ResourceSlot::LastContext() const {
   if (contexts_.empty()) {
     return NULL;
@@ -110,6 +117,8 @@ HtmlResourceSlot::HtmlResourceSlot(const ResourcePtr& resource,
       // that and simplify the code?
       url_relativity_(
           GoogleUrl::FindRelativity(attribute->DecodedValueOrNull())),
+      // Note: these need to be deep-copied in case we run as a detached
+      // rewrite, in which case element_ may be dead.
       begin_line_number_(element->begin_line_number()),
       end_line_number_(element->end_line_number()) {
 }

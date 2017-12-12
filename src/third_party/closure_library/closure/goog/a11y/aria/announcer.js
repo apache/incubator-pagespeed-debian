@@ -26,6 +26,7 @@ goog.require('goog.a11y.aria');
 goog.require('goog.a11y.aria.LivePriority');
 goog.require('goog.a11y.aria.State');
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.object');
 
 
@@ -105,17 +106,15 @@ goog.a11y.aria.Announcer.prototype.getLiveRegion_ = function(priority) {
     return liveRegion;
   }
 
-  liveRegion = this.domHelper_.createElement('div');
+  liveRegion = this.domHelper_.createElement(goog.dom.TagName.DIV);
   // Note that IE has a habit of declaring things that aren't display:none as
   // invisible to third-party tools like JAWs, so we can't just use height:0.
   liveRegion.style.position = 'absolute';
   liveRegion.style.top = '-1000px';
   liveRegion.style.height = '1px';
   liveRegion.style.overflow = 'hidden';
-  goog.a11y.aria.setState(liveRegion, goog.a11y.aria.State.LIVE,
-      priority);
-  goog.a11y.aria.setState(liveRegion, goog.a11y.aria.State.ATOMIC,
-      'true');
+  goog.a11y.aria.setState(liveRegion, goog.a11y.aria.State.LIVE, priority);
+  goog.a11y.aria.setState(liveRegion, goog.a11y.aria.State.ATOMIC, 'true');
   this.domHelper_.getDocument().body.appendChild(liveRegion);
   this.liveRegions_[priority] = liveRegion;
   return liveRegion;

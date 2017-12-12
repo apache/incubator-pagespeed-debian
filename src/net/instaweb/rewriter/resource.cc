@@ -22,6 +22,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"  // for InputInfo, etc
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
@@ -207,7 +208,9 @@ void Resource::FillInPartitionInputInfo(HashHint include_content_hash,
 void Resource::FillInPartitionInputInfoFromResponseHeaders(
       const ResponseHeaders& headers,
       InputInfo* input) {
-  input->set_last_modified_time_ms(headers.last_modified_time_ms());
+  if (headers.has_last_modified_time_ms()) {
+    input->set_last_modified_time_ms(headers.last_modified_time_ms());
+  }
   input->set_expiration_time_ms(headers.CacheExpirationTimeMs());
   input->set_date_ms(headers.date_ms());
 }
@@ -251,7 +254,7 @@ Resource::FreshenCallback::~FreshenCallback() {
 
 bool Resource::Link(HTTPValue* value, MessageHandler* handler) {
   DCHECK(UseHttpCache());
-  SharedString* contents_and_headers = value->share();
+  const SharedString& contents_and_headers = value->share();
   // Invalidate extracted_contents_.
   extracted_ = false;
   extracted_contents_.clear();

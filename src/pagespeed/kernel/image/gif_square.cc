@@ -49,8 +49,6 @@ const GifColorType GifSquare::kGifYellow = {0xFF, 0xFF, 0x00};
 namespace {
 // Later versions of gif_lib use a Gif prefix for these functions.
 
-// In particular, the google3 version has the prefix but the    // [google3]
-// open-source pagespeed version does not.                      // [google3]
 ColorMapObject* (*GifMakeMapObject)(int, const GifColorType*) =
     MakeMapObject;
 void (*GifFreeMapObject)(ColorMapObject*) = FreeMapObject;
@@ -242,6 +240,7 @@ bool GifSquare::AnimateAllImages(int delay_cs, int transparent_idx,
   // adding the Graphics Control Blocks manually.
   if (!manual_gcb_ && delay_cs >= 0) {
     for (int j = 0; j < num_images_; ++j) {
+#if GIFLIB_MAJOR >= 5
       GraphicsControlBlock gcb;
 
       gcb.DisposalMode = disposal_method;
@@ -249,7 +248,6 @@ bool GifSquare::AnimateAllImages(int delay_cs, int transparent_idx,
       gcb.DelayTime = delay_cs;
       gcb.TransparentColor = transparent_idx;
 
-#if GIFLIB_MAJOR >= 5
       if (!Log(EGifGCBToSavedExtension(&gcb, gif_file_, j), "GCB status")) {
         return false;
       }

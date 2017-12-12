@@ -29,7 +29,7 @@ class DevicePropertiesTest: public testing::Test {
 
   void ParseAndVerifySaveData(const char* header_value, bool expected_value) {
     RequestHeaders headers;
-    if (header_value != NULL) {
+    if (header_value != nullptr) {
       headers.Add(HttpAttributes::kSaveData, header_value);
     }
     DeviceProperties device_properties(&user_agent_matcher_);
@@ -79,7 +79,7 @@ TEST_F(DevicePropertiesTest, WebpUserAgentIdentificationNoAccept) {
   EXPECT_TRUE(device_properties_.SupportsWebpLosslessAlpha());
 }
 
-// See https://code.google.com/p/modpagespeed/issues/detail?id=978
+// See https://github.com/pagespeed/mod_pagespeed/issues/978
 //
 // Microsoft (v-evgena@microsoft.com and tobint@microsoft.com)
 // suggests that they are planning to start masquerading IE11 on
@@ -175,7 +175,7 @@ TEST_F(DevicePropertiesTest, ProcessSaveDataHeader) {
   ParseAndVerifySaveData("on", true);
   ParseAndVerifySaveData("oN", true);
   ParseAndVerifySaveData("ON", true);
-  ParseAndVerifySaveData(NULL, false);
+  ParseAndVerifySaveData(nullptr, false);
   ParseAndVerifySaveData("off", false);
   ParseAndVerifySaveData("ofF", false);
   ParseAndVerifySaveData("", false);

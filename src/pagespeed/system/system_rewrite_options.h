@@ -22,23 +22,36 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/static_asset_config.pb.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/fast_wildcard_group.h"
+#include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "pagespeed/kernel/base/fast_wildcard_group.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/util/copy_on_write.h"
+#include "pagespeed/system/external_server_spec.h"
 
 namespace net_instaweb {
 
-class StaticAssetConfig;
-class ThreadSystem;
+class MessageHandler;
 
 // This manages configuration options specific to server implementations of
 // pagespeed optimization libraries, such as mod_pagespeed and ngx_pagespeed.
 class SystemRewriteOptions : public RewriteOptions {
  public:
   typedef std::set<StaticAssetEnum::StaticAsset> StaticAssetSet;
+
+  static const char kCentralControllerPort[];
+  static const char kPopularityContestMaxInFlight[];
+  static const char kPopularityContestMaxQueueSize[];
   static const char kStaticAssetCDN[];
+  static const char kRedisServer[];
+  static const char kRedisReconnectionDelayMs[];
+  static const char kRedisTimeoutUs[];
+  static const char kRedisDatabaseIndex[];
+
+  static constexpr int kMemcachedDefaultPort = 11211;
+  static constexpr int kRedisDefaultPort = 6379;
 
   static void Initialize();
   static void Terminate();
@@ -142,10 +155,10 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   const GoogleString& log_dir() const { return log_dir_.value(); }
   void set_log_dir(const GoogleString& x) { set_option(x, &log_dir_); }
-  const GoogleString& memcached_servers() const {
+  const ExternalClusterSpec& memcached_servers() const {
     return memcached_servers_.value();
   }
-  void set_memcached_servers(const GoogleString& x) {
+  void set_memcached_servers(const ExternalClusterSpec& x) {
     set_option(x, &memcached_servers_);
   }
   int memcached_threads() const {
@@ -163,6 +176,24 @@ class SystemRewriteOptions : public RewriteOptions {
   void set_memcached_timeout_us(int x) {
     set_option(x, &memcached_timeout_us_);
   }
+  const ExternalServerSpec& redis_server() const {
+    return redis_server_.value();
+  }
+  void set_redis_server(const ExternalServerSpec& x) {
+    set_option(x, &redis_server_);
+  }
+  int64 redis_reconnection_delay_ms() const {
+    return redis_reconnection_delay_ms_.value();
+  }
+  int64 redis_timeout_us() const {
+    return redis_timeout_us_.value();
+  }
+  int redis_database_index() const {
+    return redis_database_index_.value();
+  }
+  bool has_redis_database_index() const {
+    return redis_database_index_.was_set();
+  }
   int64 slow_file_latency_threshold_us() const {
     return slow_file_latency_threshold_us_.value();
   }
@@ -177,6 +208,16 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   void set_fetcher_proxy(const GoogleString& x) {
     set_option(x, &fetcher_proxy_);
+  }
+
+  const GoogleString& controller_port() const {
+    return controller_port_.value();
+  }
+  int popularity_contest_max_inflight_requests() const {
+    return popularity_contest_max_inflight_requests_.value();
+  }
+  int popularity_contest_max_queue_size() const {
+    return popularity_contest_max_queue_size_.value();
   }
 
   // Cache flushing configuration.
@@ -241,6 +282,9 @@ class SystemRewriteOptions : public RewriteOptions {
   }
   void set_default_shared_memory_cache_kb(int64 x) {
     set_option(x, &default_shared_memory_cache_kb_);
+  }
+  int shm_metadata_cache_checkpoint_interval_sec() const {
+    return shm_metadata_cache_checkpoint_interval_sec_.value();
   }
   void set_purge_method(const GoogleString& x) {
     set_option(x, &purge_method_);
@@ -363,6 +407,28 @@ class SystemRewriteOptions : public RewriteOptions {
     CopyOnWrite<StaticAssetSet> static_assets_to_cdn_;
   };
 
+  template<typename Spec, int default_port>
+  class ExternalServersOption : public OptionTemplateBase<Spec> {
+   public:
+    bool SetFromString(StringPiece value_string,
+                       GoogleString* error_detail) override {
+      return this->mutable_value().SetFromString(value_string, default_port,
+                                                 error_detail);
+    }
+    GoogleString ToString() const override {
+      return this->value().ToString();
+    }
+    GoogleString Signature(const Hasher* hasher) const override {
+      return hasher->Hash(ToString());
+    }
+  };
+
+  class ControllerPortOption : public Option<GoogleString> {
+   public:
+    bool SetFromString(StringPiece value_string,
+                       GoogleString* error_detail) override;
+  };
+
   // Keeps the properties added by this subclass.  These are merged into
   // RewriteOptions::all_properties_ during Initialize().
   static Properties* system_properties_;
@@ -401,9 +467,9 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<GoogleString> file_cache_path_;
   Option<GoogleString> log_dir_;
 
-  // comma-separated list of host[:port].  See AprMemCache::AprMemCache
-  // for code that parses it.
-  Option<GoogleString> memcached_servers_;
+  ExternalServersOption<ExternalClusterSpec, kMemcachedDefaultPort>
+      memcached_servers_;
+  ExternalServersOption<ExternalServerSpec, kRedisDefaultPort> redis_server_;
   Option<GoogleString> statistics_logging_charts_css_;
   Option<GoogleString> statistics_logging_charts_js_;
   Option<GoogleString> cache_flush_filename_;
@@ -432,8 +498,15 @@ class SystemRewriteOptions : public RewriteOptions {
   // cleartext.  We'll decompress as we read the content if needed.
   Option<bool> fetch_with_gzip_;
 
+  ControllerPortOption controller_port_;
+  Option<int> popularity_contest_max_inflight_requests_;
+  Option<int> popularity_contest_max_queue_size_;
+
   Option<int> memcached_threads_;
   Option<int> memcached_timeout_us_;
+  Option<int64> redis_reconnection_delay_ms_;
+  Option<int64> redis_timeout_us_;
+  Option<int> redis_database_index_;
 
   Option<int64> slow_file_latency_threshold_us_;
   Option<int64> file_cache_clean_inode_limit_;
@@ -450,6 +523,7 @@ class SystemRewriteOptions : public RewriteOptions {
   Option<int64> ipro_max_response_bytes_;
   Option<int64> ipro_max_concurrent_recordings_;
   Option<int64> default_shared_memory_cache_kb_;
+  Option<int> shm_metadata_cache_checkpoint_interval_sec_;
   Option<GoogleString> purge_method_;
 
   StaticAssetCDNOptions static_assets_to_cdn_;

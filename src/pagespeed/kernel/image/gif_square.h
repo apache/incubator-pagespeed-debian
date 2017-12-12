@@ -19,7 +19,6 @@
 #ifndef PAGESPEED_KERNEL_IMAGE_GIF_SQUARE_H_
 #define PAGESPEED_KERNEL_IMAGE_GIF_SQUARE_H_
 
-#include <stdbool.h>
 #include <cstddef>
 #include <vector>
 
@@ -27,7 +26,7 @@
 #include "pagespeed/kernel/image/image_util.h"
 
 extern "C" {
-#include "third_party/giflib/lib/gif_lib.h"
+#include "gif_lib.h"
 }
 
 namespace net_instaweb {

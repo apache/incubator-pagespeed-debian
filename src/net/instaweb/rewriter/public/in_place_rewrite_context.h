@@ -114,8 +114,15 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // resource than wait for the optimization.
   virtual bool CreationLockBeforeStartFetch() const { return false; }
 
+  // The context nested inside this context can be scheduled via the
+  // CentralController. See comment in RewriteContext::ObtainLockForCreation.
+  bool ScheduleNestedContextViaCentalController() const override {
+    return true;
+  }
+
  private:
   friend class RecordingFetch;
+  bool PolicyPermitsRendering() const override;
   // Implements RewriteContext::Harvest().
   virtual void Harvest();
   void StartFetchReconstructionParent();
@@ -145,6 +152,9 @@ class InPlaceRewriteContext : public SingleRewriteContext {
   // But when serving via IPRO we should remove it if the url hasn't changed.
   void RemoveRedundantRelCanonicalHeader(const CachedResult& cached_result,
                                          ResponseHeaders* headers);
+
+  // Returns true iff the single underlying resource is mapped by LoadFromFile.
+  bool IsLoadFromFileBased();
 
   GoogleString url_;
   // Boolean indicating whether or not the resource was rewritten successfully.
@@ -181,6 +191,7 @@ class RecordingFetch : public SharedAsyncFetch {
                  AsyncFetch* async_fetch,
                  const ResourcePtr& resource,
                  InPlaceRewriteContext* context,
+                 int desired_s_maxage_sec,
                  MessageHandler* handler);
 
   virtual ~RecordingFetch();
@@ -208,6 +219,12 @@ class RecordingFetch : public SharedAsyncFetch {
   MessageHandler* handler_;
   ResourcePtr resource_;
   InPlaceRewriteContext* context_;
+
+  // If this is set to something other than -1, use it to set "Cache-Control:
+  // s-maxage=..." on the unoptimized response we send back to the browser.  See
+  // https://tools.ietf.org/html/rfc7234#section-5.2.2.9 for the s-maxage
+  // specification.
+  int desired_s_maxage_sec_;
 
   // True if resource is of rewritable type and is cacheable or if we're forcing
   // rewriting of uncacheable resources.

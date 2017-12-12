@@ -20,7 +20,6 @@
 #include <cstddef>
 
 #include "base/logging.h"
-#include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/cache_url_async_fetcher.h"
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/sync_fetcher_adapter_callback.h"
@@ -31,7 +30,6 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
-#include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_fetch.h"
@@ -39,19 +37,21 @@
 #include "pagespeed/apache/apache_request_context.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
 #include "pagespeed/apache/apache_server_context.h"
+#include "pagespeed/apache/apache_writer.h"
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/header_util.h"
 #include "pagespeed/apache/instaweb_context.h"
 #include "pagespeed/apache/mod_instaweb.h"
+#include "pagespeed/apache/simple_buffered_apache_fetch.h"
 #include "pagespeed/automatic/proxy_fetch.h"
-#include "pagespeed/kernel/base/abstract_mutex.h"
+#include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_writer.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/http_options.h"
@@ -59,7 +59,6 @@
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/system/admin_site.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
-#include "pagespeed/system/system_rewrite_options.h"
 
 #include "http_config.h"
 #include "http_core.h"
@@ -100,6 +99,7 @@ InstawebHandler::InstawebHandler(request_rec* request)
       server_context_(InstawebContext::ServerContextFromServerRec(
           request->server)),
       rewrite_driver_(NULL),
+      driver_owned_(true),
       num_response_attributes_(0),
       fetch_(NULL) {
   apache_request_context_ = server_context_->NewApacheRequestContext(request);
@@ -107,10 +107,6 @@ InstawebHandler::InstawebHandler(request_rec* request)
 
   // Global options
   options_ = server_context_->global_config();
-  if (request_context_->using_spdy() &&
-      (server_context_->SpdyGlobalConfig() != NULL)) {
-    options_ = server_context_->SpdyGlobalConfig();
-  }
 
   request_headers_.reset(new RequestHeaders);
   ApacheRequestToRequestHeaders(*request, request_headers_.get());
@@ -127,38 +123,32 @@ InstawebHandler::~InstawebHandler() {
   // If fetch_ is null we either never tried to fetch anything or it took
   // ownership of itself after timing out.
   if (fetch_ != NULL) {
-    if (WaitForFetch()) {
-      delete fetch_;  // Fetch completed normally.
-    } else {
-      // Fetch took ownership of itself and will continue in the background.
-      CHECK(fetch_ == NULL);
-    }
+    WaitForFetch();
+    delete fetch_;
+  }
+  if (driver_owned_ && rewrite_driver_ != nullptr) {
+    rewrite_driver_->Cleanup();
+    rewrite_driver_ = nullptr;
   }
 }
 
-bool InstawebHandler::WaitForFetch() {
+void InstawebHandler::WaitForFetch() {
   if (fetch_ == NULL) {
-    return true;  // Nothing to wait for.
+    return;  // Nothing to wait for.
   }
-
-  bool ok = fetch_->Wait(rewrite_driver_);
-  if (!ok) {
-    // Give up on waiting for the fetch so we stop tying up a thread.  Fetch has
-    // taken ownership of itself, will discard any messages it receives if it's
-    // abandoned, and will delete itself when Done() is called, if ever.
-    fetch_ = NULL;
-  }
-  return ok;
+  fetch_->Wait();
 }
 
-void InstawebHandler::SetupSpdyConnectionIfNeeded() {
-  apache_request_context_->SetupSpdyConnectionIfNeeded(request_);
+void InstawebHandler::DisownDriver() {
+  DCHECK(rewrite_driver_ != nullptr);
+  driver_owned_ = false;
 }
 
 // Makes a driver from the request_context and options.  Note that
 // this can only be called once, as it potentially mutates the options
 // as it transfers ownership of custom_options.
 RewriteDriver* InstawebHandler::MakeDriver() {
+  CHECK(fetch_ == NULL) << "Call MakeDriver before MakeFetch";
   DCHECK(rewrite_driver_ == NULL)
       << "We can only call MakeDriver once per InstawebHandler:"
       << original_url_;
@@ -166,9 +156,6 @@ RewriteDriver* InstawebHandler::MakeDriver() {
   rewrite_driver_ = ResourceFetch::GetDriver(
       stripped_gurl_, custom_options_.release(), server_context_,
       request_context_);
-  if (fetch_ != NULL) {
-    rewrite_driver_->SetRequestHeaders(*fetch_->request_headers());
-  }
 
   // If there were custom options, the ownership of the memory has
   // now been transferred to the driver, but options_ still points
@@ -176,7 +163,7 @@ RewriteDriver* InstawebHandler::MakeDriver() {
   // driver is alive.  However, for Karma, and in case some other
   // option-merging is added to the driver someday, let's use the
   // pointer from the driver now.
-  options_ = SystemRewriteOptions::DynamicCast(rewrite_driver_->options());
+  options_ = ApacheConfig::DynamicCast(rewrite_driver_->options());
   return rewrite_driver_;
 }
 
@@ -187,16 +174,15 @@ ApacheFetch* InstawebHandler::MakeFetch(const GoogleString& url,
   // ApacheFetch takes ownership of request_headers.
   RequestHeaders* request_headers = new RequestHeaders();
   ApacheRequestToRequestHeaders(*request_, request_headers);
-  fetch_ = new ApacheFetch(
-      url, debug_info, server_context_->thread_system(),
-      server_context_->timer(),
-      new ApacheWriter(request_, server_context_->thread_system()),
-      request_headers, request_context_, options_,
-      server_context_->message_handler());
-  fetch_->set_buffered(buffered);
-  if (rewrite_driver_ != NULL) {
-    rewrite_driver_->SetRequestHeaders(*fetch_->request_headers());
+  ApacheWriter* writer = new ApacheWriter(request_,
+                                          server_context_->thread_system());
+  if (rewrite_driver_ == NULL) {
+    MakeDriver();
   }
+  fetch_ = new ApacheFetch(
+        url, debug_info, rewrite_driver_, writer, request_headers,
+        request_context_, options_, server_context_->message_handler());
+  fetch_->set_buffered(buffered || options_->force_buffering());
   return fetch_;
 }
 
@@ -414,6 +400,7 @@ void InstawebHandler::RemoveStrippedResponseHeadersFromApacheRequest() {
 // Handle url as .pagespeed. rewritten resource.
 void InstawebHandler::HandleAsPagespeedResource() {
   RewriteDriver* driver = MakeDriver();
+  DisownDriver();
   GoogleString output;  // TODO(jmarantz): Quit buffering resource output.
   StringWriter writer(&output);
 
@@ -465,13 +452,13 @@ bool InstawebHandler::HandleAsInPlace() {
        != NULL) || (request_->user != NULL));
 
   RewriteDriver* driver = MakeDriver();
-  MakeFetch(true /* buffered */, "ipro");
+  MakeFetch(false /* not buffered */, "ipro");
   fetch_->set_handle_error(false);
+
+  DisownDriver();
   driver->FetchInPlaceResource(stripped_gurl_, false /* proxy_mode */, fetch_);
-  bool ok = WaitForFetch();
-  if (!ok) {
-    // Nothing to do, fetch_ has been released, no longer safe to look at.
-  } else if (fetch_->status_ok()) {
+  WaitForFetch();
+  if (fetch_->status_ok()) {
     server_context_->rewrite_stats()->ipro_served()->Add(1);
     handled = true;
   } else if ((fetch_->response_headers()->status_code() ==
@@ -496,7 +483,11 @@ bool InstawebHandler::HandleAsInPlace() {
         server_context_->http_cache(),
         server_context_->statistics(),
         server_context_->message_handler());
+    // See mod_instaweb.cc:mod_pagespeed_register_hooks for why we need all
+    // three filters.
     ap_add_output_filter(kModPagespeedInPlaceFilterName, recorder,
+                         request_, request_->connection);
+    ap_add_output_filter(kModPagespeedInPlaceFixHeadersName, recorder,
                          request_, request_->connection);
     ap_add_output_filter(kModPagespeedInPlaceCheckHeadersName, recorder,
                          request_, request_->connection);
@@ -525,17 +516,52 @@ bool InstawebHandler::HandleAsProxy() {
   if (options_->domain_lawyer()->MapOriginUrl(stripped_gurl_, &mapped_url,
                                               &host_header, &is_proxy) &&
       is_proxy) {
+    // TODO(jmarantz): make this unbuffered, verifying that it will
+    // only call back to apache on the request thread.
     RewriteDriver* driver = MakeDriver();
     MakeFetch(mapped_url, true /* buffered */, "proxy");
     fetch_->set_is_proxy(true);
+    DisownDriver();
     server_context_->proxy_fetch_factory()->StartNewProxyFetch(
         mapped_url, fetch_, driver, NULL, NULL);
-    if (!WaitForFetch()) {
-      server_context_->ReportResourceNotFound(mapped_url.c_str(), request_);
-    }
+    WaitForFetch();
     return true;  // handled
   }
   return false;  // declined
+}
+
+void InstawebHandler::HandleAsProxyForAll() {
+  static const char kLoopValue[] = "MPS";
+
+  // Note: we can't use MakeFetch here as we want ProxyInterface to create the
+  // RewriteDriver.
+  std::unique_ptr<RequestHeaders> request_headers(new RequestHeaders());
+  ApacheRequestToRequestHeaders(*request_, request_headers.get());
+
+  // Do loop detection.
+  if (request_headers->HasValue(HttpAttributes::kXPageSpeedLoop, kLoopValue)) {
+    write_handler_response("Loop detected on fetch in ProxyAllRequests mode; "
+                           "you may need to authorize more domains. ",
+                           request_);
+    return;
+  }
+  request_headers->Add(HttpAttributes::kXPageSpeedLoop, kLoopValue);
+  SimpleBufferedApacheFetch fetch(request_context_,
+                                  request_headers.release(),
+                                  server_context_->thread_system(),
+                                  request_,
+                                  server_context_->message_handler());
+
+  ProxyInterface proxy_interface(
+      ApacheServerContext::kProxyInterfaceStatsPrefix,
+      apache_request_context_->local_ip(),
+      apache_request_context_->local_port(),
+      server_context_,
+      server_context_->statistics());
+  proxy_interface.Fetch(original_url_, server_context_->message_handler(),
+                        &fetch);
+
+  fetch.Wait();
 }
 
 // Determines whether the url can be handled as a mod_pagespeed or in-place
@@ -550,7 +576,6 @@ bool InstawebHandler::handle_as_resource(ApacheServerContext* server_context,
   }
 
   InstawebHandler instaweb_handler(request);
-  instaweb_handler.SetupSpdyConnectionIfNeeded();
   scoped_ptr<RequestHeaders> request_headers(new RequestHeaders);
   const RewriteOptions* options = instaweb_handler.options();
 
@@ -740,6 +765,10 @@ bool InstawebHandler::parse_body_from_post(const request_rec* request,
     *ret = HTTP_BAD_REQUEST;
     return false;
   }
+  // TODO(jud): Set the charset on the beacon to a known value (say, UTF-8), and
+  // check here that it's as expected. Intended as a cheap-and-nasty test that
+  // the beacon came from our JS and not some black hat. Easily subvertible but
+  // better than nothing (?).
   if (!StringCaseEqual(mime_type, "application/x-www-form-urlencoded") &&
       !StringCaseEqual(mime_type, "multipart/form-data")) {
     *ret = HTTP_BAD_REQUEST;
@@ -891,6 +920,13 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
     return DECLINED;  // URL not valid, let someone other module handle.
   }
 
+  if (global_config->proxy_all_requests_mode() && gurl.IsWebValid()) {
+    InstawebHandler instaweb_handler(request);
+    // TODO(morlovich): Still export stats and the like?
+    instaweb_handler.HandleAsProxyForAll();
+    return APACHE_OK;
+  }
+
   if (request_handler_str == kStatisticsHandler &&
       global_config->StatisticsAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -899,7 +935,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                    instaweb_handler.options(),
                                    instaweb_handler.MakeFetch(
                                        false /* unbuffered */, "local-stats"));
-    return OK;
+    return APACHE_OK;
   } else if (request_handler_str == kGlobalStatisticsHandler &&
              global_config->GlobalStatisticsAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -908,7 +944,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                    instaweb_handler.options(),
                                    instaweb_handler.MakeFetch(
                                        false /* unbuffered */, "global-stats"));
-    return OK;
+    return APACHE_OK;
   } else if (request_handler_str == kAdminHandler &&
              global_config->AdminAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -920,7 +956,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                               instaweb_handler.options(),
                               instaweb_handler.MakeFetch(
                                   true /* buffered */, "local-admin"));
-    ret = OK;
+    ret = APACHE_OK;
   } else if (request_handler_str == kGlobalAdminHandler &&
              global_config->GlobalAdminAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -932,7 +968,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                               instaweb_handler.options(),
                               instaweb_handler.MakeFetch(
                                   true /* buffered */, "global-admin"));
-    ret = OK;
+    ret = APACHE_OK;
   } else if (global_config->enable_cache_purge() &&
              !global_config->purge_method().empty() &&
              (global_config->purge_method() == request->method)) {
@@ -948,7 +984,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                              server_context->cache_path(),
                              instaweb_handler.MakeFetch(
                                  true /* buffered */, "purge"));
-    ret = OK;
+    ret = APACHE_OK;
   } else if (request_handler_str == kConsoleHandler &&
              global_config->ConsoleAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -957,7 +993,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                                    instaweb_handler.query_params(),
                                    instaweb_handler.MakeFetch(
                                        false /* unbuffered */, "console"));
-    ret = OK;
+    ret = APACHE_OK;
   } else if (request_handler_str == kMessageHandler &&
              global_config->MessagesAccessAllowed(gurl)) {
     InstawebHandler instaweb_handler(request);
@@ -965,7 +1001,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         *instaweb_handler.options(),
         AdminSite::kOther,
         instaweb_handler.MakeFetch(false /* unbuffered */, "messages"));
-    ret = OK;
+    ret = APACHE_OK;
   } else if (request_handler_str == kLogRequestHeadersHandler) {
     // For testing CustomFetchHeader.
     GoogleString output;
@@ -975,7 +1011,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
                  request->headers_in, NULL);
 
     write_handler_response(output, request, kContentTypeJavascript, "public");
-    ret = OK;
+    ret = APACHE_OK;
   } else if (strcmp(request->handler, kGenerateResponseWithOptionsHandler) == 0
              && request->uri != NULL) {
     // This handler is only needed for apache_system_test. It adds headers to
@@ -1015,15 +1051,15 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
       } else if (gurl.PathSansLeaf() ==
                  server_context->apache_factory()->static_asset_prefix()) {
         instaweb_static_handler(request, server_context);
-        ret = OK;
+        ret = APACHE_OK;
       } else if (!is_pagespeed_subrequest(request) &&
                  handle_as_resource(server_context, request, &gurl)) {
-        ret = OK;
+        ret = APACHE_OK;
       }
 
       // Check for HTTP_NO_CONTENT here since that's the status used for a
       // successfully handled beacon.
-      if (ret != OK && ret != HTTP_NO_CONTENT &&
+      if (ret != APACHE_OK && ret != HTTP_NO_CONTENT &&
           gurl.Host() != "localhost" &&
           (global_config->slurping_enabled() || global_config->test_proxy() ||
            !global_config->domain_lawyer()->proxy_suffix().empty())) {
@@ -1034,7 +1070,7 @@ apr_status_t InstawebHandler::instaweb_handler(request_rec* request) {
         // constructor here.
         InstawebHandler instaweb_handler(request);
         if (instaweb_handler.ProxyUrl()) {
-          ret = OK;
+          ret = APACHE_OK;
         }
       }
     }
@@ -1230,7 +1266,7 @@ apr_status_t InstawebHandler::instaweb_map_to_storage(request_rec* request) {
   request->finfo.filetype = APR_UNKFILE;
 
   // Keep core_map_to_storage from running and rejecting our long filenames.
-  return OK;
+  return APACHE_OK;
 }
 
 /* static */

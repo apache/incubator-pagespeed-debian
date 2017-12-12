@@ -45,10 +45,6 @@ DEFINE_string(rewrite_level, "CoreFilters",
 DEFINE_string(rewrite_options, "",
               "semicolon-separated list of name=value pairs for options");
 DEFINE_string(rewriters, "", "Comma-separated list of rewriters");
-// distributable_filters is for experimentation and may be removed later.
-DEFINE_string(distributable_filters, "",
-    "List of comma-separated filters whose rewrites should be distributed to "
-    "another task.");
 DEFINE_string(domains, "", "Comma-separated list of domains");
 
 DEFINE_int64(css_outline_min_bytes,
@@ -236,8 +232,6 @@ DEFINE_bool(flush_html, false, "Pass fetcher-generated flushes through HTML");
 DEFINE_bool(proactively_freshen_user_facing_request, false,
             "Proactively freshen user facing requests if they are about to"
             "expire in cache.");
-DEFINE_bool(serve_split_html_in_two_chunks, false,
-            "Whether to serve the split html response in two chunks.");
 DEFINE_bool(serve_stale_if_fetch_error, true, "Serve stale content if the "
             "fetch results in an error.");
 DEFINE_int64(serve_stale_while_revalidate_threshold_sec, 0, "Threshold for "
@@ -254,12 +248,8 @@ DEFINE_int32(psa_idle_flush_time_ms,
              " will be injected. Use a value <= 0 to disable.");
 DEFINE_string(pagespeed_version, "", "Version number to put into X-Page-Speed "
               "response header.");
-DEFINE_bool(enable_flush_early_critical_css, false,
-            "If true, inlined critical css rules are flushed early if both"
-            "flush subresources and critical css filter are enabled");
-DEFINE_bool(use_selectors_for_critical_css, false,
-            "Use CriticalSelectorFilter instead of CriticalCssFilter for "
-            "the prioritize_critical_css filter.");
+DEFINE_bool(use_selectors_for_critical_css, true,
+            "Deprecated. Doesn't do anything any more");
 DEFINE_int32(max_inlined_preview_images_index,
              RewriteOptions::kDefaultMaxInlinedPreviewImagesIndex,
              "Number of first N images for which low res image is generated. "
@@ -328,21 +318,10 @@ DEFINE_int64(implicit_cache_ttl_ms,
              "that are likely cacheable (e.g. images, js, css, not html) and "
              "have no explicit cache ttl or expiration date.");
 
-DEFINE_int64(min_cache_ttl_ms,
-             RewriteOptions::kDefaultMinCacheTtlMs,
-             "The minimum milliseconds of cache TTL for all resources that "
-             "are explicitly cacheable. This overrides the max-age even when "
-             "it is set on the Cache-Control headers.");
-
 DEFINE_int32(property_cache_http_status_stability_threshold,
              RewriteOptions::kDefaultPropertyCacheHttpStatusStabilityThreshold,
              "The number of requests for which the status code should remain "
              "same so that we consider it to be stable.");
-
-DEFINE_int32(max_prefetch_js_elements,
-             RewriteOptions::kDefaultMaxPrefetchJsElements,
-             "The number of JS elements to prefetch and download when defer "
-             "Javascript filter is enabled.");
 
 DEFINE_bool(enable_defer_js_experimental, false,
             "Enables experimental defer js.");
@@ -356,13 +335,6 @@ DEFINE_bool(disable_rewrite_on_no_transform, true,
 
 DEFINE_bool(lazyload_highres_images, false,
             "Enables experimental lazy load of high res images.");
-
-DEFINE_bool(flush_more_resources_early_if_time_permits, false,
-            "Flush more resources if origin is slow to respond.");
-
-DEFINE_bool(flush_more_resources_in_ie_and_firefox, false,
-            "Flush more resources if origin is slow to respond in IE and "
-            "Firefox.");
 
 DEFINE_bool(avoid_renaming_introspective_javascript, true,
             "Don't combine, inline, cache extend, or otherwise modify "
@@ -408,34 +380,9 @@ DEFINE_string(blocking_rewrite_key,
               "the client, if X-PSA-Blocking-Rewrite http request header's "
               "value is same as this flag's value.");
 
-DEFINE_string(distributed_rewrite_key, "",
-              "The user-provided key used to authenticate requests from one "
-              "rewrite task to another.  Right now only used to validate "
-              "meta-data headers in distributed rewrites in the html path. "
-              "This should be random, greater than 8 characters, and the same "
-              "value for each task. An empty value disables features that rely "
-              "on it.");
-
-DEFINE_string(distributed_rewrite_servers, "",
-              "Comma-separated list of servers for distributed rewriting. "
-              "Servers can be BNS jobs or host:port pairs.");
-
-DEFINE_int64(distributed_rewrite_timeout_ms,
-             RewriteOptions::kDefaultDistributedTimeoutMs,
-             "Time to wait for a distributed rewrite to complete before "
-             "abandoning it.");
-
-DEFINE_bool(
-    distribute_fetches, true,
-    "Whether or not to distribute IPRO and .pagespeed. resource fetch requests "
-    "from the RewriteDriver before checking the cache.");
-
 DEFINE_bool(support_noscript_enabled, true,
             "Support for clients with no script support, in filters that "
             "insert new javascript.");
-
-DEFINE_bool(enable_blink_debug_dashboard, true,
-            "Enable blink dashboard used for debugging.");
 
 DEFINE_bool(report_unload_time, false, "If enabled, sends beacons when page "
             "unload happens before onload.");
@@ -448,31 +395,9 @@ DEFINE_int64(max_combined_js_bytes, -1,
             "Maximum size allowed for the combined js resource. "
             "Negative values will bypass size check.");
 
-DEFINE_int64(
-    blink_html_change_detection_time_ms,
-    RewriteOptions::kDefaultBlinkHtmlChangeDetectionTimeMs,
-    "Time after which we should try to detect if publisher html has changed");
-
-DEFINE_bool(enable_blink_html_change_detection, false,
-            "If enabled automatically detect publisher changes in html in "
-            "blink.");
-
-DEFINE_bool(enable_blink_html_change_detection_logging, false,
-            "If enabled, html change detection is applied to all blink sites"
-            " and the results are logged. Critical line recomputation is not"
-            " triggered in case of mismatch.");
-
-DEFINE_bool(use_smart_diff_in_blink, false,
-            "If enabled use smart diff to detect publisher changes in html "
-            "in blink");
-
 DEFINE_bool(enable_prioritizing_scripts, false,
     "If it is set to true, defer javascript will prioritize scripts with"
     "data-pagespeed-prioritize attibute.");
-
-DEFINE_int64(max_image_bytes_for_webp_in_css,
-             RewriteOptions::kDefaultMaxImageBytesForWebpInCss,
-             "The maximum size of an image in CSS, which we convert to webp.");
 
 DEFINE_bool(override_ie_document_mode, false,
             "If enabled, IE will be made to use the highest mode available"
@@ -511,14 +436,11 @@ DEFINE_bool(rewrite_uncacheable_resources, false,
             "in-place rewriting mode, regardless of resource's caching "
             "settings. in_place_wait_for_optimized flag should also be set.");
 
-DEFINE_bool(serve_ghost_click_buster_with_split_html, false,
-            "Whether ghost click buster code is served along with split_html.");
-
 DEFINE_bool(serve_xhr_access_control_headers, false,
             "If set to true, adds access control headers to response headers.");
 
 DEFINE_string(access_control_allow_origins, "",
-              "Comma seperated list of origins that are allowed to make "
+              "Comma separated list of origins that are allowed to make "
               "cross-origin requests. These domain requests are served with "
               "Access-Control-Allow-Origin header.");
 
@@ -659,10 +581,6 @@ bool RewriteGflags::SetupOptionsOnly(
     options->set_serve_stale_while_revalidate_threshold_sec(
         FLAGS_serve_stale_while_revalidate_threshold_sec);
   }
-  if (WasExplicitlySet("serve_split_html_in_two_chunks")) {
-    options->set_serve_split_html_in_two_chunks(
-        FLAGS_serve_split_html_in_two_chunks);
-  }
   if (WasExplicitlySet("psa_idle_flush_time_ms")) {
     options->set_idle_flush_time_ms(FLAGS_psa_idle_flush_time_ms);
   }
@@ -712,14 +630,6 @@ bool RewriteGflags::SetupOptionsOnly(
   if (WasExplicitlySet("image_limit_rendered_area_percent")) {
     options->set_image_limit_rendered_area_percent(
         FLAGS_image_limit_rendered_area_percent);
-  }
-  if (WasExplicitlySet("enable_flush_early_critical_css")) {
-    options->set_enable_flush_early_critical_css(
-        FLAGS_enable_flush_early_critical_css);
-  }
-  if (WasExplicitlySet("use_selectors_for_critical_css")) {
-    options->set_use_selectors_for_critical_css(
-        FLAGS_use_selectors_for_critical_css);
   }
   if (WasExplicitlySet("max_inlined_preview_images_index")) {
     options->set_max_inlined_preview_images_index(
@@ -791,12 +701,6 @@ bool RewriteGflags::SetupOptionsOnly(
   if (WasExplicitlySet("implicit_cache_ttl_ms")) {
     options->set_implicit_cache_ttl_ms(FLAGS_implicit_cache_ttl_ms);
   }
-  if (WasExplicitlySet("min_cache_ttl_ms")) {
-    options->set_min_cache_ttl_ms(FLAGS_min_cache_ttl_ms);
-  }
-  if (WasExplicitlySet("max_prefetch_js_elements")) {
-    options->set_max_prefetch_js_elements(FLAGS_max_prefetch_js_elements);
-  }
   if (WasExplicitlySet("enable_defer_js_experimental")) {
     options->set_enable_defer_js_experimental(
         FLAGS_enable_defer_js_experimental);
@@ -808,15 +712,6 @@ bool RewriteGflags::SetupOptionsOnly(
   if (WasExplicitlySet("disable_background_fetches_for_bots")) {
     options->set_disable_background_fetches_for_bots(
         FLAGS_disable_background_fetches_for_bots);
-  }
-  if (WasExplicitlySet("flush_more_resources_early_if_time_permits")) {
-    options->set_flush_more_resources_early_if_time_permits(
-        FLAGS_flush_more_resources_early_if_time_permits);
-  }
-  // TODO(pulkitg): Remove this flag when this feature gets stabilized.
-  if (WasExplicitlySet("flush_more_resources_in_ie_and_firefox")) {
-    options->set_flush_more_resources_in_ie_and_firefox(
-        FLAGS_flush_more_resources_in_ie_and_firefox);
   }
   if (WasExplicitlySet("lazyload_highres_images")) {
     options->set_lazyload_highres_images(FLAGS_lazyload_highres_images);
@@ -844,47 +739,11 @@ bool RewriteGflags::SetupOptionsOnly(
   if (WasExplicitlySet("blocking_rewrite_key")) {
     options->set_blocking_rewrite_key(FLAGS_blocking_rewrite_key);
   }
-  if (WasExplicitlySet("distributed_rewrite_key")) {
-    options->set_distributed_rewrite_key(FLAGS_distributed_rewrite_key);
-  }
-  if (WasExplicitlySet("distributed_rewrite_servers")) {
-    options->set_distributed_rewrite_servers(FLAGS_distributed_rewrite_servers);
-  }
-  if (WasExplicitlySet("distributed_rewrite_timeout_ms")) {
-    options->set_distributed_rewrite_timeout_ms(
-        FLAGS_distributed_rewrite_timeout_ms);
-  }
-  if (WasExplicitlySet("distribute_fetches")) {
-    options->set_distribute_fetches(FLAGS_distribute_fetches);
-  }
   if (WasExplicitlySet("pagespeed_version")) {
     options->set_x_header_value(FLAGS_pagespeed_version);
   }
-  if (WasExplicitlySet("enable_blink_debug_dashboard")) {
-    options->set_enable_blink_debug_dashboard(
-        FLAGS_enable_blink_debug_dashboard);
-  }
   if (WasExplicitlySet("report_unload_time")) {
     options->set_report_unload_time(FLAGS_report_unload_time);
-  }
-  if (WasExplicitlySet("blink_html_change_detection_time_ms")) {
-    options->set_blink_html_change_detection_time_ms(
-        FLAGS_blink_html_change_detection_time_ms);
-  }
-  if (WasExplicitlySet("enable_blink_html_change_detection")) {
-    options->set_enable_blink_html_change_detection(
-        FLAGS_enable_blink_html_change_detection);
-  }
-  if (WasExplicitlySet("enable_blink_html_change_detection_logging")) {
-    options->set_enable_blink_html_change_detection_logging(
-        FLAGS_enable_blink_html_change_detection_logging);
-  }
-  if (WasExplicitlySet("use_smart_diff_in_blink")) {
-    options->set_use_smart_diff_in_blink(FLAGS_use_smart_diff_in_blink);
-  }
-  if (WasExplicitlySet("max_image_bytes_for_webp_in_css")) {
-    options->set_max_image_bytes_for_webp_in_css(
-        FLAGS_max_image_bytes_for_webp_in_css);
   }
   if (WasExplicitlySet("enable_prioritizing_scripts")) {
     options->set_enable_prioritizing_scripts(
@@ -965,10 +824,6 @@ bool RewriteGflags::SetupOptionsOnly(
   }
   if (WasExplicitlySet("private_not_vary_for_ie")) {
     options->set_private_not_vary_for_ie(FLAGS_private_not_vary_for_ie);
-  }
-  if (WasExplicitlySet("serve_ghost_click_buster_with_split_html")) {
-    options->set_serve_ghost_click_buster_with_split_html(
-        FLAGS_serve_ghost_click_buster_with_split_html);
   }
   if (WasExplicitlySet("serve_xhr_access_control_headers")) {
     options->set_serve_xhr_access_control_headers(
@@ -1076,11 +931,6 @@ bool RewriteGflags::SetupOptionsOnly(
       }
     }
   }
-  if (WasExplicitlySet("distributable_filters")) {
-    options->DistributeFiltersByCommaSeparatedList(FLAGS_distributable_filters,
-                                                   handler);
-  }
-
   ret &= SetRewriters("rewriters", FLAGS_rewriters.c_str(),
                       "rewrite_level", FLAGS_rewrite_level.c_str(),
                       options, handler);

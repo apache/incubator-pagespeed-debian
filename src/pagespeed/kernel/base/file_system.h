@@ -75,6 +75,9 @@ class Writer;
 //     in a place where multiple Apache servers can see them.
 class FileSystem {
  public:
+  // This is documented as -1 in user-facing documentation, so don't change it.
+  static const int64 kUnlimitedSize = -1;
+
   virtual ~FileSystem();
 
   class File {
@@ -95,8 +98,12 @@ class FileSystem {
     // Note: This returns num bytes read, NOT a success bool.
     virtual int Read(char* buf, int size, MessageHandler* handler) = 0;
 
-    // Reads entire file into buf, returning true if successful.
-    virtual bool ReadFile(GoogleString* buf, MessageHandler* handler) = 0;
+    // Reads entire file into buf, returning true if successful.  Calling this
+    // with max_file_size=kUnlimitedSize doesn't limit the read size, but it's
+    // dangerous, since we can OOM if the file somehow ended up being much
+    // larger than expected, so you should set a reasonable limit.
+    virtual bool ReadFile(GoogleString* buf, int64 max_file_size,
+                          MessageHandler* handler) = 0;
 
    protected:
     friend class FileSystem;
@@ -114,6 +121,17 @@ class FileSystem {
    protected:
     friend class FileSystem;
     virtual ~OutputFile();
+  };
+
+  class ProgressNotifier {
+   public:
+    virtual void Notify() = 0;
+    virtual ~ProgressNotifier() {}
+  };
+
+  class NullProgressNotifier : public ProgressNotifier {
+   public:
+    void Notify() override {}
   };
 
   struct FileInfo {
@@ -142,16 +160,38 @@ class FileSystem {
   virtual int MaxPathLength(const StringPiece& base) const;
 
   // High level support to read/write entire files in one shot.  The input_file
-  // versions accept a NULL input_file, in which case they report failure.  All
-  // routines close the file.
+  // versions accept a NULL input_file, in which case they report failure.  If
+  // the file is larget than max_file_size, return false.  All routines close
+  // the file.
   virtual bool ReadFile(const char* filename,
+                        int64 max_file_size,
+                        Writer* writer,
+                        MessageHandler* handler);
+  virtual bool ReadFile(InputFile* input_file,
+                        int64 max_file_size,
+                        Writer* writer,
+                        MessageHandler* handler);
+  virtual bool ReadFile(const char* filename,
+                        int64 max_file_size,
+                        GoogleString* buffer,
+                        MessageHandler* handler);
+  virtual bool ReadFile(InputFile* input_file,
+                        int64 max_file_size,
+                        GoogleString* buffer,
+                        MessageHandler* handler);
+  // Deprecated versions of ReadFile, because they can OOM if the file they're
+  // trying to read happens to be surprisingly large.  Instead, call ReadFile
+  // with a limit.  If you can guarantee that you'll never encounter a large
+  // file with this call, perhaps because you're reading a file you created,
+  // then call ReadFile with an explicit limit of kUnlimitedSize.
+  virtual bool ReadFile(const char* filename,
+                        GoogleString* buffer,
+                        MessageHandler* handler);
+  virtual bool ReadFile(InputFile* input_file,
                         GoogleString* buffer,
                         MessageHandler* handler);
   virtual bool ReadFile(const char* filename,
                         Writer* writer,
-                        MessageHandler* handler);
-  virtual bool ReadFile(InputFile* input_file,
-                        GoogleString* buffer,
                         MessageHandler* handler);
   virtual bool ReadFile(InputFile* input_file,
                         Writer* writer,
@@ -263,8 +303,14 @@ class FileSystem {
   // directories are modified while we traverse, we are not guaranteed to
   // represent their final state. The path name should NOT end in a "/".
   // TODO(abliss): unify all slash-ending assumptions
-  virtual void GetDirInfo(const StringPiece& path, DirInfo* dirinfo,
-                          MessageHandler* handler);
+  void GetDirInfo(const StringPiece& path, DirInfo* dirinfo,
+                  MessageHandler* handler);
+
+  // Like GetDirInfo, but notifier->Notify() is called repeatedly as long as
+  // GetDirInfo is making progress.
+  virtual void GetDirInfoWithProgress(
+      const StringPiece& path, DirInfo* dirinfo,
+      ProgressNotifier* notifier, MessageHandler* handler);
 
   // Given a file, computes its size in bytes and store it in *size.  Returns
   // true on success, false on failure.  Behavior is undefined if path refers to
@@ -275,7 +321,7 @@ class FileSystem {
   // size on disk.
   // TODO(abliss): replace this with a single Stat() function.
   virtual bool Size(const StringPiece& path, int64* size,
-                    MessageHandler* handler) = 0;
+                    MessageHandler* handler) const = 0;
 
   // Attempts to obtain a global (cross-process, cross-thread) lock of the given
   // name (which should be a valid filename, not otherwise used, in an extant
@@ -285,16 +331,32 @@ class FileSystem {
   virtual BoolOrError TryLock(const StringPiece& lock_name,
                               MessageHandler* handler) = 0;
 
-  // Like TryLock, but may attempt to break the lock if it appears to be staler
-  // than the given number of milliseconds.  (The default implementation never
-  // actually breaks locks.)  If you obtain a lock through this method, there
-  // are no hard guarantees that nobody else has it too.
+  // Like TryLock, but may attempt to break stale locks, though the default
+  // implementation never actually breaks any.  A lock is stale if it was taken
+  // (or last bumped) more than timeout_millis ms ago.
+  //
+  // If you obtain a lock through this method, there are no hard guarantees that
+  // nobody else has it too.
   // <blink> If you use this function, your lock becomes "best-effort". </blink>
+  //
+  // If you override this function, you need to override BumpLockTimeout as
+  // well.
   virtual BoolOrError TryLockWithTimeout(const StringPiece& lock_name,
                                          int64 timeout_millis,
                                          const Timer* timer,
                                          MessageHandler* handler) {
     return TryLock(lock_name, handler);
+  }
+
+  // If you're holding a lock for a long running task you want to avoid someone
+  // else receiving the lock if they request it with TryLockWithTimeout because
+  // you've been working for longer than the timeout, you should bump it often
+  // enough that it doesn't expire.
+  virtual bool BumpLockTimeout(const StringPiece& lock_name,
+                               MessageHandler* handler) {
+    // Default implementation does nothing, since the default implementation of
+    // TryLockWithTimeout doesn't do anything either.
+    return true;
   }
 
   // Attempts to release a lock previously obtained through TryLock.  If your

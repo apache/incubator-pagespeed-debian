@@ -16,46 +16,28 @@
 
 #include "pagespeed/apache/apache_server_context.h"
 
-#include "httpd.h"                  // NOLINT
+// http_protocol.h includes httpd.h. We need to include httpd_includes.h, which
+// works around a conflicting definition of OK in gRPC.
+#include "pagespeed/apache/apache_httpd_includes.h"
 #include "http_protocol.h"          // NOLINT
-#include "base/logging.h"
-#include "net/instaweb/rewriter/public/rewrite_driver.h"
-#include "net/instaweb/rewriter/public/rewrite_driver_pool.h"
 #include "pagespeed/apache/apache_config.h"
 #include "pagespeed/apache/apache_request_context.h"
 #include "pagespeed/apache/apache_rewrite_driver_factory.h"
-#include "pagespeed/apache/mod_spdy_fetcher.h"
 #include "pagespeed/automatic/proxy_fetch.h"
-#include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "net/instaweb/config/measurement_proxy_rewrite_options_manager.h"
+#include "net/instaweb/rewriter/public/measurement_proxy_url_namer.h"
 
 namespace net_instaweb {
 
-class RewriteOptions;
-
-namespace {
-
-class SpdyOptionsRewriteDriverPool : public RewriteDriverPool {
- public:
-  explicit SpdyOptionsRewriteDriverPool(ApacheServerContext* context)
-      : apache_server_context_(context) {
-  }
-
-  virtual const RewriteOptions* TargetOptions() const {
-    DCHECK(apache_server_context_->SpdyGlobalConfig() != NULL);
-    return apache_server_context_->SpdyGlobalConfig();
-  }
-
- private:
-  ApacheServerContext* apache_server_context_;
-};
-
-}  // namespace
+const char ApacheServerContext::kProxyInterfaceStatsPrefix[] =
+    "proxy-all-mode-";
 
 ApacheServerContext::ApacheServerContext(
     ApacheRewriteDriverFactory* factory,
@@ -64,8 +46,7 @@ ApacheServerContext::ApacheServerContext(
     : SystemServerContext(factory, server->server_hostname, server->port),
       apache_factory_(factory),
       server_rec_(server),
-      version_(version.data(), version.size()),
-      spdy_driver_pool_(NULL) {
+      version_(version.data(), version.size()) {
   // We may need the message handler for error messages very early, before
   // we get to InitServerContext in ChildInit().
   set_message_handler(apache_factory_->message_handler());
@@ -84,8 +65,8 @@ ApacheServerContext::~ApacheServerContext() {
 }
 
 void ApacheServerContext::InitStats(Statistics* statistics) {
+  ProxyInterface::InitStats(kProxyInterfaceStatsPrefix, statistics);
   SystemServerContext::InitStats(statistics);
-  ModSpdyFetcher::InitStats(statistics);
 }
 
 bool ApacheServerContext::InitPath(const GoogleString& path) {
@@ -103,7 +84,13 @@ ApacheConfig* ApacheServerContext::global_config() {
   return ApacheConfig::DynamicCast(global_options());
 }
 
+const ApacheConfig* ApacheServerContext::global_config() const {
+  return ApacheConfig::DynamicCast(global_options());
+}
+
 ApacheConfig* ApacheServerContext::SpdyConfigOverlay() {
+  // While we no longer actually use the spdy config overlay, it's still
+  // useful for backwards compatibility during parsing.
   if (spdy_config_overlay_.get() == NULL) {
     spdy_config_overlay_.reset(new ApacheConfig(
         "spdy_overlay", thread_system()));
@@ -127,72 +114,21 @@ ApacheConfig* ApacheServerContext::NonSpdyConfigOverlay() {
 }
 
 void ApacheServerContext::CollapseConfigOverlaysAndComputeSignatures() {
-  if (spdy_config_overlay_.get() != NULL ||
-      non_spdy_config_overlay_.get() != NULL) {
-    // We need separate SPDY/non-SPDY configs if we have any
-    // <IfModpagespeed spdy> or <IfModpagespeed !spdy> blocks.
-    // We compute the SPDY one first since we need global_config() to be
-    // the common config and not common + !spdy.
-    spdy_specific_config_.reset(global_config()->Clone());
-    spdy_specific_config_->set_cache_invalidation_timestamp_mutex(
-        thread_system()->NewRWLock());
-    if (spdy_config_overlay_.get() != NULL) {
-      spdy_specific_config_->Merge(*spdy_config_overlay_);
-    }
-    ComputeSignature(spdy_specific_config_.get());
-  }
-
+  // These days we ignore the spdy overlay and merge-in the non-spdy one
+  // unconditionally.
   if (non_spdy_config_overlay_.get() != NULL) {
     global_config()->Merge(*non_spdy_config_overlay_);
   }
 
   SystemServerContext::CollapseConfigOverlaysAndComputeSignatures();
 
-  if (spdy_specific_config_.get() != NULL) {
-    spdy_driver_pool_ = new SpdyOptionsRewriteDriverPool(this);
-    ManageRewriteDriverPool(spdy_driver_pool_);
-  }
+  spdy_config_overlay_.reset();
+  non_spdy_config_overlay_.reset();
 }
 
 bool ApacheServerContext::PoolDestroyed() {
-  ShutDownDrivers();
+  DCHECK_EQ(num_active_rewrite_drivers(), 0);
   return apache_factory_->PoolDestroyed(this);
-}
-
-bool ApacheServerContext::UpdateCacheFlushTimestampMs(int64 timestamp_ms) {
-  bool flushed = SystemServerContext::UpdateCacheFlushTimestampMs(timestamp_ms);
-  if (spdy_specific_config_.get() != NULL) {
-    // We need to make sure to update the invalidation timestamp in the
-    // SPDY configuration as well, so it also gets any cache flushes.
-    flushed |=
-        spdy_specific_config_->UpdateCacheInvalidationTimestampMs(timestamp_ms);
-  }
-  return flushed;
-}
-
-RewriteDriverPool* ApacheServerContext::SelectDriverPool(bool using_spdy) {
-  if (using_spdy && (SpdyGlobalConfig() != NULL)) {
-    return spdy_driver_pool();
-  }
-  return standard_rewrite_driver_pool();
-}
-
-void ApacheServerContext::MaybeApplySpdySessionFetcher(
-    const RequestContextPtr& request, RewriteDriver* driver) {
-  const ApacheConfig* conf = ApacheConfig::DynamicCast(driver->options());
-  CHECK(conf != NULL);
-  ApacheRequestContext* apache_request = ApacheRequestContext::DynamicCast(
-      request.get());
-
-  // This should have already been caught by the caller.
-  CHECK(apache_request != NULL);
-
-  if (conf->fetch_from_mod_spdy() &&
-      apache_request->use_spdy_fetcher()) {
-    driver->SetSessionFetcher(new ModSpdyFetcher(
-        apache_factory_->mod_spdy_fetch_controller(), apache_request->url(),
-        driver, apache_request->spdy_connection_factory()));
-  }
 }
 
 void ApacheServerContext::InitProxyFetchFactory() {
@@ -223,6 +159,23 @@ void ApacheServerContext::ReportNotFoundHelper(MessageType message_type,
 GoogleString ApacheServerContext::FormatOption(StringPiece option_name,
                                                StringPiece args) {
   return StrCat("ModPagespeed", option_name, " ", args);
+}
+
+void ApacheServerContext::ChildInit(SystemRewriteDriverFactory* f) {
+  if (global_config()->proxy_all_requests_mode()) {
+    apache_factory_->SetNeedSchedulerThread();
+    if (global_config()->measurement_proxy_mode()) {
+      measurement_url_namer_.reset(new MeasurementProxyUrlNamer(
+          global_config()->measurement_proxy_root(),
+          global_config()->measurement_proxy_password()));
+      set_url_namer(measurement_url_namer_.get());
+      SetRewriteOptionsManager(new MeasurementProxyRewriteOptionsManager(
+          this,
+          global_config()->measurement_proxy_root(),
+          global_config()->measurement_proxy_password()));
+    }
+  }
+  SystemServerContext::ChildInit(f);
 }
 
 }  // namespace net_instaweb

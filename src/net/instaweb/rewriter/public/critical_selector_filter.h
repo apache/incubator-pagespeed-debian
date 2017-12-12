@@ -33,6 +33,9 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_filter.h"
+#include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 
 namespace Css {
@@ -43,16 +46,10 @@ class Stylesheet;
 
 namespace net_instaweb {
 
-class HtmlCharactersNode;
-class HtmlElement;
-
 class CriticalSelectorFilter : public CssSummarizerBase {
  public:
   static const char kAddStylesFunction[];
   static const char kAddStylesInvocation[];
-  static const char kApplyFlushEarlyCss[];
-  static const char kInvokeFlushEarlyCssTemplate[];
-  static const char kMoveScriptId[];
   static const char kNoscriptStylesClass[];
 
   explicit CriticalSelectorFilter(RewriteDriver* rewrite_driver);
@@ -76,6 +73,7 @@ class CriticalSelectorFilter : public CssSummarizerBase {
 
   // Selectors are inlined into the html.
   virtual bool IntendedForInlining() const { return true; }
+  ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
 
  protected:
   // Overrides of CssSummarizerBase summary API. These help us compute
@@ -83,16 +81,15 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   // write them out to the page. We also use this to pick up the output
   // of filters before us, like rewrite_css; so we run this even on things
   // that will not contain on-screen critical CSS.
-  virtual void Summarize(Css::Stylesheet* stylesheet,
-                         GoogleString* out) const;
-  virtual void RenderSummary(int pos,
-                             HtmlElement* element,
-                             HtmlCharactersNode* char_node,
-                             bool* is_element_deleted);
-  virtual void WillNotRenderSummary(int pos,
-                                    HtmlElement* element,
-                                    HtmlCharactersNode* char_node,
-                                    bool* is_element_deleted);
+  void Summarize(Css::Stylesheet* stylesheet,
+                 GoogleString* out) const override;
+  void RenderSummary(int pos,
+                     HtmlElement* element,
+                     HtmlCharactersNode* char_node,
+                     bool* is_element_deleted) override;
+  void WillNotRenderSummary(int pos,
+                            HtmlElement* element,
+                            HtmlCharactersNode* char_node) override;
 
   // Since our computation depends on the selectors that are relevant to the
   // webpage, we incorporate them into the cache key as well.
@@ -114,11 +111,6 @@ class CriticalSelectorFilter : public CssSummarizerBase {
   void RememberFullCss(int pos,
                        HtmlElement* element,
                        HtmlCharactersNode* char_node);
-
-  bool IsCssFlushedEarly(const GoogleString& url) const;
-  void ApplyCssFlushedEarly(HtmlElement* element,
-                            const GoogleString& style_id,
-                            const char* media);
 
   // Selectors that are critical for this page.
   // These are just copied over from the finder and turned into a set for easier

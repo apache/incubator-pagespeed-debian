@@ -22,7 +22,7 @@
 #include "pagespeed/apache/apr_timer.h"
 #include "pagespeed/apache/log_message_handler.h"
 
-#include "httpd.h"
+#include "pagespeed/apache/apache_httpd_includes.h"
 #include "pagespeed/apache/apache_logging_includes.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/debug.h"
@@ -123,6 +123,7 @@ void ApacheMessageHandler::FileMessageSImpl(
                "[%s %s @%ld] %s:%d: %s",
                kModuleName, version_.c_str(), static_cast<long>(getpid()),
                file, line, message.c_str());
+  AddMessageToBuffer(type, file, line, message);
 }
 
 }  // namespace net_instaweb

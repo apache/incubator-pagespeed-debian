@@ -399,7 +399,8 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
                             const GoogleString& fragment, int64 start_us,
                             HTTPValue* value, ResponseHeaders* response_headers,
                             MessageHandler* handler) {
-  HTTPValue compressed_value;
+  HTTPValue working_value;
+
   // Check to see if the HTTPValue is worth gzipping.
   // TODO(jcrowell): investigate switching to mod_gzip from mod_deflate so that
   // we can set some heuristic on minimum size where compressing the data no
@@ -416,16 +417,39 @@ void HTTPCache::PutInternal(bool preserve_response_headers,
         headers_copy.CopyFrom(*response_headers);
         headers_to_gzip = &headers_copy;
       }
+
+      // Canonicalize header order so x-original-content-length is always
+      // last.  This helps tests act more consistently.
+      const char* orig_content_length = headers_to_gzip->Lookup1(
+          HttpAttributes::kXOriginalContentLength);
+      if (orig_content_length != NULL) {
+        GoogleString save_content_length = orig_content_length;
+        headers_to_gzip->RemoveAll(HttpAttributes::kXOriginalContentLength);
+        headers_to_gzip->Add(HttpAttributes::kXOriginalContentLength,
+                             save_content_length);
+      }
       headers_to_gzip->ComputeCaching();
 
       if (InflatingFetch::GzipValue(compression_level_, *value,
-                                    &compressed_value, headers_to_gzip,
+                                    &working_value, headers_to_gzip,
                                     handler)) {
         // The resource is text (js, css, html, svg, etc.), and not previously
         // compressed, so we'll compress it and stick the new compressed version
         // in the cache.
-        value = &compressed_value;
+        value = &working_value;
       }
+    }
+  } else if ((compression_level_ == 0) && response_headers->IsGzipped()) {
+    ResponseHeaders* headers_to_unzip = response_headers;
+    ResponseHeaders headers_copy;
+    if (preserve_response_headers) {
+      headers_copy.CopyFrom(*response_headers);
+      headers_to_unzip = &headers_copy;
+    }
+
+    if (InflatingFetch::UnGzipValueIfCompressed(
+            *value, headers_to_unzip, &working_value, handler)) {
+      value = &working_value;
     }
   }
   // TODO(jcrowell): prevent the unzip-rezip flow when sending compressed data

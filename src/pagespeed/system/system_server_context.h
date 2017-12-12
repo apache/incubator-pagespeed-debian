@@ -17,19 +17,19 @@
 #ifndef PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 #define PAGESPEED_SYSTEM_SYSTEM_SERVER_CONTEXT_H_
 
-#include "net/instaweb/rewriter/public/server_context.h"
-
 #include "net/instaweb/http/public/request_context.h"
+#include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/system/admin_site.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/writer.h"
 #include "pagespeed/kernel/util/copy_on_write.h"
 
 namespace net_instaweb {
 
-class AbstractMutex;
 class AsyncFetch;
 class GoogleUrl;
 class Histogram;
@@ -48,7 +48,6 @@ class SystemRewriteOptions;
 class UpDownCounter;
 class UrlAsyncFetcherStats;
 class Variable;
-class Writer;
 
 // A server context with features specific to a PSOL port on a unix system.
 class SystemServerContext : public ServerContext {
@@ -105,9 +104,6 @@ class SystemServerContext : public ServerContext {
   // but there are some cases where we need to do something more complex:
   //  - Local requests: requests for resources on this host should go directly
   //    to the local IP.
-  //  - Fetches directly from other modules: in Apache we have an experimental
-  //    pathway where we can make fetches directly from mod_spdy without going
-  //    out to the network.
   //  - Custom fetch headers: before continuing with the fetch we want to add
   //    request headers.
   // Session fetchers allow us to make these decisions.  Here we may update
@@ -126,10 +122,6 @@ class SystemServerContext : public ServerContext {
   // config overlays into actual RewriteOptions objects.  It will also compute
   // signatures when done, and by default that's the only thing it does.
   virtual void CollapseConfigOverlaysAndComputeSignatures();
-
-  // Returns the spdy-specific configuration, or NULL if there is none
-  // specified.
-  virtual const SystemRewriteOptions* SpdyGlobalConfig() const;
 
   // Handler which serves PSOL console.
   // Note: ConsoleHandler always succeeds.
@@ -173,14 +165,8 @@ class SystemServerContext : public ServerContext {
   //
   // Subclasses which add additional configurations need to override this method
   // to additionally update the cache flush timestamp in those other
-  // configurations.  See ApacheServerContext::UpdateCacheFlushTimestampMs where
-  // the separate SpdyConfig that mod_pagespeed uses when using SPDY also needs
-  // to have it's timestamp bumped.
+  // configurations.
   virtual bool UpdateCacheFlushTimestampMs(int64 timestamp_ms);
-
-  // Hook for implementations to support fetching directly from the spdy module.
-  virtual void MaybeApplySpdySessionFetcher(const RequestContextPtr& request,
-                                            RewriteDriver* driver) {}
 
   // Returns JSON used by the PageSpeed Console JavaScript.
   void ConsoleJsonHandler(const QueryParams& params, AsyncFetch* fetch);
@@ -189,21 +175,11 @@ class SystemServerContext : public ServerContext {
   // /ngx_pagespeed_statistics, as well as
   // /...pagespeed__global_statistics.  If the latter,
   // is_global_request should be true.
-  //
-  // Returns NULL on success, otherwise the returned error string
-  // should be passed along to the user and the contents of writer and
-  // content_type should be ignored.
-  //
-  // In systems without a spdy-specific config, spdy_config should be
-  // null.
   void StatisticsHandler(const RewriteOptions& options, bool is_global_request,
                          AdminSite::AdminSource source, AsyncFetch* fetch);
 
-  // Print details fo the SPDY configuration.
-  void PrintSpdyConfig(AdminSite::AdminSource source, AsyncFetch* fetch);
-
-  // Print details fo the non-SPDY configuration.
-  void PrintNormalConfig(AdminSite::AdminSource source, AsyncFetch* fetch);
+  // Print details for configuration.
+  void PrintConfig(AdminSite::AdminSource source, AsyncFetch* fetch);
 
   // Print statistics about the caches.  In the future this will also
   // be a launching point for examining cache entries and purging them.

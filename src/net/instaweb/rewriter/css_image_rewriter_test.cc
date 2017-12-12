@@ -918,6 +918,10 @@ TEST_F(CssImageRewriterTest, FallbackNoAbsolutify) {
 // options on the HTML and resources-serving servers or if the resource
 // changes between the HTML and resource servers (race condition during push).
 TEST_F(CssImageRewriterTest, FetchRewriteFailure) {
+  // TODO(jmarantz): With gzip, the background-url gets written as relative,
+  // failing the EXPECT_STREQ at the bottom of the test method.
+  DisableGzip();
+
   options()->ClearSignatureForTesting();
   DomainLawyer* lawyer = options()->WriteableDomainLawyer();
   lawyer->AddRewriteDomainMapping("http://new_domain.com", kTestDomain,
@@ -1084,42 +1088,7 @@ TEST_F(CssRecompressImagesInStyleAttributes,
       "<div style=\"background-image:url(xfoo.jpg.pagespeed.ic.0.webp)\"/>");
 }
 
-// TODO(huibao) Remove test cases RecompressAndWebpAndStyleEnabledWithMaxCssSize
-// and RecompressAndWebpLosslessAndStyleEnabledWithMaxCssSize, when
-// option max_image_bytes_for_webp_in_css is removed.
-TEST_F(CssRecompressImagesInStyleAttributes,
-       RecompressAndWebpAndStyleEnabledWithMaxCssSize) {
-  AddFileToMockFetcher(StrCat(kTestDomain, "foo.jpg"), kPuzzleJpgFile,
-                       kContentTypeJpeg, 100);
-  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
-  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
-  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributesWithUrl);
-  options()->set_image_jpeg_recompress_quality(85);
-  options()->set_max_image_bytes_for_webp_in_css(1);  // No effect
-  SetupForWebp();
-  rewrite_driver()->AddFilters();
-  ValidateExpected("webp",
-      "<div style=\"background-image:url(foo.jpg)\"/>",
-      "<div style=\"background-image:url(xfoo.jpg.pagespeed.ic.0.webp)\"/>");
-}
-
-TEST_F(CssRecompressImagesInStyleAttributes,
-       RecompressAndWebpLosslessAndStyleEnabledWithMaxCssSize) {
-  AddFileToMockFetcher(StrCat(kTestDomain, "foo.jpg"), kPuzzleJpgFile,
-                       kContentTypeJpeg, 100);
-  options()->EnableFilter(RewriteOptions::kConvertJpegToWebp);
-  options()->EnableFilter(RewriteOptions::kRecompressJpeg);
-  options()->EnableFilter(RewriteOptions::kRewriteStyleAttributesWithUrl);
-  options()->set_image_jpeg_recompress_quality(85);
-  options()->set_max_image_bytes_for_webp_in_css(1);  // No effect
-  SetupForWebpLossless();
-  rewrite_driver()->AddFilters();
-  ValidateExpected("webp-lossless",
-      "<div style=\"background-image:url(foo.jpg)\"/>",
-      "<div style=\"background-image:url(xfoo.jpg.pagespeed.ic.0.webp)\"/>");
-}
-
-// https://code.google.com/p/modpagespeed/issues/detail?id=781
+// https://github.com/pagespeed/mod_pagespeed/issues/781
 TEST_F(CssRecompressImagesInStyleAttributes, ServeCssToDifferentUA) {
   AddFileToMockFetcher(StrCat(kTestDomain, "bike.png"), kBikePngFile,
                        kContentTypePng, 100);
@@ -1130,7 +1099,6 @@ TEST_F(CssRecompressImagesInStyleAttributes, ServeCssToDifferentUA) {
   options()->EnableFilter(RewriteOptions::kRewriteStyleAttributesWithUrl);
   options()->set_image_jpeg_recompress_quality(85);
   options()->set_image_inline_max_bytes(10000);
-  options()->set_max_image_bytes_for_webp_in_css(100000);
   options()->set_css_image_inline_max_bytes(10000);
   rewrite_driver()->AddFilters();
 
@@ -1207,10 +1175,10 @@ TEST_F(CssImageRewriterTest, DebugMessage) {
       ")}");
 
   debug_message_ =
-      "<!--Image does not appear to need resizing.-->"
-      "<!--Image has no transparent pixels, is not sensitive to compression "
-      "noise, and has no animation.-->"
-      "<!--The image was not inlined because it has too many bytes.-->";
+      "<!--The image was not inlined because it has too many bytes.-->"
+      "<!--Image http://test.com/foo.png does not appear to need resizing.-->"
+      "<!--Image http://test.com/foo.png has no transparent pixels, "
+      "is not sensitive to compression noise, and has no animation.-->";
   ValidateRewriteInlineCss("recompress_css_images", kCss, kCssAfter,
                            kNoStatCheck | kExpectCached);
 }

@@ -51,6 +51,10 @@ class Scheduler {
   // Alarm should be treated as an opaque type.
   class Alarm;
 
+  // An implementation of net_instaweb::Sequence that's controlled by the
+  // scheduler.
+  class Sequence;
+
   // Sorting comparator for Alarms, so that they can be retrieved in time
   // order.  For use by std::set, thus public.
   struct CompareAlarms {
@@ -163,10 +167,14 @@ class Scheduler {
   virtual void RegisterWorker(QueuedWorkerPool::Sequence* w);
   virtual void UnregisterWorker(QueuedWorkerPool::Sequence* w);
 
-  // Run any alarms that have reached their deadline.  Returns the time of the
-  // next deadline, or 0 if no further deadlines loom.  Sets *ran_alarms if
-  // non-NULL and any alarms were run, otherwise leaves it untouched.
+  // Run any alarms that have reached their deadline.  Returns the time in
+  // microseconds of the next deadline, or 0 if no further deadlines loom.
+  // Sets *ran_alarms if non-NULL and any alarms were run, otherwise leaves
+  // it untouched.
   int64 RunAlarms(bool* ran_alarms) EXCLUSIVE_LOCKS_REQUIRED(mutex());
+
+  // Creates a new sequence, controlled by the scheduler.
+  Sequence* NewSequence();
 
  protected:
   // Internal method to await a wakeup event.  Block until wakeup_time_us (an

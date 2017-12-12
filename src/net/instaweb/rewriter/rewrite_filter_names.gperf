@@ -31,7 +31,7 @@ struct FilterMap {
 "add_head",                          RewriteOptions::kAddHead
 "add_ids",                           RewriteOptions::kAddIds
 "add_instrumentation",               RewriteOptions::kAddInstrumentation
-"cache_partial_html",                RewriteOptions::kCachePartialHtml
+"cache_partial_html",                RewriteOptions::kCachePartialHtmlDeprecated
 "canonicalize_javascript_libraries", RewriteOptions::kCanonicalizeJavascriptLibraries
 "collapse_whitespace",               RewriteOptions::kCollapseWhitespace
 "combine_css",                       RewriteOptions::kCombineCss
@@ -56,7 +56,7 @@ struct FilterMap {
 "div_structure",                     RewriteOptions::kDivStructure
 "elide_attributes",                  RewriteOptions::kElideAttributes
 "experiment_collect_mob_image_info", RewriteOptions::kExperimentCollectMobImageInfo
-"experiment_spdy",                   RewriteOptions::kExperimentSpdy
+"experiment_http2",                  RewriteOptions::kExperimentHttp2
 "explicit_close_tags",               RewriteOptions::kExplicitCloseTags
 "extend_cache_css",                  RewriteOptions::kExtendCacheCss
 "extend_cache_images",               RewriteOptions::kExtendCacheImages
@@ -66,6 +66,7 @@ struct FilterMap {
 "fix_reflows",                       RewriteOptions::kFixReflows
 "flatten_css_imports",               RewriteOptions::kFlattenCssImports
 "flush_subresources",                RewriteOptions::kFlushSubresources
+"hint_preload_subresources",         RewriteOptions::kHintPreloadSubresources
 "in_place_optimize_for_browser",     RewriteOptions::kInPlaceOptimizeForBrowser
 "include_js_source_maps",            RewriteOptions::kIncludeJsSourceMaps
 "inline_css",                        RewriteOptions::kInlineCss
@@ -74,6 +75,7 @@ struct FilterMap {
 "inline_import_to_link",             RewriteOptions::kInlineImportToLink
 "inline_javascript",                 RewriteOptions::kInlineJavascript
 "inline_preview_images",             RewriteOptions::kDelayImages
+"insert_amp_link",                   RewriteOptions::kInsertAmpLink
 "insert_dns_prefetch",               RewriteOptions::kInsertDnsPrefetch
 "insert_ga",                         RewriteOptions::kInsertGA
 "insert_img_dimensions",             RewriteOptions::kInsertImageDimensions

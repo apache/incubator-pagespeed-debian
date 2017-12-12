@@ -19,7 +19,6 @@
 #ifndef PAGESPEED_KERNEL_BASE_JSON_H_
 #define PAGESPEED_KERNEL_BASE_JSON_H_
 
-
-#include "third_party/jsoncpp/src/include/json/json.h"
+#include "jsoncpp/json/json.h"
 
 #endif  // PAGESPEED_KERNEL_BASE_JSON_H_

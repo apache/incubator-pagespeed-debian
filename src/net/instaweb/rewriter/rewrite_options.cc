@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <new>
 #include <set>
 #include <utility>
 
@@ -60,8 +61,8 @@ const char RewriteOptions::kAllowLoggingUrlsInLogRecord[] =
     "AllowLoggingUrlsInLogRecord";
 const char RewriteOptions::kAllowOptionsToBeSetByCookies[] =
     "AllowOptionsToBeSetByCookies";
-const char RewriteOptions::kAlwaysMobilize[] = "AlwaysMobilize";
 const char RewriteOptions::kAlwaysRewriteCss[] = "AlwaysRewriteCss";
+const char RewriteOptions::kAmpLinkPattern[] = "AmpLinkPattern";
 const char RewriteOptions::kAnalyticsID[] = "AnalyticsID";
 const char RewriteOptions::kAvoidRenamingIntrospectiveJavascript[] =
     "AvoidRenamingIntrospectiveJavascript";
@@ -69,8 +70,6 @@ const char RewriteOptions::kAwaitPcacheLookup[] = "AwaitPcacheLookup";
 const char RewriteOptions::kBeaconReinstrumentTimeSec[] =
     "BeaconReinstrumentTimeSec";
 const char RewriteOptions::kBeaconUrl[] = "BeaconUrl";
-const char RewriteOptions::kBlinkMaxHtmlSizeRewritable[] =
-    "BlinkMaxHtmlSizeRewritable";
 const char RewriteOptions::kCacheFragment[] = "CacheFragment";
 const char RewriteOptions::kCacheSmallImagesUnrewritten[] =
     "CacheSmallImagesUnrewritten";
@@ -82,7 +81,6 @@ const char RewriteOptions::kContentExperimentVariantID[] =
     "ContentExperimentVariantID";
 const char RewriteOptions::kCriticalImagesBeaconEnabled[] =
     "CriticalImagesBeaconEnabled";
-const char RewriteOptions::kCriticalLineConfig[] = "CriticalLineConfig";
 const char RewriteOptions::kCssFlattenMaxBytes[] = "CssFlattenMaxBytes";
 const char RewriteOptions::kCssImageInlineMaxBytes[] = "CssImageInlineMaxBytes";
 const char RewriteOptions::kCssInlineMaxBytes[] = "CssInlineMaxBytes";
@@ -93,12 +91,6 @@ const char RewriteOptions::kDisableRewriteOnNoTransform[] =
     "DisableRewriteOnNoTransform";
 const char RewriteOptions::kDisableBackgroundFetchesForBots[] =
     "DisableBackgroundFetchesForBots";
-const char RewriteOptions::kDistributeFetches[] = "DistributeFetches";
-const char RewriteOptions::kDistributedRewriteKey[] = "DistributedRewriteKey";
-const char RewriteOptions::kDistributedRewriteServers[] =
-    "DistributedRewriteServers";
-const char RewriteOptions::kDistributedRewriteTimeoutMs[] =
-    "DistributedRewriteTimeoutMs";
 const char RewriteOptions::kDomainRewriteCookies[] =
     "DomainRewriteCookies";
 const char RewriteOptions::kDomainRewriteHyperlinks[] =
@@ -112,15 +104,9 @@ const char RewriteOptions::kDownstreamCacheRewrittenPercentageThreshold[] =
     "DownstreamCacheRewrittenPercentageThreshold";
 const char RewriteOptions::kEnableAggressiveRewritersForMobile[] =
     "EnableAggressiveRewritersForMobile";
-const char RewriteOptions::kEnableBlinkHtmlChangeDetection[] =
-    "EnableBlinkHtmlChangeDetection";
-const char RewriteOptions::kEnableBlinkHtmlChangeDetectionLogging[] =
-    "EnableBlinkHtmlChangeDetectionLogging";
 const char RewriteOptions::kEnableDeferJsExperimental[] =
     "EnableDeferJsExperimental";
 const char RewriteOptions::kEnableCachePurge[] = "EnableCachePurge";
-const char RewriteOptions::kEnableFlushEarlyCriticalCss[] =
-    "EnableFlushEarlyCriticalCss";
 const char RewriteOptions::kEnableExtendedInstrumentation[] =
     "EnableExtendedInstrumentation";
 const char RewriteOptions::kEnableLazyLoadHighResImages[] =
@@ -139,8 +125,7 @@ const char RewriteOptions::kFinderPropertiesCacheRefreshTimeMs[] =
     "FinderPropertiesCacheRefreshTimeMs";
 const char RewriteOptions::kFlushBufferLimitBytes[] = "FlushBufferLimitBytes";
 const char RewriteOptions::kFlushHtml[] = "FlushHtml";
-const char RewriteOptions::kFlushMoreResourcesEarlyIfTimePermits[] =
-    "FlushMoreResourcesEarlyIfTimePermits";
+const char RewriteOptions::kFollowFlushes[] = "FollowFlushes";
 const char RewriteOptions::kForbidAllDisabledFilters[] =
     "ForbidAllDisabledFilters";
 const char RewriteOptions::kGoogleFontCssInlineMaxBytes[] =
@@ -148,6 +133,7 @@ const char RewriteOptions::kGoogleFontCssInlineMaxBytes[] =
 const char RewriteOptions::kHideRefererUsingMeta[] = "HideRefererUsingMeta";
 const char RewriteOptions::kHttpCacheCompressionLevel[] =
     "HttpCacheCompressionLevel";
+const char RewriteOptions::kHonorCsp[] = "HonorCsp";
 const char RewriteOptions::kIdleFlushTimeMs[] = "IdleFlushTimeMs";
 const char RewriteOptions::kImageInlineMaxBytes[] = "ImageInlineMaxBytes";
 const char RewriteOptions::kImageJpegNumProgressiveScans[] =
@@ -184,6 +170,7 @@ const char RewriteOptions::kImageWebpTimeoutMs[] = "WebpTimeoutMs";
 const char RewriteOptions::kImplicitCacheTtlMs[] = "ImplicitCacheTtlMs";
 const char RewriteOptions::kInPlaceResourceOptimization[] =
     "InPlaceResourceOptimization";
+const char RewriteOptions::kInPlaceSMaxAgeSec[] = "InPlaceSMaxAgeSec";
 const char RewriteOptions::kInPlaceWaitForOptimized[] =
     "InPlaceWaitForOptimized";
 const char RewriteOptions::kInPlacePreemptiveRewriteCss[] =
@@ -217,8 +204,6 @@ const char RewriteOptions::kMaxCombinedCssBytes[] = "MaxCombinedCssBytes";
 const char RewriteOptions::kMaxCombinedJsBytes[] = "MaxCombinedJsBytes";
 const char RewriteOptions::kMaxHtmlCacheTimeMs[] = "MaxHtmlCacheTimeMs";
 const char RewriteOptions::kMaxHtmlParseBytes[] = "MaxHtmlParseBytes";
-const char RewriteOptions::kMaxImageBytesForWebpInCss[] =
-    "MaxImageBytesForWebpInCss";
 const char RewriteOptions::kMaxImageSizeLowResolutionBytes[] =
     "MaxImageSizeLowResolutionBytes";
 const char RewriteOptions::kMaxInlinedPreviewImagesIndex[] =
@@ -227,36 +212,15 @@ const char RewriteOptions::kMaxLowResImageSizeBytes[] =
     "MaxLowResImageSizeBytes";
 const char RewriteOptions::kMaxLowResToHighResImageSizePercentage[] =
     "MaxLowResToHighResImageSizePercentage";
-const char RewriteOptions::kMaxPrefetchJsElements[] = "MaxPrefetchJsElements";
 const char RewriteOptions::kMaxRewriteInfoLogSize[] = "MaxRewriteInfoLogSize";
 const char RewriteOptions::kMaxUrlSegmentSize[] = "MaxSegmentLength";
 const char RewriteOptions::kMaxUrlSize[] = "MaxUrlSize";
 const char RewriteOptions::kMetadataCacheStalenessThresholdMs[] =
     "MetadataCacheStalenessThresholdMs";
-const char RewriteOptions::kMinCacheTtlMs[] = "MinCacheTtlMs";
 const char RewriteOptions::kMinImageSizeLowResolutionBytes[] =
     "MinImageSizeLowResolutionBytes";
 const char RewriteOptions::kMinResourceCacheTimeToRewriteMs[] =
     "MinResourceCacheTimeToRewriteMs";
-const char RewriteOptions::kMobBeaconCategory[] = "MobBeaconCategory";
-const char RewriteOptions::kMobBeaconUrl[] = "MobBeaconUrl";
-const char RewriteOptions::kMobMapLocation[] = "MobMapLocation";
-const char RewriteOptions::kMobPhoneNumber[] = "MobPhoneNumber";
-const char RewriteOptions::kMobConversionId[] = "MobConversionId";
-const char RewriteOptions::kMobMapConversionLabel[] =
-    "MobMapConversionLabel";
-const char RewriteOptions::kMobPhoneConversionLabel[] =
-    "MobPhoneConversionLabel";
-const char RewriteOptions::kMobConfig[] = "MobConfig";
-const char RewriteOptions::kMobIframe[] = "MobIframe";
-const char RewriteOptions::kMobIframeDisable[] = "MobIframeDisable";
-const char RewriteOptions::kMobIframeViewport[] = "MobIframeViewport";
-const char RewriteOptions::kMobLayout[] = "MobLayout";
-const char RewriteOptions::kMobNav[] = "MobNav";
-const char RewriteOptions::kMobLabeledMode[] = "MobLabeledMode";
-const char RewriteOptions::kMobNavClasses[] = "MobNavigationalClasses";
-const char RewriteOptions::kMobStatic[] = "MobStatic";
-const char RewriteOptions::kMobTheme[] = "MobTheme";
 const char RewriteOptions::kModifyCachingHeaders[] = "ModifyCachingHeaders";
 const char RewriteOptions::kNoop[] = "Noop";
 const char RewriteOptions::kNoTransformOptimizedImages[] =
@@ -294,10 +258,6 @@ const char RewriteOptions::kRewriteRandomDropPercentage[] =
 const char RewriteOptions::kRewriteUncacheableResources[] =
     "RewriteUncacheableResources";
 const char RewriteOptions::kRunningExperiment[] = "RunExperiment";
-const char RewriteOptions::kServeGhostClickBusterWithSplitHtml[] =
-    "ServeGhostClickBusterWithSplitHtml";
-const char RewriteOptions::kServeSplitHtmlInTwoChunks[] =
-    "ServeSplitHtmlInTwoChunks";
 const char RewriteOptions::kServeStaleIfFetchError[] = "ServeStaleIfFetchError";
 const char RewriteOptions::kServeStaleWhileRevalidateThresholdSec[] =
     "ServeStaleWhileRevalidateThresholdSec";
@@ -315,7 +275,6 @@ const char RewriteOptions::kUseExperimentalJsMinifier[] =
 const char RewriteOptions::kUseFallbackPropertyCacheValues[] =
     "UseFallbackPropertyCacheValues";
 const char RewriteOptions::kUseImageScanlineApi[] = "UseImageScanlineApi";
-const char RewriteOptions::kUseSmartDiffInBlink[] = "UseSmartDiffInBlink";
 const char RewriteOptions::kXModPagespeedHeaderValue[] =
     "XHeaderValue";
 const char RewriteOptions::kXPsaBlockingRewrite[] = "BlockingRewriteKey";
@@ -326,7 +285,6 @@ const char RewriteOptions::kBlockingRewriteRefererUrls[] =
     "BlockingRewriteRefererUrls";
 const char RewriteOptions::kDisableFilters[] = "DisableFilters";
 const char RewriteOptions::kDisallow[] = "Disallow";
-const char RewriteOptions::kDistributableFilters[] = "DistributableFilters";
 const char RewriteOptions::kDomain[] = "Domain";
 const char RewriteOptions::kDownstreamCachePurgeLocationPrefix[] =
     "DownstreamCachePurgeLocationPrefix";
@@ -337,6 +295,9 @@ const char RewriteOptions::kForbidFilters[] = "ForbidFilters";
 const char RewriteOptions::kInlineResourcesWithoutExplicitAuthorization[] =
     "InlineResourcesWithoutExplicitAuthorization";
 const char RewriteOptions::kRetainComment[] = "RetainComment";
+const char RewriteOptions::kPermitIdsForCssCombining[] =
+    "PermitIdsForCssCombining";
+const char RewriteOptions::kAddResourceHeader[] = "AddResourceHeader";
 const char RewriteOptions::kCustomFetchHeader[] = "CustomFetchHeader";
 const char RewriteOptions::kLoadFromFile[] = "LoadFromFile";
 const char RewriteOptions::kLoadFromFileMatch[] = "LoadFromFileMatch";
@@ -352,7 +313,6 @@ const char RewriteOptions::kCacheFlushFilename[] = "CacheFlushFilename";
 const char RewriteOptions::kCacheFlushPollIntervalSec[] =
     "CacheFlushPollIntervalSec";
 const char RewriteOptions::kFetchHttps[] = "FetchHttps";
-const char RewriteOptions::kFetchFromModSpdy[] = "FetchFromModSpdy";
 const char RewriteOptions::kFetcherTimeOutMs[] = "FetcherTimeOutMs";
 const char RewriteOptions::kFileCacheCleanInodeLimit[] =
     "FileCacheInodeLimit";
@@ -395,14 +355,11 @@ const char RewriteOptions::kTestProxy[] = "TestProxy";
 const char RewriteOptions::kTestProxySlurp[] = "TestProxySlurp";
 const char RewriteOptions::kUrlSigningKey[] = "UrlSigningKey";
 const char RewriteOptions::kUseAnalyticsJs[] = "UseAnalyticsJs";
-const char RewriteOptions::kUseSelectorsForCriticalCss[] =
-    "UseSelectorsForCriticalCss";
 const char RewriteOptions::kUseSharedMemLocking[] = "SharedMemoryLocks";
 const char RewriteOptions::kNullOption[] = "";
 
 // RewriteFilter prefixes
 const char RewriteOptions::kCacheExtenderId[] = "ce";
-const char RewriteOptions::kCollectFlushEarlyContentFilterId[] = "fe";
 const char RewriteOptions::kCssCombinerId[] = "cc";
 const char RewriteOptions::kCssFilterId[] = "cf";
 const char RewriteOptions::kCssImportFlattenerId[] = "if";
@@ -416,12 +373,7 @@ const char RewriteOptions::kJavascriptMinId[] = "jm";
 const char RewriteOptions::kJavascriptMinSourceMapId[] = "sm";
 const char RewriteOptions::kJavascriptInlineId[] = "ji";
 const char RewriteOptions::kLocalStorageCacheId[] = "ls";
-const char RewriteOptions::kPanelCommentPrefix[] = "GooglePanel";
 const char RewriteOptions::kPrioritizeCriticalCssId[] = "pr";
-
-// Sets limit for buffering html in blink secondary fetch to 10MB default.
-const int64 RewriteOptions::kDefaultBlinkMaxHtmlSizeRewritable =
-    10 * 1024 * 1024;
 
 // TODO(jmarantz): consider merging this threshold with the image-inlining
 // threshold, which is currently defaulting at 2000, so we have a single
@@ -460,8 +412,6 @@ const int64 RewriteOptions::kDefaultProgressiveJpegMinBytes = 10240;
 
 const int64 RewriteOptions::kDefaultMaxHtmlCacheTimeMs = 0;
 const int64 RewriteOptions::kDefaultMaxHtmlParseBytes = -1;
-const int64 RewriteOptions::kDefaultMaxImageBytesForWebpInCss = kint64max;
-
 const int64 RewriteOptions::kDefaultMinResourceCacheTimeToRewriteMs = 0;
 
 const int64 RewriteOptions::kDefaultFlushBufferLimitBytes = 100 * 1024;
@@ -469,7 +419,6 @@ const int64 RewriteOptions::kDefaultIdleFlushTimeMs = 10;
 const int64 RewriteOptions::kDefaultImplicitCacheTtlMs = 5 * Timer::kMinuteMs;
 const int64 RewriteOptions::kDefaultLoadFromFileCacheTtlMs =
     5 * Timer::kMinuteMs;
-const int64 RewriteOptions::kDefaultMinCacheTtlMs = -1;
 const int64 RewriteOptions::kDefaultMetadataInputErrorsCacheTtlMs =
     5 * Timer::kMinuteMs;
 
@@ -526,20 +475,16 @@ const int64 RewriteOptions::kDefaultImageWebpQualityForSaveData = 50;
 // image. If negative, does not time out.
 const int64 RewriteOptions::kDefaultImageWebpTimeoutMs = -1;
 
-// Setting the maximum length for the cacheable response content to -1
-// indicates that there is no size limit.
-const int64 RewriteOptions::kDefaultMaxCacheableResponseContentLength = -1;
+const int64 RewriteOptions::kDefaultMaxCacheableResponseContentLength =
+    16777216;  // 16 MB in bytes
 
-// See http://code.google.com/p/modpagespeed/issues/detail?id=9.  By
+// See http://github.com/pagespeed/mod_pagespeed/issues/9.  By
 // default, Apache evidently limits each URL path segment (between /)
 // to about 256 characters.  This is not a fundamental URL limitation
 // but is Apache specific.  Ben Noordhuis has provided a workaround
 // of hooking map_to_storage to skip the directory-mapping phase in
-// Apache.  See http://code.google.com/p/modpagespeed/issues/detail?id=176
+// Apache.  See http://github.com/pagespeed/mod_pagespeed/issues/176
 const int RewriteOptions::kDefaultMaxUrlSegmentSize = 1024;
-
-// Maximum JS elements to prefetch early when defer JS filter is enabled.
-const int RewriteOptions::kDefaultMaxPrefetchJsElements = 0;
 
 // Expiration limit for cookies that set PageSpeed options: 10 minutes.
 const int64 RewriteOptions::kDefaultOptionCookiesDurationMs = 10 * 60 * 1000;
@@ -550,7 +495,6 @@ const int RewriteOptions::kDefaultRewriteDeadlineMs = 10;
 const int RewriteOptions::kDefaultRewriteDeadlineMs = 20;
 #endif
 const int kValgrindWaitForRewriteMs = 1000;
-const int64 RewriteOptions::kDefaultDistributedTimeoutMs = 60000;
 const int RewriteOptions::kDefaultPropertyCacheHttpStatusStabilityThreshold = 5;
 
 const int RewriteOptions::kDefaultMaxRewriteInfoLogSize = 150;
@@ -586,9 +530,6 @@ const char RewriteOptions::kRejectedRequestUrlKeyName[] = "RejectedUrl";
 // Allow all the declared shards.
 const int RewriteOptions::kDefaultDomainShardCount = 0;
 
-const int64 RewriteOptions::kDefaultBlinkHtmlChangeDetectionTimeMs =
-    Timer::kMinuteMs;
-
 // By default, rebeacon every 5 seconds in high frequency mode. This will be
 // multiplied by kLowFreqBeaconMult in critical_finder_support_util.h to
 // determine the low frequency rebeacon time.
@@ -613,8 +554,9 @@ RewriteOptions::PropertyNameMap*
 const RewriteOptions::PropertyBase**
     RewriteOptions::option_id_to_property_array_ = NULL;
 
-RewriteOptions::Properties* RewriteOptions::properties_ = NULL;
-RewriteOptions::Properties* RewriteOptions::all_properties_ = NULL;
+RewriteOptions::Properties* RewriteOptions::properties_ = nullptr;
+RewriteOptions::Properties* RewriteOptions::all_properties_ = nullptr;
+RewriteOptions::Properties* RewriteOptions::deprecated_properties_ = nullptr;
 
 const char RewriteOptions::AllowVaryOn::kNoneString[] = "None";
 const char RewriteOptions::AllowVaryOn::kAutoString[] = "Auto";
@@ -693,42 +635,39 @@ const RewriteOptions::Filter kOptimizeForBandwidthFilterSet[] = {
 // Note: all Core filters are Test filters as well.  For maintainability,
 // this is managed in the c++ switch statement.
 const RewriteOptions::Filter kTestFilterSet[] = {
-  RewriteOptions::kConvertJpegToWebp,
-  RewriteOptions::kDebug,
-  RewriteOptions::kDeferIframe,
-  RewriteOptions::kDeferJavascript,
-  RewriteOptions::kDelayImages,  // AKA inline_preview_images
-  RewriteOptions::kIncludeJsSourceMaps,
-  RewriteOptions::kInsertGA,
-  RewriteOptions::kInsertImageDimensions,
-  RewriteOptions::kLazyloadImages,
-  RewriteOptions::kLeftTrimUrls,
-  RewriteOptions::kMakeGoogleAnalyticsAsync,
-  RewriteOptions::kPrioritizeCriticalCss,
-  RewriteOptions::kResizeToRenderedImageDimensions,
-  RewriteOptions::kResponsiveImages,
-  RewriteOptions::kRewriteDomains,
-  RewriteOptions::kSpriteImages,
+    RewriteOptions::kConvertJpegToWebp,
+    RewriteOptions::kDebug,
+    RewriteOptions::kDeferIframe,
+    RewriteOptions::kDeferJavascript,
+    RewriteOptions::kDelayImages,  // AKA inline_preview_images
+    RewriteOptions::kIncludeJsSourceMaps,
+    RewriteOptions::kInsertAmpLink,
+    RewriteOptions::kInsertGA,
+    RewriteOptions::kInsertImageDimensions,
+    RewriteOptions::kLazyloadImages,
+    RewriteOptions::kLeftTrimUrls,
+    RewriteOptions::kMakeGoogleAnalyticsAsync,
+    RewriteOptions::kPrioritizeCriticalCss,
+    RewriteOptions::kResizeToRenderedImageDimensions,
+    RewriteOptions::kResponsiveImages,
+    RewriteOptions::kRewriteDomains,
+    RewriteOptions::kSpriteImages,
 };
 
 // Note: These filters should not be included even if the level is "All".
 const RewriteOptions::Filter kDangerousFilterSet[] = {
-    RewriteOptions::kCachePartialHtml,
+    RewriteOptions::kCachePartialHtmlDeprecated,
     RewriteOptions::kCanonicalizeJavascriptLibraries,
-    RewriteOptions::kComputeVisibleText,  // internal, enabled conditionally
+    RewriteOptions::kComputeVisibleTextDeprecated,
     RewriteOptions::kDeterministicJs,     // used for measurement
     RewriteOptions::kDisableJavascript,
     RewriteOptions::kDivStructure,
     RewriteOptions::kExperimentCollectMobImageInfo,
-    RewriteOptions::kExperimentSpdy,
     RewriteOptions::kExplicitCloseTags,
     RewriteOptions::kFixReflows,
-    RewriteOptions::kMobilize,                // Prototype
+    RewriteOptions::kMobilize,
     RewriteOptions::kMobilizePrecompute,      // TODO(jud): Unused, remove.
     RewriteOptions::kServeDeprecationNotice,  // internal.
-    RewriteOptions::kSplitHtml,               // internal, enabled conditionally
-    RewriteOptions::kSplitHtmlHelper,         // internal, enabled conditionally
-    RewriteOptions::kStripNonCacheable,       // internal, enabled conditionally
     RewriteOptions::kStripScripts,
 };
 
@@ -737,7 +676,7 @@ const RewriteOptions::Filter kDangerousFilterSet[] = {
 // SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() method
 // if you update this list.
 const RewriteOptions::Filter kRequiresScriptExecutionFilterSet[] = {
-  RewriteOptions::kCachePartialHtml,
+  RewriteOptions::kCachePartialHtmlDeprecated,
   RewriteOptions::kDedupInlinedImages,
   RewriteOptions::kDeferIframe,
   RewriteOptions::kDeferJavascript,
@@ -746,7 +685,6 @@ const RewriteOptions::Filter kRequiresScriptExecutionFilterSet[] = {
   RewriteOptions::kLazyloadImages,
   RewriteOptions::kLocalStorageCache,
   RewriteOptions::kMobilize,
-  RewriteOptions::kSplitHtml,
   // We do not include kPrioritizeVisibleContent since we do not want to attach
   // SupportNoscriptFilter in the case of blink pcache miss pass-through, since
   // this response will not have any custom script inserted.
@@ -755,15 +693,26 @@ const RewriteOptions::Filter kRequiresScriptExecutionFilterSet[] = {
   // in a noscript block and the page will still load / function normally.
 };
 
+// List of filters that require a 'head' element to exist.
+const RewriteOptions::Filter kAddHeadFilters[] = {
+  RewriteOptions::kAddBaseTag,
+  RewriteOptions::kAddHead,
+  RewriteOptions::kAddInstrumentation,
+  RewriteOptions::kCombineHeads,
+  RewriteOptions::kDeterministicJs,
+  RewriteOptions::kHandleNoscriptRedirect,
+  RewriteOptions::kMakeGoogleAnalyticsAsync,
+  RewriteOptions::kMobilize,
+  RewriteOptions::kMoveCssAboveScripts,
+  RewriteOptions::kMoveCssToHead,
+};
+
 // List of filters which are essential for mobilizing webpages, i.e., for
 // making webpages designed for desktop computers look good on mobile devices.
 //
 // TODO(huibao): Once rewrite levels can be combined, move kRewriteCss and
 // kRewriteDomains (and kDomainRewriteHyperlinks Option) into a proxy mode.
 const RewriteOptions::Filter kMobilizeFilterSet[] = {
-  // TODO(huibao): When layout mode is enabled, uncomment kInlineJavascript
-  // to inline xhr.js, a small JS file which we create, into HTML.
-  // RewriteOptions::kInlineJavascript,
   RewriteOptions::kMobilize,
   // Turn on rewrite_css in order to rewrite hyper-links in CSS.
   RewriteOptions::kRewriteCss,
@@ -785,13 +734,10 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kAddIds, "ad", "Add Ids"},
         {RewriteOptions::kAddInstrumentation, "ai", "Add Instrumentation"},
         {RewriteOptions::kComputeStatistics, "ca", "Compute HTML statistics"},
-        {RewriteOptions::kCachePartialHtml, "ct", "Cache Partial Html"},
+        {RewriteOptions::kCachePartialHtmlDeprecated, "ct", "Deprecated."},
         {RewriteOptions::kCanonicalizeJavascriptLibraries, "ij",
          "Canonicalize Javascript library URLs"},
         {RewriteOptions::kCollapseWhitespace, "cw", "Collapse Whitespace"},
-        {RewriteOptions::kCollectFlushEarlyContentFilter,
-         RewriteOptions::kCollectFlushEarlyContentFilterId,
-         "Collect Flush Early Content Filter"},
         {RewriteOptions::kCombineCss, RewriteOptions::kCssCombinerId,
          "Combine Css"},
         {RewriteOptions::kCombineHeads, "ch", "Combine Heads"},
@@ -799,15 +745,15 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          RewriteOptions::kJavascriptCombinerId, "Combine Javascript"},
         {RewriteOptions::kComputeCriticalCss, "bc",
          "Background Compute Critical css"},
-        {RewriteOptions::kComputeVisibleText, "bp", "Computes visible text"},
+        {RewriteOptions::kComputeVisibleTextDeprecated, "bp", "Deprecated."},
         {RewriteOptions::kConvertGifToPng, "gp", "Convert Gif to Png"},
         {RewriteOptions::kConvertJpegToProgressive, "jp",
          "Convert Jpeg to Progressive"},
         {RewriteOptions::kConvertJpegToWebp, "jw", "Convert Jpeg To Webp"},
         {RewriteOptions::kConvertMetaTags, "mc", "Convert Meta Tags"},
         {RewriteOptions::kConvertPngToJpeg, "pj", "Convert Png to Jpeg"},
-        { RewriteOptions::kConvertToWebpAnimated, "wa",
-          "Convert animated images to WebP" },
+        {RewriteOptions::kConvertToWebpAnimated, "wa",
+         "Convert animated images to WebP"},
         {RewriteOptions::kConvertToWebpLossless, "ws",
          "When converting images to WebP, prefer lossless conversions"},
         {RewriteOptions::kDebug, "db", "Debug"},
@@ -823,7 +769,8 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kElideAttributes, "ea", "Elide Attributes"},
         {RewriteOptions::kExperimentCollectMobImageInfo, "xi",
          "Experiment: collect image info to help mobilization"},
-        {RewriteOptions::kExperimentSpdy, "xs", "SPDY Resources Experiment"},
+        {RewriteOptions::kExperimentHttp2, "x2",
+         "Experiment: http2-specific features in development"},
         {RewriteOptions::kExplicitCloseTags, "xc", "Explicit Close Tags"},
         {RewriteOptions::kExtendCacheCss, "ec", "Cache Extend Css"},
         {RewriteOptions::kExtendCacheImages, "ei", "Cache Extend Images"},
@@ -837,6 +784,8 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
         {RewriteOptions::kFlushSubresources, "fs", "Flush Subresources"},
         {RewriteOptions::kHandleNoscriptRedirect, "hn",
          "Handles Noscript Redirects"},
+        {RewriteOptions::kHintPreloadSubresources, "hpsr",
+         "Hint Preload of Subresources"},
         {RewriteOptions::kHtmlWriterFilter, "hw", "Flushes html"},
         {RewriteOptions::kIncludeJsSourceMaps,
          RewriteOptions::kJavascriptMinSourceMapId, "Include JS Source Maps"},
@@ -850,6 +799,7 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          "Inline Javascript"},
         {RewriteOptions::kInPlaceOptimizeForBrowser, "io",
          "In-place optimize for browser"},
+        {RewriteOptions::kInsertAmpLink, "ial", "Insert AMP link"},
         {RewriteOptions::kInsertDnsPrefetch, "idp", "Insert DNS Prefetch"},
         {RewriteOptions::kInsertGA, "ig", "Insert Google Analytics"},
         {RewriteOptions::kInsertImageDimensions, "id",
@@ -896,14 +846,13 @@ const RewriteOptions::FilterEnumToIdAndNameEntry
          "Rewrite Style Attributes With Url"},
         {RewriteOptions::kServeDeprecationNotice, "sd",
          "Serve Deprecation Notice"},
-        {RewriteOptions::kSplitHtml, "sh", "Split Html"},
-        {RewriteOptions::kSplitHtmlHelper, "se", "Split Html Helper"},
+        {RewriteOptions::kSplitHtml, "sh", "Deprecated"},
+        {RewriteOptions::kSplitHtmlHelper, "se", "Deprecated"},
         {RewriteOptions::kSpriteImages, RewriteOptions::kImageCombineId,
          "Sprite Images"},
         {RewriteOptions::kStripImageColorProfile, "cp",
          "Strip Image Color Profiles"},
         {RewriteOptions::kStripImageMetaData, "md", "Strip Image Meta Data"},
-        {RewriteOptions::kStripNonCacheable, "nc", "Strip Non Cacheable"},
         {RewriteOptions::kStripScripts, "ss", "Strip Scripts"},
 };
 
@@ -986,9 +935,9 @@ void StripBeaconUrlQueryParam(GoogleString* url,
 }
 
 // Maps the deprecated options to the new names.
-struct DeprecatedOptionMap {
+struct RenamedOptionMap {
   static bool LessThan(
-      const DeprecatedOptionMap& option_map,
+      const RenamedOptionMap& option_map,
       StringPiece arg) {
     return StringCaseCompare(option_map.deprecated_option_name, arg) < 0;
   }
@@ -997,17 +946,17 @@ struct DeprecatedOptionMap {
   const char* new_option_name;
 };
 
-const DeprecatedOptionMap kDeprecatedOptionNameData[] = {
+const RenamedOptionMap kRenamedOptionNameData[] = {
   {"ImageWebpRecompressionQuality",
       "WebpRecompressionQuality"},
   {"ImageWebpRecompressionQualityForSmallScreens",
       "WebpRecompressionQualityForSmallScreens"}
 };
 
-std::vector<DeprecatedOptionMap> kDeprecatedOptionNameList(
-    kDeprecatedOptionNameData,
-    kDeprecatedOptionNameData + arraysize(kDeprecatedOptionNameData)
-);
+// Will be initialized to a sorted list of headers not allowed in
+// AddResourceHeader.
+const StringPieceVector* fixed_resource_headers = NULL;
+bool http_header_separators[256] = {false};
 
 }  // namespace
 
@@ -1038,7 +987,7 @@ int RewriteOptions::NumFilterIds() {
 bool RewriteOptions::ParseRewriteLevel(
     const StringPiece& in, RewriteLevel* out) {
   bool ret = false;
-  if (in != NULL) {
+  if (!in.empty()) {
     if (StringCaseEqual(in, "CoreFilters")) {
       *out = kCoreFilters;
       ret = true;
@@ -1192,6 +1141,7 @@ RewriteOptions::RewriteOptions(ThreadSystem* thread_system)
                          arraysize(kJsPreserveUrlDisabledFilters));
   CheckFilterSetOrdering(kCssPreserveUrlDisabledFilters,
                          arraysize(kCssPreserveUrlDisabledFilters));
+  CheckFilterSetOrdering(kAddHeadFilters, arraysize(kAddHeadFilters));
 
   // Ensure that all filters have unique IDs.
   StringSet id_set;
@@ -1244,7 +1194,7 @@ void RewriteOptions::AddProperties() {
   // for mod_pagespeed, and serves as the error message if there is a
   // syntax error specifying the option in pagespeed.conf.
   //
-  // There are three sorts of options which pass in NULL for the help-string
+  // There are four sorts of options which pass in NULL for the help-string
   // 1. Options that should be enabled in mod_pagespeed but we haven't
   //    written the help-string or added HTML documentation yet.  These
   //    will be flagged with:
@@ -1253,8 +1203,8 @@ void RewriteOptions::AddProperties() {
   //    permanent support in mod_pagespeed.  These will be marked:
   //    // TODO(jmarantz): eliminate experiment or document.
   // 3. Options which are not applicable to mod_pagespeed, e.g. those that
-  //    support features not yet in mod_pagespeed such as Blink, or have
-  //    an alternate solution (populating the cache invalidation timestamp).
+  //    support features not yet in mod_pagespeed, or have an alternate solution
+  //    (populating the cache invalidation timestamp).
   //    These are marked as:
   //    // Not applicable for mod_pagespeed.
   // 4. Options which should be in mod_pagespeed but need a bit more
@@ -1264,12 +1214,6 @@ void RewriteOptions::AddProperties() {
       kPassThrough, &RewriteOptions::level_, "l", kRewriteLevel,
       kDirectoryScope,
       "Base level of rewriting (PassThrough, CoreFilters)", true);
-  AddBaseProperty(
-      kDefaultBlinkMaxHtmlSizeRewritable,
-      &RewriteOptions::blink_max_html_size_rewritable_,
-      "bmhsr", kBlinkMaxHtmlSizeRewritable,
-      kDirectoryScope,
-      NULL, true);  // Not applicable for mod_pagespeed.
   AddBaseProperty(
       kDefaultCssFlattenMaxBytes,
       &RewriteOptions::css_flatten_max_bytes_, "cf",
@@ -1332,25 +1276,18 @@ void RewriteOptions::AddProperties() {
       &RewriteOptions::max_cacheable_response_content_length_, "rcl",
       kMaxCacheableResponseContentLength,
       kServerScope,
-      "Maximum length of a cacheable response content.", true);
-  AddBaseProperty(
-      kDefaultMaxHtmlCacheTimeMs, &RewriteOptions::max_html_cache_time_ms_,
-      "hc", kMaxHtmlCacheTimeMs, kDirectoryScope, NULL,
-      true);  // TODO(jud): Add doc when split_html is made availabile in MPS.
+      "Maximum length of a cacheable response content. "
+      "To remove this limit, use -1.", true);
+  AddBaseProperty(kDefaultMaxHtmlCacheTimeMs,
+                  &RewriteOptions::max_html_cache_time_ms_, "hc",
+                  kMaxHtmlCacheTimeMs, kDirectoryScope, NULL, true);
   AddBaseProperty(
       kDefaultMaxHtmlParseBytes,
       &RewriteOptions::max_html_parse_bytes_, "hpb",
       kMaxHtmlParseBytes,
-      kDirectoryScope,  // TODO(jmarantz): switch to kProcessScope?
+      kDirectoryScope,  // TODO(jmarantz): switch to kProcessScopeStrict?
       "Maximum number of bytes of HTML that we parse, before "
       "redirecting to ?ModPagespeed=off", true);
-  AddBaseProperty(
-      kDefaultMaxImageBytesForWebpInCss,
-      &RewriteOptions::max_image_bytes_for_webp_in_css_, "miwc",
-      kMaxImageBytesForWebpInCss,
-      kDirectoryScope,
-      NULL, true);  // TODO(jmarantz): clean this up & doc it, or delete it.
-  // "Maximum byte size of webp images rewritten from CSS"
   AddBaseProperty(
       kDefaultMinResourceCacheTimeToRewriteMs,
       &RewriteOptions::min_resource_cache_time_to_rewrite_ms_, "rc",
@@ -1401,7 +1338,7 @@ void RewriteOptions::AddProperties() {
       kDefaultImageMaxRewritesAtOnce,
       &RewriteOptions::image_max_rewrites_at_once_,
       "im", kImageMaxRewritesAtOnce,
-      kProcessScope,
+      kLegacyProcessScope,
       "Set bound on number of images being rewritten at one time "
       "(0 = unbounded).", true);
   AddBaseProperty(
@@ -1457,6 +1394,11 @@ void RewriteOptions::AddProperties() {
       kInPlaceWaitForOptimized,
       kDirectoryScope,
       "Wait for optimizations to complete", true);  // TODO(jmarantz): Add doc.
+  AddBaseProperty(
+      10, &RewriteOptions::in_place_s_maxage_sec_, "ipsm",
+      kInPlaceSMaxAgeSec,
+      kServerScope,
+      "What to set s-maxage to on not-yet-optimized ipro resources", true);
   AddBaseProperty(
       kDefaultRewriteDeadlineMs,
       &RewriteOptions::in_place_rewrite_deadline_ms_, "iprdm",
@@ -1570,8 +1512,8 @@ void RewriteOptions::AddProperties() {
       "Whether to respect the X-Forwarded-Proto header.", true);
   AddBaseProperty(
       false, &RewriteOptions::flush_html_, "fh", kFlushHtml,
-      kDirectoryScope,
-      NULL, true);  // TODO(jmarantz): implement for mod_pagespeed.
+      kServerScope,
+      "Enable auto-flush heuristics for HTML in full proxy mode", true);
   AddBaseProperty(
       false, &RewriteOptions::css_preserve_urls_, "cpu",
       kCssPreserveURLs,
@@ -1587,11 +1529,6 @@ void RewriteOptions::AddProperties() {
       kJsPreserveURLs,
       kDirectoryScope,
       "Disable the rewriting of Javascript URLs.", true);
-  AddBaseProperty(
-      false, &RewriteOptions::serve_split_html_in_two_chunks_, "sstc",
-      kServeSplitHtmlInTwoChunks,
-      kDirectoryScope,
-      "Serve the split html response in two chunks", true);
   AddBaseProperty(
       true, &RewriteOptions::serve_stale_if_fetch_error_, "ss",
       kServeStaleIfFetchError,
@@ -1612,22 +1549,11 @@ void RewriteOptions::AddProperties() {
       "background. 0 means don't serve stale content."
       "Note: Stale response will be served only for non-html requests.", true);
   AddBaseProperty(
-      false,
-      &RewriteOptions::flush_more_resources_early_if_time_permits_,
-      "fretp", kFlushMoreResourcesEarlyIfTimePermits,
+      true, &RewriteOptions::follow_flushes_, "ff", kFollowFlushes,
       kDirectoryScope,
-      NULL, true);  // TODO(jmarantz): implement for mod_pagespeed.
-  AddRequestProperty(
-      false,
-      &RewriteOptions::flush_more_resources_in_ie_and_firefox_,
-      "fmrief", true);
-  AddBaseProperty(
-      kDefaultMaxPrefetchJsElements,
-      &RewriteOptions::max_prefetch_js_elements_, "mpje",
-      kMaxPrefetchJsElements,
-      kDirectoryScope,
-      "Set number of JS elements to download without executing. This is useful"
-      "for prefetching script elements when defer JS filter is enabled.", true);
+      "Attempt to mirror incoming flushes for html streams in the output "
+      "when ProxyFetch is used.",
+      true);
   AddBaseProperty(
       false, &RewriteOptions::enable_defer_js_experimental_, "edje",
       kEnableDeferJsExperimental,
@@ -1663,16 +1589,6 @@ void RewriteOptions::AddProperties() {
       "elhr", kEnableLazyLoadHighResImages,
       kDirectoryScope,
       NULL, true);
-  AddBaseProperty(
-      false, &RewriteOptions::enable_flush_early_critical_css_, "efcc",
-      kEnableFlushEarlyCriticalCss,
-      kDirectoryScope,
-      NULL, true);  // Not applicable for mod_pagespeed.
-  AddBaseProperty(
-      false, &RewriteOptions::use_selectors_for_critical_css_, "scss",
-      kUseSelectorsForCriticalCss,
-      kDirectoryScope,
-      NULL, true);  // Not applicable for mod_pagespeed.
   AddBaseProperty(
       false, &RewriteOptions::default_cache_html_, "dch",
       kDefaultCacheHtml,
@@ -1886,7 +1802,7 @@ void RewriteOptions::AddProperties() {
       kDefaultImageWebpTimeoutMs,
       &RewriteOptions::image_webp_timeout_ms_, "wt",
       kImageWebpTimeoutMs,
-      kProcessScope,
+      kLegacyProcessScope,
       NULL, true);  // TODO(jmarantz): write help & doc for mod_pagespeed.
   AddBaseProperty(
       kDefaultMaxInlinedPreviewImagesIndex,
@@ -2011,27 +1927,6 @@ void RewriteOptions::AddProperties() {
       kXModPagespeedHeaderValue,
       kDirectoryScope,
       "Set the value for the X-Mod-Pagespeed HTTP header", true);
-  AddBaseProperty(true, &RewriteOptions::distribute_fetches_, "dfe",
-                  kDistributeFetches, kProcessScope,
-                  "Whether or not to distribute IPRO and .pagespeed. resource "
-                  "fetch requests from the RewriteDriver before checking the "
-                  "cache.", true);
-  AddBaseProperty(
-      "", &RewriteOptions::distributed_rewrite_key_, "drwk",
-      kDistributedRewriteKey, kProcessScope,
-      "The key used to authenticate requests from one rewrite task "
-      "to another.  This should be random, greater than 8 characters (longer "
-      "is better), and the same value on each mod_pagespeed server config in "
-      "the rewrite cluster.", false);
-  AddBaseProperty(
-      "", &RewriteOptions::distributed_rewrite_servers_, "drws",
-      kDistributedRewriteServers, kProcessScope,
-     "A comma-separated list of hosts to use for distributed rewrites.", false);
-  AddBaseProperty(
-      kDefaultDistributedTimeoutMs,
-      &RewriteOptions::distributed_rewrite_timeout_ms_, "drwt",
-      kDistributedRewriteTimeoutMs, kProcessScope,
-      "Time to wait before giving up on a distributed rewrite request.", false);
   AddBaseProperty(
       true, &RewriteOptions::avoid_renaming_introspective_javascript_,
       "aris", kAvoidRenamingIntrospectiveJavascript,
@@ -2107,34 +2002,12 @@ void RewriteOptions::AddProperties() {
       kMaxCombinedJsBytes,
       kDirectoryScope,
       "Maximum size allowed for the combined JavaScript resource.", true);
-  AddBaseProperty(
-      false, &RewriteOptions::enable_blink_html_change_detection_,
-      "ebhcd", kEnableBlinkHtmlChangeDetection,
-      kDirectoryScope,
-      NULL, false);   // Not applicable for mod_pagespeed.
   // Currently not applicable for mod_pagespeed.
-  AddBaseProperty(
-      false,
-      &RewriteOptions::enable_blink_html_change_detection_logging_,
-      "ebhcdl", kEnableBlinkHtmlChangeDetectionLogging,
-      kDirectoryScope,
-      NULL, false);   // Not applicable for mod_pagespeed.
-  AddBaseProperty(
-      "", &RewriteOptions::critical_line_config_, "clc",
-      kCriticalLineConfig,
-      kDirectoryScope,
-      "Critical line xpath config for use by the split html filter.", true);
   AddBaseProperty(
       -1, &RewriteOptions::override_caching_ttl_ms_, "octm",
       kOverrideCachingTtlMs,
       kDirectoryScope,
       NULL, true);  // TODO(jmarantz): write help & doc for mod_pagespeed.
-  AddBaseProperty(
-      kDefaultMinCacheTtlMs,
-      &RewriteOptions::min_cache_ttl_ms_, "mctm",
-      kMinCacheTtlMs,
-      kDirectoryScope,
-      NULL, true);
   AddBaseProperty(
       5 * Timer::kSecondMs, &RewriteOptions::blocking_fetch_timeout_ms_,
       "bfto", RewriteOptions::kFetcherTimeOutMs,
@@ -2190,19 +2063,16 @@ void RewriteOptions::AddProperties() {
       &RewriteOptions::metadata_input_errors_cache_ttl_ms_,
       "mect", true);
   AddRequestProperty(
-      true, &RewriteOptions::enable_blink_debug_dashboard_, "ebdd", false);
-  AddRequestProperty(
-      kDefaultBlinkHtmlChangeDetectionTimeMs,
-      &RewriteOptions::blink_html_change_detection_time_ms_,
-      "bhcdt", false);
-  AddRequestProperty(
       false, &RewriteOptions::override_ie_document_mode_,
       "oidm", true);
-  AddBaseProperty(
-      false, &RewriteOptions::use_smart_diff_in_blink_, "usdb",
-      kUseSmartDiffInBlink,
-      kDirectoryScope,
-      NULL, false);   // Not applicable for mod_pagespeed.
+  AddBaseProperty("", &RewriteOptions::amp_link_pattern_, "alp",
+                  kAmpLinkPattern, kDirectoryScope, nullptr,
+                  true);  // Not applicable for mod_pagespeed.
+  AddBaseProperty(false, &RewriteOptions::honor_csp_, "hcsp",
+                  kHonorCsp, kServerScope,
+                  "Controls whether PageSpeed should pay attention to "
+                  "Content-Security-Policy directives",
+                  false);
 
   // Note: defer_javascript and defer_iframe were previously not
   // trusted on mobile user-agents, but have now matured to the point
@@ -2216,11 +2086,6 @@ void RewriteOptions::AddProperties() {
       kDirectoryScope,
       "Allows defer_javascript and defer_iframe for mobile browsers", true);
 
-  AddBaseProperty(
-      false, &RewriteOptions::serve_ghost_click_buster_with_split_html_,
-      "sgcbsh", kServeGhostClickBusterWithSplitHtml, kDirectoryScope,
-      "Serve ghost click buster code along with split html", false);
-
   AddBaseProperty(false, &RewriteOptions::serve_xhr_access_control_headers_,
                   "shach", kServeXhrAccessControlHeaders, kDirectoryScope,
                   "Serve access control headers with response headers", false);
@@ -2229,7 +2094,7 @@ void RewriteOptions::AddProperties() {
       "", &RewriteOptions::access_control_allow_origins_,
       "acao", kAccessControlAllowOrigins,
       kDirectoryScope,
-      "Comma seperated list of origins that are allowed to make cross-origin "
+      "Comma separated list of origins that are allowed to make cross-origin "
       "requests", false);
 
   AddBaseProperty(
@@ -2237,9 +2102,6 @@ void RewriteOptions::AddProperties() {
       "hrum", kHideRefererUsingMeta,
       kDirectoryScope,
       "Hides the referer by adding meta tag to the HTML", true);
-
-  AddRequestProperty(
-      -1, &RewriteOptions::blink_blacklist_end_timestamp_ms_, "bbet", false);
 
   AddBaseProperty(
       false, &RewriteOptions::preserve_subresource_hints_, "psrh",
@@ -2343,103 +2205,6 @@ void RewriteOptions::AddProperties() {
       "\"Auto\", \"None\", or comma separated list of strings chosen from "
       "\"Save-Data\", \"User-Agent\", and \"Accept\".", true);
 
-  AddBaseProperty(
-      false, &RewriteOptions::mob_always_, "malways", kAlwaysMobilize,
-      kQueryScope,
-      "(experimental) Unconditionally mobilize page regardless of user-agent.",
-      true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_beacon_category_, "mbeaconcat",
-      kMobBeaconCategory, kDirectoryScope,
-      "(experimental) Additional category info to pass to beacon.",
-      true);
-  AddBaseProperty(
-      kDefaultBeaconUrl, &RewriteOptions::mob_beacon_url_, "mbeaconurl",
-      kMobBeaconUrl, kDirectoryScope,
-      "(experimental) URL for beacons sent from the mobilization filter.",
-      true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_map_location_, "mlocation", kMobMapLocation,
-      kQueryScope,
-      "(experimental) map location for click-to-navigate.  This should be in "
-      "a form suitable for sending to a map query, and will not be exposed in "
-      "a web UI directly until map button is pressed", true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_phone_number_, "mphone", kMobPhoneNumber,
-      kQueryScope,
-      "(experimental) phone number for click-to-call.  This should be in "
-      "a form suitable for sending to a dialer, and will not be exposed in "
-      "a web UI directly until call button is pressed", true);
-  AddBaseProperty(
-      0, &RewriteOptions::mob_conversion_id_, "mcnvid", kMobConversionId,
-      kQueryScope,
-      "(experimental) conversion ID", true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_map_conversion_label_, "mpcnvl",
-      kMobMapConversionLabel, kQueryScope,
-      "(experimental) phone conversion Label", true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_phone_conversion_label_, "mmcnvl",
-      kMobPhoneConversionLabel, kQueryScope,
-      "(experimental) map conversion Label", true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_config_, "mconfig", kMobConfig,
-      kQueryScope,
-      "(experimental) whether to load interactive configuration GUI", true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_iframe_, "miframe", kMobIframe,
-      kQueryScope,
-      "(experimental) whether to use an iframe rather than proxying", true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_iframe_disable_, "miframedis",
-      kMobIframeDisable, kDirectoryScope,
-      "(experimental) serves a redirect to the original page for every request "
-      "for which MobIFrame is enabled.  Intended as a safety valve when an "
-      "iframed site is sending us traffic and we don't want to actually "
-      "mobilize it.", true);
-  // Note that setting this option to "none" turns off inserting an iframe. We
-  // use this because it's otherwise difficult to set the option to a blank
-  // string to override the default.
-  AddBaseProperty(
-      "width=device-width,initial-scale=1",
-      &RewriteOptions::mob_iframe_viewport_, "miframev", kMobIframeViewport,
-      kQueryScope,
-      "(experimental) the content of the viewport tag to insert "
-      "when in iframe mode. Set to \"none\" to avoid adding a viewport tag.",
-      true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_layout_, "mlayout", kMobLayout,
-      kQueryScope,
-      "(experimental) whether to run layout resynthesis when mobilizing", true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_nav_, "mnav", kMobNav,
-      kQueryScope,
-      "(experimental) whether to run navigation resynthesis when mobilizing",
-      true);
-  // TODO(jud): Rename or remove this option once we've settled on a final
-  // design for the mobilization header bar.
-  AddBaseProperty(
-      false, &RewriteOptions::mob_labeled_mode_, "mlabeled", kMobLabeledMode,
-      kQueryScope,
-      "(experimental) whether to use text labels in the header bar. Also "
-      "disables the menu button and the logo.",
-      true);
-  AddBaseProperty(
-      "", &RewriteOptions::mob_nav_classes_, "navcls", kMobNavClasses,
-      kQueryScope,
-      "Comma separated list of element classes or ids to treat as "
-      "navigational, or with leading - as non-navigational", true);
-  AddBaseProperty(
-      false, &RewriteOptions::mob_static_, "mstatic", kMobStatic,
-      kQueryScope,
-      "(experimental) whether to load discrete mobilization JS",
-      true);
-  AddBaseProperty(
-      MobTheme(), &RewriteOptions::mob_theme_, "mtheme", kMobTheme,
-      kServerScope,  // DO NOT MAKE THIS QueryScope --- that would XSS.
-      "(experimental) pre-computed theme for mobilization JS",
-      true);
-
   // Test-only, so no enum.
   AddRequestProperty(false,
                      &RewriteOptions::test_instant_fetch_rewrite_deadline_,
@@ -2457,7 +2222,16 @@ void RewriteOptions::AddProperties() {
   properties_->property(properties_->size() - 1)
       ->set_do_not_use_for_signature_computation(true);
 
-  //
+  // Some options are removed, but we recognize their names for backwards
+  // compatibility with config files that still have them.
+  AddDeprecatedProperty("MaxPrefetchJsElements", kDirectoryScope);
+  AddDeprecatedProperty("DistributeFetches", kServerScope);
+  AddDeprecatedProperty("DistributedRewriteKey", kServerScope);
+  AddDeprecatedProperty("DistributedRewriteServers", kServerScope);
+  AddDeprecatedProperty("DistributedRewriteTimeoutMs", kServerScope);
+  // No need for DistributableFilters, since nothing actually registered it with
+  // the hosting server.
+
   // Recently sriharis@ excluded a variety of options from
   // signature-computation which makes sense from the perspective
   // of metadata cache, however it makes Signature() useless for
@@ -2499,6 +2273,7 @@ void RewriteOptions::AddProperties() {
 }  // NOLINT  (large function)
 
 RewriteOptions::~RewriteOptions() {
+  STLDeleteElements(&resource_headers_);
   STLDeleteElements(&custom_fetch_headers_);
   STLDeleteElements(&experiment_specs_);
   STLDeleteElements(&url_cache_invalidation_entries_);
@@ -2583,11 +2358,13 @@ bool RewriteOptions::Properties::Terminate(Properties** properties_handle) {
 bool RewriteOptions::Initialize() {
   if (Properties::Initialize(&properties_)) {
     Properties::Initialize(&all_properties_);
+    Properties::Initialize(&deprecated_properties_);
     AddProperties();
     InitFilterIdToEnumArray();
     all_properties_->Merge(properties_);
     InitOptionIdToPropertyArray();
     InitOptionNameToPropertyArray();
+    InitFixedResourceHeaders();
 
     for (int f = 0; f < static_cast<int>(RewriteOptions::kEndOfFilters); ++f) {
       RewriteOptions::Filter filter = static_cast<RewriteOptions::Filter>(f);
@@ -2686,7 +2463,39 @@ void RewriteOptions::InitOptionNameToPropertyArray() {
   }
 }
 
+void RewriteOptions::InitFixedResourceHeaders() {
+  StringPieceVector* tmp = new StringPieceVector();
+  tmp->push_back(HttpAttributes::kAcceptRanges);
+  tmp->push_back(HttpAttributes::kCacheControl);
+  tmp->push_back(HttpAttributes::kContentEncoding);
+  tmp->push_back(HttpAttributes::kContentLength);
+  tmp->push_back(HttpAttributes::kContentType);
+  tmp->push_back(HttpAttributes::kDate);
+  tmp->push_back(HttpAttributes::kEtag);
+  tmp->push_back(HttpAttributes::kExpires);
+  tmp->push_back(HttpAttributes::kLastModified);
+  tmp->push_back(HttpAttributes::kLink);
+  tmp->push_back(HttpAttributes::kServer);
+  tmp->push_back(HttpAttributes::kVary);
+  fixed_resource_headers = tmp;
+
+  // From <https://www.ietf.org/rfc/rfc2616.txt>
+  // token          = 1*<any CHAR except CTLs or separators>
+  // separators     = "(" | ")" | "<" | ">" | "@"
+  //                      | "," | ";" | ":" | "\" | <">
+  //                      | "/" | "[" | "]" | "?" | "="
+  //                      | "{" | "}" | SP | HT
+  const GoogleString separators("()<>@,;:\\\"/[]?={} \t");
+  for (int i = 0, n = separators.size(); i < n; ++i) {
+    http_header_separators[static_cast<unsigned int>(separators.at(i))] = true;
+  }
+}
+
 bool RewriteOptions::Terminate() {
+  if (fixed_resource_headers != NULL) {
+    delete fixed_resource_headers;
+    fixed_resource_headers = NULL;
+  }
   if (Properties::Terminate(&properties_)) {
     DCHECK(option_id_to_property_array_ != NULL);
     delete [] option_id_to_property_array_;
@@ -2696,6 +2505,7 @@ bool RewriteOptions::Terminate() {
     delete option_name_to_property_map_;
     option_name_to_property_map_ = NULL;
     Properties::Terminate(&all_properties_);
+    Properties::Terminate(&deprecated_properties_);
     return true;
   }
   return false;
@@ -2748,33 +2558,36 @@ GoogleString RewriteOptions::GetExperimentStateStr() const {
 }
 
 void RewriteOptions::DisallowTroublesomeResources() {
-  // http://code.google.com/p/modpagespeed/issues/detail?id=38
+  // http://github.com/pagespeed/mod_pagespeed/issues/38
   Disallow("*js_tinyMCE*");  // js_tinyMCE.js
   // Official tinyMCE URLs: tiny_mce.js, tiny_mce_src.js, tiny_mce_gzip.php, ...
   Disallow("*tiny_mce*");
   // I've also seen tinymce.js
   Disallow("*tinymce*");
 
-  // http://code.google.com/p/modpagespeed/issues/detail?id=352
+  // http://github.com/pagespeed/mod_pagespeed/issues/352
   Disallow("*scriptaculous.js*");
 
-  // http://code.google.com/p/modpagespeed/issues/detail?id=186
+  // http://github.com/pagespeed/mod_pagespeed/issues/186
   // ckeditor.js, ckeditor_basic.js, ckeditor_basic_source.js, ...
   Disallow("*ckeditor*");
 
-  // http://code.google.com/p/modpagespeed/issues/detail?id=207
+  // https://github.com/pagespeed/mod_pagespeed/issues/1405
+  Disallow("*/wp-admin/*");
+
+  // http://github.com/pagespeed/mod_pagespeed/issues/207
   // jquery-ui-1.8.2.custom.min.js, jquery-1.4.4.min.js, jquery.fancybox-...
   //
   // TODO(sligocki): Is jquery actually a problem? Perhaps specific
   // jquery libraries (like tiny MCE). Investigate before disabling.
   // Disallow("*jquery*");
 
-  // http://code.google.com/p/modpagespeed/issues/detail?id=216
+  // http://github.com/pagespeed/mod_pagespeed/issues/216
   // Appears to be an issue with old version of jsminify.
   // Disallow("*swfobject*");  // swfobject.js
 
   // TODO(sligocki): Add disallow for the JS broken in:
-  // http://code.google.com/p/modpagespeed/issues/detail?id=142
+  // http://github.com/pagespeed/mod_pagespeed/issues/142
   // Not clear which JS file is broken and proxying is not working correctly.
 
   // Disable lazyload_images if there is another known lazyloader present.
@@ -2890,27 +2703,6 @@ void RewriteOptions::ForceEnableFilter(Filter filter) {
 
   // remove from set of forbidden filters.
   modified_ |= forbidden_filters_.Erase(filter);
-}
-
-void RewriteOptions::DistributeFiltersByCommaSeparatedList(
-    const StringPiece& filters, MessageHandler* handler) {
-  StringPieceVector names;
-  SplitStringPieceToVector(filters, ",", &names, true);
-  for (int i = 0, n = names.size(); i < n; ++i) {
-    DistributeFilter(names[i]);
-  }
-}
-
-void RewriteOptions::DistributeFilter(const StringPiece& filter_id) {
-  DCHECK(!frozen_);
-  std::pair<FilterIdSet::iterator, bool> inserted =
-      distributable_filters_.insert(filter_id.as_string());
-  modified_ |= inserted.second;
-}
-
-bool RewriteOptions::Distributable(const StringPiece& filter_id) const {
-  return distributable_filters_.find(filter_id.as_string())
-      != distributable_filters_.end();
 }
 
 void RewriteOptions::EnableExtendCacheFilters() {
@@ -3054,6 +2846,7 @@ bool RewriteOptions::AddByNameToFilterSet(
       set->Insert(kConvertGifToPng);
       set->Insert(kConvertJpegToProgressive);
       set->Insert(kConvertJpegToWebp);
+      set->Insert(kConvertPngToJpeg);
       set->Insert(kJpegSubsampling);
       set->Insert(kRecompressJpeg);
       set->Insert(kRecompressPng);
@@ -3181,6 +2974,19 @@ bool RewriteOptions::IsValidOptionName(StringPiece name) {
   return (LookupOptionByName(name) != NULL);
 }
 
+bool RewriteOptions::IsDeprecatedOptionName(StringPiece option_name) {
+  // If this ever becomes hot, we should make a proper index, rather than
+  // using a Properties object to store these.
+  for (int i = 0, n = deprecated_properties_->size(); i < n; ++i) {
+    if (StringCaseEqual(
+            option_name,
+            deprecated_properties_->property(i)->option_name())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool RewriteOptions::SetOptionsFromName(const OptionSet& option_set,
                                         MessageHandler* handler) {
   bool ret = true;
@@ -3275,6 +3081,9 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
   // Assume all goes well; if not, set result accordingly.
   result = RewriteOptions::kOptionOk;
 
+  // Avoid adding more options like this.  All new options should be set via
+  // RewriteOptions::AddProperty.  If you have to add one here, also add it to
+  // compile_scripts in ngx_rewrite_options.cc.
   // TODO(matterbury): use a hash map for faster lookup/switching.
   if (StringCaseEqual(name, kAllow)) {
     Allow(arg);
@@ -3285,8 +3094,6 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
     }
   } else if (StringCaseEqual(name, kDisallow)) {
     Disallow(arg);
-  } else if (StringCaseEqual(name, kDistributableFilters)) {
-    DistributeFiltersByCommaSeparatedList(arg, handler);
   } else if (StringCaseEqual(name, kDomain)) {
     WriteableDomainLawyer()->AddDomain(arg, handler);
   } else if (StringCaseEqual(name, kProxySuffix)) {
@@ -3342,6 +3149,8 @@ RewriteOptions::ParseAndSetOptionFromNameWithScope(
     RetainComment(arg);
   } else if (StringCaseEqual(name, kBlockingRewriteRefererUrls)) {
     EnableBlockingRewriteForRefererUrlPattern(arg);
+  } else if (StringCaseEqual(name, kPermitIdsForCssCombining)) {
+    AddCssCombiningWildcard(arg);
   } else {
     result = RewriteOptions::kOptionNameUnknown;
   }
@@ -3355,7 +3164,11 @@ RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName2(
   OptionSettingResult result = RewriteOptions::kOptionOk;
 
   // TODO(matterbury): use a hash map for faster lookup/switching.
-  if (StringCaseEqual(name, kCustomFetchHeader)) {
+  if (StringCaseEqual(name, kAddResourceHeader)) {
+    if (!ValidateAndAddResourceHeader(arg1, arg2, msg)) {
+      return RewriteOptions::kOptionValueInvalid;
+    }
+  } else if (StringCaseEqual(name, kCustomFetchHeader)) {
     AddCustomFetchHeader(arg1, arg2);
   } else if (StringCaseEqual(name, kLoadFromFile)) {
     file_load_policy()->Associate(arg1, arg2);
@@ -3442,14 +3255,13 @@ RewriteOptions::OptionSettingResult RewriteOptions::ParseAndSetOptionFromName3(
 
 StringPiece RewriteOptions::GetEffectiveOptionName(StringPiece name) {
   StringPiece effective_name = name;
-  std::vector<DeprecatedOptionMap>::iterator id =
-       std::lower_bound(kDeprecatedOptionNameList.begin(),
-                        kDeprecatedOptionNameList.end(),
-                        name,
-                        DeprecatedOptionMap::LessThan);
-  if (id != kDeprecatedOptionNameList.end() &&
-      StringCaseEqual(name, id->deprecated_option_name)) {
-    effective_name = id->new_option_name;
+  const RenamedOptionMap* end = kRenamedOptionNameData +
+      arraysize(kRenamedOptionNameData);
+  const RenamedOptionMap* entry =
+      std::lower_bound(kRenamedOptionNameData, end, name,
+                       &RenamedOptionMap::LessThan);
+  if ((entry != end) && StringCaseEqual(name, entry->deprecated_option_name)) {
+    effective_name = entry->new_option_name;
   }
   return effective_name;
 }
@@ -3540,6 +3352,8 @@ bool RewriteOptions::ParseFromString(StringPiece value_string,
     *value = bool_value ? kEnabledOn : kEnabledOff;
   } else if (StringCaseEqual(value_string, "unplugged")) {
     *value = kEnabledUnplugged;
+  } else if (StringCaseEqual(value_string, "standby")) {
+    *value = kEnabledStandby;
   } else {
     // value_string is not "true"/"false" or "on"/"off"/"unplugged".
     // Return a parse error.
@@ -3752,19 +3566,49 @@ int64 RewriteOptions::MaxImageInlineMaxBytes() const {
 
 void RewriteOptions::GetEnabledFiltersRequiringScriptExecution(
     RewriteOptions::FilterVector* filters) const {
-  for (int i = 0, n = arraysize(kRequiresScriptExecutionFilterSet); i < n;
-       ++i) {
-    if (Enabled(kRequiresScriptExecutionFilterSet[i])) {
-      filters->push_back(kRequiresScriptExecutionFilterSet[i]);
+  for (RewriteOptions::Filter filter : kRequiresScriptExecutionFilterSet) {
+    if (Enabled(filter)) {
+      filters->push_back(filter);
     }
   }
 }
 
 void RewriteOptions::DisableFiltersRequiringScriptExecution() {
-  for (int i = 0, n = arraysize(kRequiresScriptExecutionFilterSet); i < n;
-       ++i) {
-    DisableFilter(kRequiresScriptExecutionFilterSet[i]);
+  for (RewriteOptions::Filter filter : kRequiresScriptExecutionFilterSet) {
+    DisableFilter(filter);
   }
+}
+
+void RewriteOptions::DisableFiltersThatCantRunInAjax() {
+  DisableFiltersRequiringScriptExecution();
+  for (RewriteOptions::Filter filter : kAddHeadFilters) {
+    DisableFilter(filter);
+  }
+
+  // Note that kPrioritizeCriticalCss does not require script execution for
+  // correct behavior because it adds its own <noscript> block.  This is better
+  // than a noscript-redirect, which is what we need to do for filters that
+  // require JS to run for the page to render correctly.  But we still need
+  // to disable it for ajax requests because it's fundamentally a whole-page
+  // optimization.
+  DisableFilter(RewriteOptions::kPrioritizeCriticalCss);
+
+  // Don't modify URLs for ajax requests, in case they are relative.
+  //
+  // TODO(jmarantz): would be better to enable rewriting of absolute URLs but
+  // disable rewriting of relative URLs.
+  set_css_preserve_urls(true);
+  set_image_preserve_urls(true);
+  set_js_preserve_urls(true);
+}
+
+bool RewriteOptions::RequiresAddHead() const {
+  for (RewriteOptions::Filter filter : kAddHeadFilters) {
+    if (Enabled(filter)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool RewriteOptions::UsePerOriginPropertyCachePage() const {
@@ -3830,13 +3674,6 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
 
   enabled_filters_.EraseSet(forbidden_filters_);
 
-  for (FilterIdSet::const_iterator p = src.distributable_filters_.begin(),
-           e = src.distributable_filters_.end(); p != e; ++p) {
-    StringPiece filter_id = *p;
-    // Distributable filters union when merged.
-    distributable_filters_.insert(filter_id.as_string());
-  }
-
   experiment_id_ = src.experiment_id_;
   for (int i = 0, n = src.experiment_specs_.size(); i < n; ++i) {
     ExperimentSpec* spec = src.experiment_specs_[i]->Clone();
@@ -3846,6 +3683,10 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
   if (src.downstream_cache_purge_location_prefix_.was_set()) {
     set_downstream_cache_purge_location_prefix(
       src.downstream_cache_purge_location_prefix());
+  }
+  for (int i = 0, n = src.resource_headers_.size(); i < n; ++i) {
+    NameValue* nv = src.resource_headers_[i];
+    AddResourceHeader(nv->name, nv->value);
   }
   for (int i = 0, n = src.custom_fetch_headers_.size(); i < n; ++i) {
     NameValue* nv = src.custom_fetch_headers_[i];
@@ -3899,6 +3740,7 @@ void RewriteOptions::Merge(const RewriteOptions& src) {
       src.allow_when_inlining_resources_);
   retain_comments_.MergeOrShare(src.retain_comments_);
   lazyload_enabled_classes_.MergeOrShare(src.lazyload_enabled_classes_);
+  css_combining_permitted_ids_.MergeOrShare(src.css_combining_permitted_ids_);
   blocking_rewrite_referer_urls_.MergeOrShare(
       src.blocking_rewrite_referer_urls_);
   override_caching_wildcard_.MergeOrShare(src.override_caching_wildcard_);
@@ -3952,7 +3794,7 @@ void RewriteOptions::MergeOnlyProcessScopeOptions(const RewriteOptions& src) {
                                      src.all_options_.size());
   for (size_t i = 0; i < options_to_merge; ++i) {
     OptionScope scope = all_options_[i]->scope();
-    if (scope == kProcessScope || scope == kProcessScopeStrict) {
+    if (scope == kLegacyProcessScope || scope == kProcessScopeStrict) {
       all_options_[i]->Merge(src.all_options_[i]);
     }
   }
@@ -4133,6 +3975,8 @@ void RewriteOptions::ComputeSignatureLockHeld() {
             allow_when_inlining_resources_->Signature(), "_");
   StrAppend(&signature_, "RC:", retain_comments_->Signature(), "_");
   StrAppend(&signature_, "LDC:", lazyload_enabled_classes_->Signature(), "_");
+  StrAppend(&signature_, "CCPI:",
+            css_combining_permitted_ids_->Signature(), "_");
   StrAppend(&signature_, "BRRU:",
             blocking_rewrite_referer_urls_->Signature(), "_");
   StrAppend(&signature_, "UCI:");
@@ -4342,6 +4186,7 @@ GoogleString RewriteOptions::OptionsToString() const {
     case kEnabledOff:       StrAppend(&output, "off\n\n"); break;
     case kEnabledOn:        StrAppend(&output, "on\n\n"); break;
     case kEnabledUnplugged: StrAppend(&output, "unplugged\n\n"); break;
+    case kEnabledStandby:   StrAppend(&output, "standby\n\n"); break;
   }
   output += "Filters\n";
   for (int i = kFirstFilter; i != kEndOfFilters; ++i) {
@@ -4575,6 +4420,104 @@ bool RewriteOptions::MergeOK() const {
 }
 #endif
 
+bool RewriteOptions::ValidateConfiguredHttpHeader(const GoogleString& name,
+                                                  const GoogleString& value,
+                                                  GoogleString* error_message) {
+  DCHECK(error_message != NULL);
+
+  if (error_message == NULL) {
+    return false;
+  }
+
+  // Reject empty field names. Empty field-values are acceptable.
+  // Impose a max length of 1024 on both field-name and field-value.
+  if (name.size() == 0) {
+    *error_message = "Empty field name not allowed";
+    return false;
+  }
+  if (name.size() > 1024) {
+    *error_message = "Field name too long";
+  }
+  if (value.size() > 1024) {
+    *error_message = "Field value too long";
+    return false;
+  }
+
+  for (int i = 0, n = name.size(); i < n; ++i) {
+    char c = name[i];
+    if (!IsNonControlAscii(c)) {
+      *error_message = StrCat("Invalid character in field name: ",
+                              GoogleString(1, c));
+      return false;
+    }
+    if (http_header_separators[static_cast<unsigned int>(c)]) {
+      *error_message = StrCat("Separator found in field name: ",
+                              GoogleString(1, c));
+      return false;
+    }
+  }
+
+  for (int i = 0, n = value.size(); i < n; ++i) {
+    // Formally the value may have any OCTET except CNTL, but including LWS.
+    // But in practice I think this is fair enough for our use case:
+    if (!IsNonControlAscii(value[i])) {
+      *error_message = StrCat("Invalid character in field value: ",
+                              GoogleString(1, value[i]));
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool RewriteOptions::ValidateAndAddResourceHeader(const StringPiece& name,
+                                                  const StringPiece& value,
+                                                  GoogleString* error_message) {
+  GoogleString gs_name;
+  GoogleString gs_value;
+
+  // Trim our input of whitespace, as we don't want any interpretation of that
+  // (especially header folding), and it probably was not intentionally
+  // configured like that anyway.
+  TrimWhitespace(name, &gs_name);
+  TrimWhitespace(value, &gs_value);
+
+  if (ValidateConfiguredHttpHeader(gs_name, gs_value, error_message)) {
+    // We don't allow overwriting hop-by-hop headers like Connection.
+    StringPieceVector hbh = HttpAttributes::SortedHopByHopHeaders();
+    StringCompareInsensitive compare;
+    if (std::binary_search(&hbh[0], &hbh[0] + hbh.size(), gs_name, compare)) {
+        *error_message = StrCat("Rejecting hop by hop header '", name, " '");
+        return false;
+    }
+
+    // We don't allow overwriting of headers we compute, like Cache-Control.
+    // In addition, there's a few other headers that should not be allowed
+    // so reject those fields as well:
+    const StringPiece* start = &fixed_resource_headers->at(0);
+    if (std::binary_search(
+        start, start + fixed_resource_headers->size(), gs_name, compare)) {
+        *error_message = StrCat("Rejecting header '", name, " '");
+        return false;
+    }
+
+    // Arbitrary limit of adding 20 headers
+    if (resource_headers_.size() > 20) {
+      *error_message = "Too many AddResourceHeader directives (max: 20)";
+      return false;
+    }
+    AddResourceHeader(gs_name, gs_value);
+    return true;
+  }
+  return false;
+}
+
+void RewriteOptions::AddResourceHeader(const StringPiece& name,
+                                       const StringPiece& value) {
+  resource_headers_.push_back(new NameValue(name, value));
+}
+
+// TODO(oschaaf): should AddCustomFetchHeader have validations as well?
 void RewriteOptions::AddCustomFetchHeader(const StringPiece& name,
                                           const StringPiece& value) {
   custom_fetch_headers_.push_back(new NameValue(name, value));
@@ -5191,8 +5134,12 @@ HttpOptions RewriteOptions::ComputeHttpOptions() const {
   HttpOptions options;
   options.respect_vary = respect_vary();
   options.implicit_cache_ttl_ms = implicit_cache_ttl_ms();
-  options.min_cache_ttl_ms = min_cache_ttl_ms();
   return options;
+}
+
+bool RewriteOptions::NeedsDependenciesCohort() const {
+  return Enabled(kExperimentHttp2) ||
+         Enabled(kHintPreloadSubresources);
 }
 
 bool RewriteOptions::CacheFragmentOption::SetFromString(
@@ -5200,6 +5147,10 @@ bool RewriteOptions::CacheFragmentOption::SetFromString(
   // The main thing here is that the fragment not contain '/' (the separator
   // used by HTTPCache) or '.' (so that a fragment can't be confused for a Host:
   // header) but use a whitelist to be on the safe side.
+  //
+  // This has security implications.  If you could set the fragment to
+  // "good.com" when running "evil.com" you could posion good.com's cache.  See
+  // the comment at the top of http_cache.h.
   for (int i = 0, n = value.length(); i < n; ++i) {
     const char c = value.data()[i];
     if (!IsAsciiAlphaNumeric(c) && c != '-' && c != '_') {
@@ -5222,7 +5173,7 @@ GoogleString RewriteOptions::ScopeEnumToString(OptionScope scope) {
       return "Directory";
     case kServerScope:
       return "Server";
-    case kProcessScope:
+    case kLegacyProcessScope:
       return "Process";
     case kProcessScopeStrict:
       return "Process Strict";

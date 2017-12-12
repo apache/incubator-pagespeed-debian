@@ -24,10 +24,12 @@
 #include <utility>  // for pair
 
 #include "base/logging.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/rde_hash_map.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_hash.h"
+#include "pagespeed/kernel/base/string_util.h"
 
 
 namespace net_instaweb {
@@ -146,7 +148,7 @@ class LRUCacheBase {
 
   // Puts an object into the cache.  The value is copied using the assignment
   // operator.
-  void Put(const GoogleString& key, ValueType* new_value) {
+  void Put(const GoogleString& key, const ValueType& new_value) {
     // Just do one map operation, calling the awkward 'insert' which returns
     // a pair.  The bool indicates whether a new value was inserted, and the
     // iterator provides access to the element, whether it's new or old.
@@ -166,10 +168,10 @@ class LRUCacheBase {
       // Protect the element that we are rewriting by erasing
       // it from the entry_list prior to calling EvictIfNecessary,
       // which can't find it if it isn't in the list.
-      if (!value_helper_->ShouldReplace(key_value->second, *new_value)) {
+      if (!value_helper_->ShouldReplace(key_value->second, new_value)) {
         need_to_insert = false;
       } else {
-        if (value_helper_->Equal(*new_value, key_value->second)) {
+        if (value_helper_->Equal(new_value, key_value->second)) {
           map_iter->second = Freshen(cell);
           need_to_insert = false;
           ++num_identical_reinserts_;
@@ -189,9 +191,9 @@ class LRUCacheBase {
       // insertions the same way.  In both cases, the new key is in the map
       // as a result of the call to map_.insert above.
 
-      if (EvictIfNecessary(key.size() + value_helper_->size(*new_value))) {
+      if (EvictIfNecessary(key.size() + value_helper_->size(new_value))) {
         // The new value fits.  Put it in the LRU-list.
-        KeyValuePair* kvp = new KeyValuePair(map_iter->first, *new_value);
+        KeyValuePair* kvp = new KeyValuePair(map_iter->first, new_value);
         lru_ordered_list_.push_front(kvp);
         map_iter->second = lru_ordered_list_.begin();
         ++num_inserts_;
@@ -219,7 +221,7 @@ class LRUCacheBase {
   void DeleteWithPrefixForTesting(StringPiece prefix) {
     typename Map::iterator p = map_.begin();
     while (p != map_.end()) {
-      if (HasPrefixString(p->first, prefix)) {
+      if (strings::StartsWith(p->first, prefix)) {
         typename Map::iterator next = p;
         ++next;
         DeleteAt(p);

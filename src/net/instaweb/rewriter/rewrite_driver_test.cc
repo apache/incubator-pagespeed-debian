@@ -38,6 +38,7 @@
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
 #include "net/instaweb/rewriter/public/test_rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/test_url_namer.h"
+#include "net/instaweb/rewriter/public/url_namer.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest.h"
@@ -183,6 +184,8 @@ const char kRewrittenCachableHtmlWithCollapseWhitespace[] =
     "<html>\n<link rel=stylesheet href=a.css> "
     "<link rel=stylesheet href=test/b.css></html>";
 
+// TODO(jmarantz): Add some more functional tests to RewriteDriver.  For the
+// moment this test really ensures that we can link a rewriting executable.
 TEST_F(RewriteDriverTest, NoChanges) {
   ValidateNoChanges("no_changes",
                     "<head><script src=\"foo.js\"></script></head>"
@@ -363,7 +366,7 @@ TEST_F(RewriteDriverTestUrlNamer, TestEncodedUrls) {
                          "ADDCXPWGGP1VTHJIYU13IIFQYSYMGKIMSFIEBM+HCAACVNGO8CX"
                          "XO%81%9F%F1m/", &encoded_url);
   // By default TestUrlNamer doesn't proxy but we need it to for this test.
-  TestUrlNamer::SetProxyMode(true);
+  TestUrlNamer::SetProxyMode(UrlNamer::ProxyExtent::kFull);
   EXPECT_FALSE(CanDecodeUrl(encoded_url));
 }
 
@@ -373,7 +376,7 @@ TEST_F(RewriteDriverTestUrlNamer, TestDecodeUrls) {
       "http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg"));
   rewrite_driver()->AddFilters();
   StringVector urls;
-  TestUrlNamer::SetProxyMode(true);
+  TestUrlNamer::SetProxyMode(UrlNamer::ProxyExtent::kFull);
   EXPECT_TRUE(rewrite_driver()->DecodeUrl(gurl_good, &urls));
   EXPECT_EQ(1, urls.size());
   EXPECT_EQ("http://example.com/Puzzle.jpg", urls[0]);
@@ -401,7 +404,7 @@ TEST_F(RewriteDriverTestUrlNamer, TestDecodeUrls) {
 
   // ProxyMode off
   urls.clear();
-  TestUrlNamer::SetProxyMode(false);
+  TestUrlNamer::SetProxyMode(UrlNamer::ProxyExtent::kNone);
   SetUseTestUrlNamer(false);
   gurl_good.Reset(Encode(
       "http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg"));
@@ -416,6 +419,40 @@ TEST_F(RewriteDriverTestUrlNamer, TestDecodeUrls) {
   EXPECT_EQ(2, urls.size());
   EXPECT_EQ("http://example.com/a.css", urls[0]);
   EXPECT_EQ("http://example.com/b.css", urls[1]);
+}
+
+TEST_F(RewriteDriverTestUrlNamer, InputOnlyMode) {
+  TestUrlNamer::SetProxyMode(UrlNamer::ProxyExtent::kInputOnly);
+  rewrite_driver()->AddFilters();
+
+  GoogleUrl at_proxy(
+      Encode("http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg"));
+
+  TestUrlNamer::UseNormalEncoding(true);
+  GoogleUrl direct(
+      Encode("http://example.com/", "ce", "HASH", "Puzzle.jpg", "jpg"));
+
+  StringVector urls;
+  // In input-only mode, We should be able to decode both.
+  EXPECT_TRUE(rewrite_driver()->DecodeUrl(at_proxy, &urls));
+  ASSERT_EQ(1, urls.size());
+  EXPECT_EQ("http://example.com/Puzzle.jpg", urls[0]);
+
+  urls.clear();
+  EXPECT_TRUE(rewrite_driver()->DecodeUrl(direct, &urls));
+  ASSERT_EQ(1, urls.size());
+  EXPECT_EQ("http://example.com/Puzzle.jpg", urls[0]);
+
+  // Now try with full proxy mode. That should accept only proxy-encoded.
+  TestUrlNamer::SetProxyMode(UrlNamer::ProxyExtent::kFull);
+  urls.clear();
+  EXPECT_TRUE(rewrite_driver()->DecodeUrl(at_proxy, &urls));
+  ASSERT_EQ(1, urls.size());
+  EXPECT_EQ("http://example.com/Puzzle.jpg", urls[0]);
+
+  urls.clear();
+  EXPECT_FALSE(rewrite_driver()->DecodeUrl(direct, &urls));
+  EXPECT_EQ(0, urls.size());
 }
 
 // Test to make sure we do not put in extra things into the cache.
@@ -755,6 +792,7 @@ TEST_F(RewriteDriverTest, TestComputeCurrentFlushWindowRewriteDelayMs) {
   options()->set_rewrite_deadline_ms(1000);
 
   // "Start" a parse to configure the start time in the driver.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParseId("http://site.com/",
                                              "compute_flush_window_test",
                                              kContentTypeHtml));
@@ -829,6 +867,7 @@ TEST_F(RewriteDriverTest, TestCacheUseOnTheFlyWithInvalidation) {
 
 TEST_F(RewriteDriverTest, BaseTags) {
   // Starting the parse, the base-tag will be derived from the html url.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
   rewrite_driver()->Flush();
   EXPECT_EQ("http://example.com/index.html", BaseUrlSpec());
@@ -861,6 +900,7 @@ TEST_F(RewriteDriverTest, BaseTags) {
 
 TEST_F(RewriteDriverTest, RelativeBaseTag) {
   // Starting the parse, the base-tag will be derived from the html url.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
   rewrite_driver()->ParseText("<base href='subdir/'>");
   rewrite_driver()->Flush();
@@ -870,6 +910,7 @@ TEST_F(RewriteDriverTest, RelativeBaseTag) {
 
 TEST_F(RewriteDriverTest, InvalidBaseTag) {
   // Encountering an invalid base tag should be ignored (except info message).
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // Note: Even nonsensical protocols must be accepted as base URLs.
@@ -1149,7 +1190,7 @@ TEST_F(RewriteDriverTest, LoadResourcesFromFiles) {
 }
 
 // Make sure the content-type is set correctly, even for URLs with queries.
-// http://code.google.com/p/modpagespeed/issues/detail?id=405
+// http://github.com/pagespeed/mod_pagespeed/issues/405
 TEST_F(RewriteDriverTest, LoadResourcesContentType) {
   rewrite_driver()->AddFilters();
 
@@ -1194,6 +1235,7 @@ class MockRewriteContext : public SingleRewriteContext {
 
   virtual void RewriteSingle(const ResourcePtr& input,
                              const OutputResourcePtr& output) {}
+  bool PolicyPermitsRendering() const override { return true; }
   virtual const char* id() const { return "mock"; }
   virtual OutputResourceKind kind() const { return kOnTheFlyResource; }
 };
@@ -1242,8 +1284,8 @@ TEST_F(RewriteDriverTest, RejectDataResourceGracefully) {
   MockRewriteContext context(rewrite_driver());
   GoogleUrl dataUrl("data:");
   bool is_authorized;
-  ResourcePtr resource(rewrite_driver()->CreateInputResource(dataUrl,
-                                                             &is_authorized));
+  ResourcePtr resource(rewrite_driver()->CreateInputResource(
+      dataUrl, RewriteDriver::InputRole::kImg, &is_authorized));
   EXPECT_TRUE(resource.get() == NULL);
   EXPECT_TRUE(is_authorized);
 }
@@ -1254,13 +1296,14 @@ TEST_F(RewriteDriverTest, RejectDataResourceGracefully) {
 TEST_F(RewriteDriverTest, NoCreateInputResourceUnauthorized) {
   MockRewriteContext context(rewrite_driver());
   // Call StartParseUrl so that the base_url gets set to a non-empty string.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // Test that an unauthorized resource is not allowed to be created.
   GoogleUrl unauthorized_url("http://unauthorized.domain.com/a.js");
   bool is_authorized;
-  ResourcePtr resource(rewrite_driver()->CreateInputResource(unauthorized_url,
-                                                             &is_authorized));
+  ResourcePtr resource(rewrite_driver()->CreateInputResource(
+      unauthorized_url, RewriteDriver::InputRole::kScript, &is_authorized));
   EXPECT_TRUE(resource.get() == NULL);
   EXPECT_FALSE(is_authorized);
 
@@ -1271,6 +1314,7 @@ TEST_F(RewriteDriverTest, NoCreateInputResourceUnauthorized) {
       authorized_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource2.get() != NULL);
   EXPECT_TRUE(is_authorized);
@@ -1286,6 +1330,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorized) {
 
   MockRewriteContext context(rewrite_driver());
   // Call StartParseUrl so that the base_url gets set to a non-empty string.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // Test that an unauthorized resource is created with the right cache key.
@@ -1295,6 +1340,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorized) {
       unauthorized_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource.get() != NULL);
   EXPECT_FALSE(is_authorized);
@@ -1308,6 +1354,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorized) {
       authorized_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource2.get() != NULL);
   EXPECT_TRUE(is_authorized);
@@ -1320,6 +1367,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorized) {
       unauthorized_url,
       RewriteDriver::kInlineOnlyAuthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource3.get() == NULL);
   EXPECT_FALSE(is_authorized);
@@ -1327,7 +1375,8 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorized) {
   // Test that an unauthorized resource is not created with the default
   // CreateInputResource call.
   ResourcePtr resource4(
-      rewrite_driver()->CreateInputResource(unauthorized_url, &is_authorized));
+      rewrite_driver()->CreateInputResource(
+          unauthorized_url, RewriteDriver::InputRole::kScript, &is_authorized));
   EXPECT_TRUE(resource4.get() == NULL);
   EXPECT_FALSE(is_authorized);
 }
@@ -1340,6 +1389,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorizedWithDisallow) {
 
   MockRewriteContext context(rewrite_driver());
   // Call StartParseUrl so that the base_url gets set to a non-empty string.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // Test that an unauthorized resource is not created when it is disallowed.
@@ -1349,6 +1399,7 @@ TEST_F(RewriteDriverTest, CreateInputResourceUnauthorizedWithDisallow) {
       unauthorized_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource.get() == NULL);
   EXPECT_FALSE(is_authorized);
@@ -1360,6 +1411,7 @@ TEST_F(RewriteDriverTest, AllowWhenInliningOverridesDisallow) {
 
   MockRewriteContext context(rewrite_driver());
   // Call StartParseUrl so that the base_url gets set to a non-empty string.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // This resource would normally not be created because it is disallowed,
@@ -1370,6 +1422,7 @@ TEST_F(RewriteDriverTest, AllowWhenInliningOverridesDisallow) {
       js_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForInlining,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_FALSE(resource.get() == NULL);
   EXPECT_TRUE(is_authorized);
@@ -1381,6 +1434,7 @@ TEST_F(RewriteDriverTest, AllowWhenInliningDoesntOverrideDisallow) {
 
   MockRewriteContext context(rewrite_driver());
   // Call StartParseUrl so that the base_url gets set to a non-empty string.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(rewrite_driver()->StartParse("http://example.com/index.html"));
 
   // This resource would normally not be created because it is disallowed, and
@@ -1391,6 +1445,7 @@ TEST_F(RewriteDriverTest, AllowWhenInliningDoesntOverrideDisallow) {
       js_url,
       RewriteDriver::kInlineUnauthorizedResources,
       RewriteDriver::kIntendedForGeneral,
+      RewriteDriver::InputRole::kScript,
       &is_authorized));
   EXPECT_TRUE(resource.get() == NULL);
   EXPECT_FALSE(is_authorized);
@@ -1468,6 +1523,7 @@ TEST_F(RewriteDriverTest, DetermineEnabledTest) {
   DetermineEnabledCheckingFilter* filter =
       new DetermineEnabledCheckingFilter();
   driver->AddOwnedEarlyPreRenderFilter(filter);
+  rewrite_driver()->AddFilters();
   driver->StartParse("http://example.com/index.html");
   rewrite_driver()->ParseText("<div>");
   driver->Flush();
@@ -1497,6 +1553,7 @@ TEST_F(RewriteDriverTest, ResponseHeadersAccess) {
   driver->AddOwnedPostRenderFilter(new ResponseHeadersCheckingFilter(driver));
 
   // Starting the parse, the base-tag will be derived from the html url.
+  rewrite_driver()->AddFilters();
   ASSERT_TRUE(driver->StartParse("http://example.com/index.html"));
   rewrite_driver()->ParseText("<div>");
   driver->Flush();
@@ -2100,10 +2157,18 @@ TEST_F(RewriteDriverTest, SetRequestHeadersPopulatesWebpNoAccept) {
 // rewritten in the very first go.
 class DownstreamCacheWithPossiblePurgeTest : public RewriteDriverTest {
  protected:
-  void SetUp() {
+  void SetUp() override {
     options()->EnableFilter(RewriteOptions::kExtendCacheCss);
     SetUseManagedRewriteDrivers(true);
     RewriteDriverTest::SetUp();
+  }
+
+  void TearDown() override {
+    // We need to clean up the other rewrite driver manually since we don't
+    // parse anything through it --- NewRewriteDriver is called, but nothing
+    // else is done otherwise.
+    other_rewrite_driver()->Cleanup();
+    RewriteDriverTest::TearDown();
   }
 };
 
@@ -2112,10 +2177,18 @@ class DownstreamCacheWithPossiblePurgeTest : public RewriteDriverTest {
 // in the very first go.
 class DownstreamCacheWithNoPossiblePurgeTest : public RewriteDriverTest {
  protected:
-  void SetUp() {
+  void SetUp() override {
     options()->EnableFilter(RewriteOptions::kCollapseWhitespace);
     SetUseManagedRewriteDrivers(true);
     RewriteDriverTest::SetUp();
+  }
+
+  void TearDown() override {
+    // We need to clean up the other rewrite driver manually since we don't
+    // parse anything through it --- NewRewriteDriver is called, but nothing
+    // else is done otherwise.
+    other_rewrite_driver()->Cleanup();
+    RewriteDriverTest::TearDown();
   }
 };
 

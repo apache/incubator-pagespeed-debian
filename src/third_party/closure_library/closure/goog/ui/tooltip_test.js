@@ -16,23 +16,22 @@ goog.provide('goog.ui.TooltipTest');
 goog.setTestOnly('goog.ui.TooltipTest');
 
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.events.Event');
 goog.require('goog.events.EventHandler');
 goog.require('goog.events.EventType');
+goog.require('goog.events.FocusHandler');
 goog.require('goog.html.testing');
 goog.require('goog.math.Coordinate');
 goog.require('goog.positioning.AbsolutePosition');
 goog.require('goog.style');
 goog.require('goog.testing.MockClock');
-goog.require('goog.testing.PropertyReplacer');
 goog.require('goog.testing.TestQueue');
 goog.require('goog.testing.events');
 goog.require('goog.testing.jsunit');
 goog.require('goog.ui.PopupBase');
 goog.require('goog.ui.Tooltip');
 goog.require('goog.userAgent');
-
-var stubs = new goog.testing.PropertyReplacer();
 
 
 
@@ -63,7 +62,7 @@ function setUp() {
   // We get access denied error when accessing the iframe in IE on the farm
   // as IE doesn't have the same window size issues as firefox on the farm
   // we bypass the iframe and use the current document instead.
-  if (goog.userAgent.IE) {
+  if (goog.userAgent.EDGE_OR_IE) {
     dom = goog.dom.getDomHelper(document);
   } else {
     var frame = document.getElementById('testframe');
@@ -73,30 +72,26 @@ function setUp() {
 
   // Host elements in fixed size iframe to avoid window size problems when
   // running under Selenium.
-  dom.getDocument().body.innerHTML =
-      '<p id="notpopup">Content</p>' +
+  dom.getDocument().body.innerHTML = '<p id="notpopup">Content</p>' +
       '<p id="hovertarget">Hover Here For Popup</p>' +
       '<p id="second">Secondary target</p>';
 
   tt = new goog.ui.Tooltip(undefined, undefined, dom);
-  tt.setElement(dom.createDom('div', {id: 'popup',
-    style: 'visibility:hidden'},
-  'Hello'));
+  tt.setElement(
+      dom.createDom(
+          goog.dom.TagName.DIV, {id: 'popup', style: 'visibility:hidden'},
+          'Hello'));
   clock = new goog.testing.MockClock(true);
   eventQueue = new goog.testing.TestQueue();
   handler = new goog.events.EventHandler(eventQueue);
   handler.listen(tt, goog.ui.PopupBase.EventType.SHOW, eventQueue.enqueue);
   handler.listen(tt, goog.ui.PopupBase.EventType.HIDE, eventQueue.enqueue);
-
-  // Reset global flags to their defaults.
-  /** @suppress {missingRequire} */
-  stubs.set(goog.html.legacyconversions, 'ALLOW_LEGACY_CONVERSIONS', true);
 }
 
 function tearDown() {
   // tooltip needs to be hidden as well as disposed of so that it doesn't
   // leave global state hanging around to trip up other tests.
-  tt.onHide_();
+  tt.onHide();
   tt.dispose();
   clock.uninstall();
   handler.removeAll();
@@ -105,9 +100,11 @@ function tearDown() {
 function testConstructor() {
   var element = tt.getElement();
   assertNotNull('Tooltip should have non-null element', element);
-  assertEquals('Tooltip element should be the DIV we created',
-      dom.getElement('popup'), element);
-  assertEquals('Tooltip element should be a child of the document body',
+  assertEquals(
+      'Tooltip element should be the DIV we created', dom.getElement('popup'),
+      element);
+  assertEquals(
+      'Tooltip element should be a child of the document body',
       dom.getDocument().body, element.parentNode);
 }
 
@@ -117,8 +114,9 @@ function testTooltipShowsAndHides() {
   var element = tt.getElement();
   var position = new goog.math.Coordinate(5, 5);
   assertNotNull('Tooltip should have non-null element', element);
-  assertEquals('Initial state should be inactive',
-               goog.ui.Tooltip.State.INACTIVE, tt.getState());
+  assertEquals(
+      'Initial state should be inactive', goog.ui.Tooltip.State.INACTIVE,
+      tt.getState());
   tt.attach(hoverTarget);
   tt.setShowDelayMs(100);
   tt.setHideDelayMs(50);
@@ -126,7 +124,8 @@ function testTooltipShowsAndHides() {
   assertEquals(goog.ui.Tooltip.State.WAITING_TO_SHOW, tt.getState());
   clock.tick(101);
   assertEquals('visible', tt.getElement().style.visibility);
-  assertEquals('tooltip y position (10px margin below the cursor)', '15px',
+  assertEquals(
+      'tooltip y position (10px margin below the cursor)', '15px',
       tt.getElement().style.top);
   assertEquals(goog.ui.Tooltip.State.SHOWING, tt.getState());
   assertEquals(goog.ui.PopupBase.EventType.SHOW, eventQueue.dequeue().type);
@@ -217,26 +216,26 @@ function testRequireInteraction() {
   goog.testing.events.fireMouseOverEvent(hoverTarget, elsewhere);
   clock.tick(101);
   assertEquals(
-      'Tooltip should not show without mouse move event',
-      'hidden', tt.getElement().style.visibility);
+      'Tooltip should not show without mouse move event', 'hidden',
+      tt.getElement().style.visibility);
   goog.testing.events.fireMouseMoveEvent(hoverTarget);
   goog.testing.events.fireMouseOverEvent(hoverTarget, elsewhere);
   clock.tick(101);
   assertEquals(
-      'Tooltip should show because we had mouse move event',
-      'visible', tt.getElement().style.visibility);
+      'Tooltip should show because we had mouse move event', 'visible',
+      tt.getElement().style.visibility);
 
   goog.testing.events.fireMouseOutEvent(hoverTarget, elsewhere);
   clock.tick(51);
   assertEquals('hidden', tt.getElement().style.visibility);
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.FOCUS, hoverTarget));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.FOCUS, hoverTarget));
   clock.tick(101);
   assertEquals(
-      'Tooltip should show because we had focus event',
-      'visible', tt.getElement().style.visibility);
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.BLUR, hoverTarget));
+      'Tooltip should show because we had focus event', 'visible',
+      tt.getElement().style.visibility);
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.BLUR, hoverTarget));
   clock.tick(51);
   assertEquals('hidden', tt.getElement().style.visibility);
 
@@ -246,26 +245,28 @@ function testRequireInteraction() {
   goog.testing.events.fireMouseOverEvent(hoverTarget, elsewhere);
   clock.tick(101);
   assertEquals(
-      'A cancelled trigger should also cancel the seen interaction',
-      'hidden', tt.getElement().style.visibility);
+      'A cancelled trigger should also cancel the seen interaction', 'hidden',
+      tt.getElement().style.visibility);
 }
 
 function testDispose() {
   var element = tt.getElement();
   tt.dispose();
   assertTrue('Tooltip should have been disposed of', tt.isDisposed());
-  assertNull('Tooltip element reference should have been nulled out',
-      tt.getElement());
-  assertNotEquals('Tooltip element should not be a child of the body',
-      document.body, element.parentNode);
+  assertNull(
+      'Tooltip element reference should have been nulled out', tt.getElement());
+  assertNotEquals(
+      'Tooltip element should not be a child of the body', document.body,
+      element.parentNode);
 }
 
 function testNested() {
   var ttNested;
-  tt.getElement().appendChild(dom.createDom(
-      'span', {id: 'nested'}, 'Goodbye'));
+  tt.getElement().appendChild(
+      dom.createDom(goog.dom.TagName.SPAN, {id: 'nested'}, 'Goodbye'));
   ttNested = new goog.ui.Tooltip(undefined, undefined, dom);
-  ttNested.setElement(dom.createDom('div', {id: 'nestedPopup'}, 'hi'));
+  ttNested.setElement(
+      dom.createDom(goog.dom.TagName.DIV, {id: 'nestedPopup'}, 'hi'));
   tt.setShowDelayMs(100);
   tt.setHideDelayMs(50);
   ttNested.setShowDelayMs(75);
@@ -313,30 +314,30 @@ function testNested() {
   assertEquals('hidden', tt.getElement().style.visibility);
 
   // Test with focus
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.FOCUS, hoverTarget));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.FOCUS, hoverTarget));
   clock.tick(101);
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.BLUR, hoverTarget));
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.FOCUS, nestedAnchor));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.BLUR, hoverTarget));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.FOCUS, nestedAnchor));
   clock.tick(76);
   assertEquals('visible', tt.getElement().style.visibility);
   assertEquals('visible', ttNested.getElement().style.visibility);
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.BLUR, nestedAnchor));
-  goog.testing.events.fireBrowserEvent(new goog.events.Event(
-      goog.events.EventType.FOCUS, hoverTarget));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.BLUR, nestedAnchor));
+  goog.testing.events.fireBrowserEvent(
+      new goog.events.Event(goog.events.EventType.FOCUS, hoverTarget));
   clock.tick(26);
   assertEquals('visible', tt.getElement().style.visibility);
   assertEquals('hidden', ttNested.getElement().style.visibility);
 
-  ttNested.onHide_();
+  ttNested.onHide();
   ttNested.dispose();
 }
 
 function testPosition() {
-  dom.getDocument().body.style.paddingBottom = '150%'; // force scrollbar
+  dom.getDocument().body.style.paddingBottom = '150%';  // force scrollbar
   var scrollEl = dom.getDocumentScrollElement();
 
   var anchor = dom.getElement('hovertarget');
@@ -347,17 +348,20 @@ function testPosition() {
   tooltip.cursorPosition.y = 100;
   tooltip.showForElement(anchor);
 
-  assertEquals('Tooltip should be at cursor position',
-      '(110, 110)', // (100, 100) + padding (10, 10)
+  assertEquals(
+      'Tooltip should be at cursor position',
+      '(110, 110)',  // (100, 100) + padding (10, 10)
       goog.style.getPageOffset(tooltip.getElement()).toString());
 
   scrollEl.scrollTop = 50;
 
   var offset = goog.style.getPageOffset(tooltip.getElement());
-  assertTrue('Tooltip should be at cursor position when scrolled',
-      Math.abs(offset.x - 110) <= ALLOWED_OFFSET); // 100 + padding 10
-  assertTrue('Tooltip should be at cursor position when scrolled',
-      Math.abs(offset.y - 110) <= ALLOWED_OFFSET); // 100 + padding 10
+  assertTrue(
+      'Tooltip should be at cursor position when scrolled',
+      Math.abs(offset.x - 110) <= ALLOWED_OFFSET);  // 100 + padding 10
+  assertTrue(
+      'Tooltip should be at cursor position when scrolled',
+      Math.abs(offset.y - 110) <= ALLOWED_OFFSET);  // 100 + padding 10
 
   tooltip.dispose();
   dom.getDocument().body.style.paddingTop = '';
@@ -370,25 +374,78 @@ function testPositionOverride() {
 
   tooltip.showForElement(anchor);
 
-  assertEquals('Tooltip should be at absolute position', '(13, 17)',
+  assertEquals(
+      'Tooltip should be at absolute position', '(13, 17)',
       goog.style.getPageOffset(tooltip.getElement()).toString());
   tooltip.dispose();
 }
 
 function testHtmlContent() {
-  tt.setSafeHtml(goog.html.testing.newSafeHtmlForTest(
-      '<span class="theSpan">Hello</span>'));
-  var spanEl =
-      goog.dom.getElementByClass('theSpan', tt.getElement());
+  tt.setSafeHtml(
+      goog.html.testing.newSafeHtmlForTest(
+          '<span class="theSpan">Hello</span>'));
+  var spanEl = goog.dom.getElementByClass('theSpan', tt.getElement());
   assertEquals('Hello', goog.dom.getTextContent(spanEl));
 }
 
-function testSetContent_guardedByGlobalFlag() {
-  /** @suppress {missingRequire} */
-  stubs.set(goog.html.legacyconversions, 'ALLOW_LEGACY_CONVERSIONS', false);
-  assertEquals(
-      'Error: Legacy conversion from string to goog.html types is disabled',
-      assertThrows(function() {
-        tt.setHtml('<img src="blag" onerror="evil();">');
-      }).message);
+function testSetElementNull() {
+  tt.setElement(null);
+}
+
+function testFocusBlurElementsInTooltip() {
+  var anchorEl = dom.getElement('hovertarget');
+  goog.dom.setFocusableTabIndex(anchorEl, true);
+  tt.attach(anchorEl);
+  goog.testing.events.fireFocusEvent(anchorEl);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  goog.testing.events.fireBlurEvent(anchorEl);
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSIN);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  // Run blur on the previous element followed by focus on the element being
+  // focused, as would normally happen when focus() is called on an element.
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSOUT);
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSIN);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSOUT);
+  clock.tick(1000);
+  assertEquals('hidden', tt.getElement().style.visibility);
+}
+
+function testFocusElementInTooltipThenBackToAnchor() {
+  var anchorEl = dom.getElement('hovertarget');
+  goog.dom.setFocusableTabIndex(anchorEl, true);
+  tt.attach(anchorEl);
+  goog.testing.events.fireFocusEvent(anchorEl);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  // Run blur on the previous element followed by focus on the element being
+  // focused, as would normally happen when focus() is called on an element.
+  goog.testing.events.fireBlurEvent(anchorEl);
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSIN);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  // Run blur on the previous element followed by focus on the element being
+  // focused, as would normally happen when focus() is called on an element.
+  tt.tooltipFocusHandler_.dispatchEvent(
+      goog.events.FocusHandler.EventType.FOCUSOUT);
+  goog.testing.events.fireFocusEvent(anchorEl);
+  clock.tick(1000);
+  assertEquals('visible', tt.getElement().style.visibility);
+
+  goog.testing.events.fireBlurEvent(anchorEl);
+  clock.tick(1000);
+  assertEquals('hidden', tt.getElement().style.visibility);
 }

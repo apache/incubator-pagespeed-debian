@@ -16,6 +16,7 @@ goog.provide('goog.ui.media.PicasaTest');
 goog.setTestOnly('goog.ui.media.PicasaTest');
 
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.testing.jsunit');
 goog.require('goog.ui.media.FlashObject');
 goog.require('goog.ui.media.Media');
@@ -25,14 +26,14 @@ var picasa;
 var control;
 var PICASA_USERNAME = 'username';
 var PICASA_ALBUM = 'albumname';
-var PICASA_URL = 'http://picasaweb.google.com/' + PICASA_USERNAME + '/' +
-    PICASA_ALBUM;
-var parent = goog.dom.createElement('div');
+var PICASA_URL =
+    'http://picasaweb.google.com/' + PICASA_USERNAME + '/' + PICASA_ALBUM;
+var parent = goog.dom.createElement(goog.dom.TagName.DIV);
 
 function setUp() {
   picasa = new goog.ui.media.PicasaAlbum();
-  var model = new goog.ui.media.PicasaAlbumModel(PICASA_USERNAME,
-      PICASA_ALBUM, null, 'album title');
+  var model = new goog.ui.media.PicasaAlbumModel(
+      PICASA_USERNAME, PICASA_ALBUM, null, 'album title');
   control = new goog.ui.media.Media(model, picasa);
   control.setSelected(true);
 }
@@ -44,24 +45,27 @@ function tearDown() {
 function testBasicRendering() {
   control.render(parent);
   var el = goog.dom.getElementsByTagNameAndClass(
-      'div', goog.ui.media.PicasaAlbum.CSS_CLASS, parent);
+      goog.dom.TagName.DIV, goog.ui.media.PicasaAlbum.CSS_CLASS, parent);
   assertEquals(1, el.length);
   assertEquals(PICASA_URL, control.getDataModel().getUrl());
 }
 
 function testParsingUrl() {
   assertExtractsCorrectly(PICASA_USERNAME, PICASA_ALBUM, null, PICASA_URL);
-  assertExtractsCorrectly('foo', 'bar', null,
-      'https://picasaweb.google.com/foo/bar');
-  assertExtractsCorrectly('foo', 'bar', null,
-      'https://www.picasaweb.google.com/foo/bar');
-  assertExtractsCorrectly('foo', 'bar', null,
-      'https://www.picasaweb.com/foo/bar');
-  assertExtractsCorrectly('foo', 'bar', '8Hzg1CUUAZM',
+  assertExtractsCorrectly(
+      'foo', 'bar', null, 'https://picasaweb.google.com/foo/bar');
+  assertExtractsCorrectly(
+      'foo', 'bar', null, 'https://www.picasaweb.google.com/foo/bar');
+  assertExtractsCorrectly(
+      'foo', 'bar', null, 'https://www.picasaweb.com/foo/bar');
+  assertExtractsCorrectly(
+      'foo', 'bar', '8Hzg1CUUAZM',
       'https://www.picasaweb.com/foo/bar?authkey=8Hzg1CUUAZM#');
-  assertExtractsCorrectly('foo', 'bar', '8Hzg1CUUAZM',
+  assertExtractsCorrectly(
+      'foo', 'bar', '8Hzg1CUUAZM',
       'https://www.picasaweb.com/foo/bar?foo=bar&authkey=8Hzg1CUUAZM#');
-  assertExtractsCorrectly('foo', 'bar', '8Hzg1CUUAZM',
+  assertExtractsCorrectly(
+      'foo', 'bar', '8Hzg1CUUAZM',
       'https://www.picasaweb.com/foo/bar?foo=bar&authkey=8Hzg1CUUAZM&' +
           'hello=world#');
 
@@ -75,13 +79,13 @@ function testParsingUrl() {
 }
 
 function testBuildingUrl() {
-  assertEquals(PICASA_URL,
+  assertEquals(
+      PICASA_URL,
       goog.ui.media.PicasaAlbumModel.buildUrl(PICASA_USERNAME, PICASA_ALBUM));
 }
 
 function testCreatingModel() {
-  var model = new goog.ui.media.PicasaAlbumModel(
-      PICASA_USERNAME, PICASA_ALBUM);
+  var model = new goog.ui.media.PicasaAlbumModel(PICASA_USERNAME, PICASA_ALBUM);
   assertEquals(PICASA_USERNAME, model.getUserId());
   assertEquals(PICASA_ALBUM, model.getAlbumId());
   assertEquals(PICASA_URL, model.getUrl());
@@ -91,13 +95,12 @@ function testCreatingModel() {
 function testCreatingDomOnInitialState() {
   control.render(parent);
   var caption = goog.dom.getElementsByTagNameAndClass(
-      'div',
-      goog.ui.media.PicasaAlbum.CSS_CLASS + '-caption',
+      goog.dom.TagName.DIV, goog.ui.media.PicasaAlbum.CSS_CLASS + '-caption',
       parent);
   assertEquals(1, caption.length);
 
   var flash = goog.dom.getElementsByTagNameAndClass(
-      'div', goog.ui.media.FlashObject.CSS_CLASS, parent);
+      goog.dom.TagName.DIV, goog.ui.media.FlashObject.CSS_CLASS, parent);
   assertEquals(1, flash.length);
 }
 

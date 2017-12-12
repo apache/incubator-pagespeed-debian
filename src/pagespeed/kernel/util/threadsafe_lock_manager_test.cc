@@ -23,16 +23,19 @@
 
 #include "pagespeed/kernel/util/threadsafe_lock_manager.h"
 
-#include "base/logging.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/mock_timer.h"
 #include "pagespeed/kernel/base/named_lock_manager.h"
 #include "pagespeed/kernel/base/named_lock_tester.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/thread/mock_scheduler.h"
 #include "pagespeed/kernel/thread/scheduler.h"
 #include "pagespeed/kernel/util/platform.h"
@@ -327,6 +330,21 @@ TEST_F(ThreadsafeLockManagerTest, WaitStealOld) {
   EXPECT_TRUE(LockTimedWaitStealOld(kWaitMs, kStealMs, lock1a));
   end_ms = timer()->NowMs();
   EXPECT_GT(start_ms + kWaitMs, end_ms);
+}
+
+TEST_F(ThreadsafeLockManagerTest, NoWaitUnlockDeletesOld) {
+  scoped_ptr<NamedLock> lock1(MakeLock(kLock1));
+  EXPECT_TRUE(TryLock(lock1));
+  NamedLock* lock1a = MakeLock(kLock1);  // Same name, new object.
+  EXPECT_TRUE(tester_.UnlockWithDelete(lock1.release(), lock1a));
+}
+
+TEST_F(ThreadsafeLockManagerTest, NoWaitStealDeletesOld) {
+  scoped_ptr<NamedLock> lock1(MakeLock(kLock1));
+  EXPECT_TRUE(TryLock(lock1));
+  NamedLock* lock1a = MakeLock(kLock1);  // Same name, new object.
+  timer()->AdvanceMs(kStealMs + 1);
+  EXPECT_TRUE(tester_.StealWithDelete(kStealMs, lock1.release(), lock1a));
 }
 
 TEST_F(ThreadsafeLockManagerTest, MultipleLocksSameTimeouts) {

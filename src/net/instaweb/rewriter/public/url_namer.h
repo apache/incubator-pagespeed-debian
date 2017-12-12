@@ -42,6 +42,15 @@ class UrlNamer {
     kUnsharded
   };
 
+  // This encodes whether we do some sort of mapping of resources to a
+  // separate proxy domain
+  enum class ProxyExtent {
+    kNone,
+    kInputOnly,  // We see requests on this domain, but don't produce it
+                 // ourselves.
+    kFull,       // All resources are moved.
+  };
+
   UrlNamer();
   virtual ~UrlNamer();
 
@@ -56,9 +65,7 @@ class UrlNamer {
                               const OutputResource& output_resource,
                               EncodeOption encode_option) const;
 
-  // Given the request_url, generate the original url.  If the URL naming
-  // syntax supports an "owner" domain, and 'owner_domain' is non-null, then
-  // this method writes the owner domain into that pointer.
+  // Given the request_url, generate the original url.
   //
   // Returns 'false' if request_url was not encoded via this namer.
   //
@@ -66,7 +73,6 @@ class UrlNamer {
   // Note: rewrite_options may be NULL.
   virtual bool Decode(const GoogleUrl& request_url,
                       const RewriteOptions* rewrite_options,
-                      GoogleUrl* owner_domain,
                       GoogleString* decoded) const;
 
   // Determines whether the provided request URL is authorized given the
@@ -82,7 +88,7 @@ class UrlNamer {
 
   // Determines whether the naming policy incorporates proxying resources
   // using a central proxy domain.
-  virtual bool ProxyMode() const { return false; }
+  virtual ProxyExtent ProxyMode() const { return ProxyExtent::kNone; }
 
   // Determines whether the specified URL has been mapped to that central
   // proxy domain.

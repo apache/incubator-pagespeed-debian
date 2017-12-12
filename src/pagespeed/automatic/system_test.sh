@@ -1,5 +1,19 @@
 #!/bin/bash
-# Copyright 2010 Google Inc. All Rights Reserved.
+#
+# Copyright 2010 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 # Author: abliss@google.com (Adam Bliss)
 #
 # Generic system test, which should work on any implementation of Page Speed
@@ -32,11 +46,16 @@ IMAGES_QUALITY="PageSpeedImageRecompressionQuality"
 JPEG_QUALITY="PageSpeedJpegRecompressionQuality"
 WEBP_QUALITY="PageSpeedWebpRecompressionQuality"
 
+SYSTEM_TEST_DIR="$(dirname "${BASH_SOURCE[0]}")/system_tests/"
+
+run_critical_test initial_header_check
+run_critical_test initial_sanity_checks
+
+# Add new tests here.
 run_test gce_public_cache
-run_test initial_header_check
-run_test initial_sanity_checks
 run_test query_params_in_resource_flow
 run_test ipro
+run_test smaxage
 run_test add_instrumentation
 run_test canonicalize_javascript_libraries
 run_test combiners
@@ -55,15 +74,13 @@ run_test image_quality_webp
 run_test image_resize
 run_test broken_images
 run_test make_show_ads_async
-# Disable mobilizer tests.
-# run_test mobilizer
 run_test responsive_images
 run_test shortcut_icons
+run_test hint_preload_subresources
 
 # These have to run after image_rewrite tests. Otherwise it causes some images
 # to be loaded into memory before they should be.
 # TODO(jefftk): Is this actually a problem?
-wait_for_async_tests
 run_test css_images
 run_test fallback_rewrite_css_urls
 run_test images_in_styles
@@ -81,15 +98,16 @@ run_test local_storage_cache
 run_test flatten_css_imports
 run_test insert_dns_prefetch
 run_test dedup_inlined_images
+run_test invalid_host_header
 
 if [ "$SECONDARY_HOSTNAME" != "" ]; then
   run_test cookie_options
   run_test sticky_cookie_options
   run_test signed_urls
   run_test redirect_with_ps_params
-  run_test invalid_host_header
   run_test optimize_to_webp
   run_test image_quality_and_response
+  run_test follow_flushes
 fi
 
 run_test content_length
@@ -97,9 +115,7 @@ run_test keep_data_urls
 run_test rel_canonical
 run_test resource_content_type_html
 
-wait_for_async_tests
-
-# Remaining tests aren't converted to async, so we need to define the fetch
+# Remaining tests aren't converted to run_test, so we need to define the fetch
 # variables for them and cleanup the now-shared OUTDIR.
 define_fetch_variables
 

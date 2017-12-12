@@ -29,16 +29,11 @@
 #include "net/instaweb/http/public/sync_fetcher_adapter_callback.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
-#include "net/instaweb/rewriter/public/beacon_critical_line_info_finder.h"
-#include "net/instaweb/rewriter/public/cache_html_info_finder.h"
-#include "net/instaweb/rewriter/public/critical_css_finder.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
-#include "net/instaweb/rewriter/public/critical_line_info_finder.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
-#include "net/instaweb/rewriter/public/flush_early_info_finder.h"
-#include "net/instaweb/rewriter/public/mobilize_cached_finder.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -56,7 +51,6 @@
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
-#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/hasher.h"
 #include "pagespeed/kernel/base/md5_hasher.h"
@@ -95,7 +89,6 @@ const char kBeaconOptionsHashQueryParam[] = "oh";
 const char kBeaconCriticalImagesQueryParam[] = "ci";
 const char kBeaconRenderedDimensionsQueryParam[] = "rd";
 const char kBeaconCriticalCssQueryParam[] = "cs";
-const char kBeaconXPathsQueryParam[] = "xp";
 const char kBeaconNonceQueryParam[] = "n";
 
 // Attributes that should not be automatically copied from inputs to outputs
@@ -135,21 +128,15 @@ StringSet* CommaSeparatedStringToSet(StringPiece str) {
 // critical image set.
 class BeaconPropertyCallback : public PropertyPage {
  public:
-  BeaconPropertyCallback(
-      ServerContext* server_context,
-      StringPiece url,
-      StringPiece options_signature_hash,
-      UserAgentMatcher::DeviceType device_type,
-      const RequestContextPtr& request_context,
-      StringSet* html_critical_images_set,
-      StringSet* css_critical_images_set,
-      StringSet* critical_css_selector_set,
-      RenderedImages* rendered_images_set,
-      StringSet* xpaths_set,
-      StringPiece nonce)
-      : PropertyPage(kPropertyCachePage,
-                     url,
-                     options_signature_hash,
+  BeaconPropertyCallback(ServerContext* server_context, StringPiece url,
+                         StringPiece options_signature_hash,
+                         UserAgentMatcher::DeviceType device_type,
+                         const RequestContextPtr& request_context,
+                         StringSet* html_critical_images_set,
+                         StringSet* css_critical_images_set,
+                         StringSet* critical_css_selector_set,
+                         RenderedImages* rendered_images_set, StringPiece nonce)
+      : PropertyPage(kPropertyCachePage, url, options_signature_hash,
                      UserAgentMatcher::DeviceTypeSuffix(device_type),
                      request_context,
                      server_context->thread_system()->NewMutex(),
@@ -158,8 +145,7 @@ class BeaconPropertyCallback : public PropertyPage {
         html_critical_images_set_(html_critical_images_set),
         css_critical_images_set_(css_critical_images_set),
         critical_css_selector_set_(critical_css_selector_set),
-        rendered_images_set_(rendered_images_set),
-        xpaths_set_(xpaths_set) {
+        rendered_images_set_(rendered_images_set) {
     nonce.CopyToString(&nonce_);
   }
 
@@ -189,13 +175,6 @@ class BeaconPropertyCallback : public PropertyPage {
               server_context_->message_handler(), server_context_->timer());
     }
 
-    if (xpaths_set_ != NULL) {
-      BeaconCriticalLineInfoFinder::WriteXPathsToPropertyCacheFromBeacon(
-          *xpaths_set_, nonce_, server_context_->page_property_cache(),
-          server_context_->beacon_cohort(), this,
-          server_context_->message_handler(), server_context_->timer());
-    }
-
     WriteCohort(server_context_->beacon_cohort());
     delete this;
   }
@@ -206,7 +185,6 @@ class BeaconPropertyCallback : public PropertyPage {
   scoped_ptr<StringSet> css_critical_images_set_;
   scoped_ptr<StringSet> critical_css_selector_set_;
   scoped_ptr<RenderedImages> rendered_images_set_;
-  scoped_ptr<StringSet> xpaths_set_;
   GoogleString nonce_;
   DISALLOW_COPY_AND_ASSIGN(BeaconPropertyCallback);
 };
@@ -216,9 +194,6 @@ class BeaconPropertyCallback : public PropertyPage {
 const int64 ServerContext::kGeneratedMaxAgeMs = Timer::kYearMs;
 const int64 ServerContext::kCacheTtlForMismatchedContentMs =
     5 * Timer::kMinuteMs;
-
-// Statistics group names.
-const char ServerContext::kStatisticsGroup[] = "Statistics";
 
 // Our HTTP cache mostly stores full URLs, including the http: prefix,
 // mapping them into the URL contents and HTTP headers.  However, we
@@ -270,7 +245,6 @@ ServerContext::ServerContext(RewriteDriverFactory* factory)
       user_agent_matcher_(NULL),
       scheduler_(factory->scheduler()),
       default_system_fetcher_(NULL),
-      default_distributed_fetcher_(NULL),
       hasher_(NULL),
       signature_(NULL),
       lock_hasher_(RewriteOptions::kHashBytes),
@@ -285,8 +259,8 @@ ServerContext::ServerContext(RewriteDriverFactory* factory)
       lock_manager_(NULL),
       message_handler_(NULL),
       dom_cohort_(NULL),
-      blink_cohort_(NULL),
       beacon_cohort_(NULL),
+      dependencies_cohort_(NULL),
       fix_reflow_cohort_(NULL),
       available_rewrite_drivers_(new GlobalOptionsRewriteDriverPool(this)),
       trying_to_cleanup_rewrite_drivers_(false),
@@ -330,7 +304,12 @@ ServerContext::~ServerContext() {
   // We scan for "leaked_rewrite_drivers" in install/Makefile.tests
   if (!active_rewrite_drivers_.empty()) {
     message_handler_->Message(
-        kInfo, "ServerContext: %d leaked_rewrite_drivers on destruction",
+#ifdef NDEBUG
+        kInfo,
+#else
+        kError,
+#endif
+        "ServerContext: %d leaked_rewrite_drivers on destruction",
         static_cast<int>(active_rewrite_drivers_.size()));
 #ifndef NDEBUG
     for (RewriteDriverSet::iterator p = active_rewrite_drivers_.begin(),
@@ -495,6 +474,7 @@ void ServerContext::AddOriginalContentLengthHeader(
   // Determine the total original content length for input resource, and
   // use this to set the X-Original-Content-Length header in the output.
   int64 input_size = 0;
+  bool all_known = !inputs.empty();
   for (int i = 0, n = inputs.size(); i < n; ++i) {
     const ResourcePtr& input_resource(inputs[i]);
     ResponseHeaders* input_headers = input_resource->response_headers();
@@ -505,12 +485,16 @@ void ServerContext::AddOriginalContentLengthHeader(
         StringToInt64(original_content_length_header,
                       &original_content_length)) {
       input_size += original_content_length;
+    } else if (input_resource->loaded()) {
+      input_size += input_resource->UncompressedContentsSize();
+    } else {
+      all_known = false;
     }
   }
   // Only add the header if there were actual input resources with
   // known sizes involved (which is not always the case, e.g., in tests where
   // synthetic input resources are used).
-  if (input_size > 0) {
+  if (all_known) {
     headers->SetOriginalContentLength(input_size);
   }
 }
@@ -557,8 +541,8 @@ void ServerContext::TryLockForCreation(NamedLock* creation_lock,
 }
 
 void ServerContext::LockForCreation(NamedLock* creation_lock,
-                                      QueuedWorkerPool::Sequence* worker,
-                                      Function* callback) {
+                                    Sequence* worker,
+                                    Function* callback) {
   // TODO(jmaessen): It occurs to me that we probably ought to be
   // doing something like this if we *really* care about lock aging:
   // if (!creation_lock->LockTimedWaitStealOld(kBlockLockMs,
@@ -669,12 +653,6 @@ bool ServerContext::HandleBeacon(StringPiece params,
             query_param_str, global_options()));
   }
 
-  scoped_ptr<StringSet> xpaths_set;
-  if (query_params.Lookup1Unescaped(kBeaconXPathsQueryParam,
-                                    &query_param_str)) {
-    xpaths_set.reset(CommaSeparatedStringToSet(query_param_str));
-  }
-
   StringPiece nonce;
   if (query_params.Lookup1Unescaped(kBeaconNonceQueryParam, &query_param_str)) {
     nonce.set(query_param_str.data(), query_param_str.size());
@@ -684,11 +662,8 @@ bool ServerContext::HandleBeacon(StringPiece params,
   // looking up the property page for the URL specified in the beacon, and
   // performing the page update and cohort write in
   // BeaconPropertyCallback::Done(). Done() is called when the read completes.
-  if (html_critical_images_set != NULL ||
-      css_critical_images_set != NULL ||
-      critical_css_selector_set != NULL ||
-      rendered_images != NULL ||
-      xpaths_set != NULL) {
+  if (html_critical_images_set != NULL || css_critical_images_set != NULL ||
+      critical_css_selector_set != NULL || rendered_images != NULL) {
     UserAgentMatcher::DeviceType device_type =
         user_agent_matcher()->GetDeviceTypeForUA(user_agent);
 
@@ -702,7 +677,6 @@ bool ServerContext::HandleBeacon(StringPiece params,
         css_critical_images_set.release(),
         critical_css_selector_set.release(),
         rendered_images.release(),
-        xpaths_set.release(),
         nonce);
     page_property_cache()->ReadWithCohorts(beacon_property_cb->CohortList(),
                                            beacon_property_cb);
@@ -754,9 +728,6 @@ RewriteDriver* ServerContext::NewUnmanagedRewriteDriver(
   rewrite_driver->SetServerContext(this);
   rewrite_driver->ClearRequestProperties();
   rewrite_driver->set_request_context(request_ctx);
-  if (has_default_distributed_fetcher()) {
-    rewrite_driver->set_distributed_fetcher(default_distributed_fetcher_);
-  }
   // Set the initial reference, as the expectation is that the client
   // will need to call Cleanup() or FinishParse()
   rewrite_driver->AddUserReference();
@@ -767,8 +738,7 @@ RewriteDriver* ServerContext::NewUnmanagedRewriteDriver(
 
 RewriteDriver* ServerContext::NewRewriteDriver(
     const RequestContextPtr& request_ctx) {
-  RewriteDriverPool* pool = SelectDriverPool(request_ctx->using_spdy());
-  return NewRewriteDriverFromPool(pool, request_ctx);
+  return NewRewriteDriverFromPool(standard_rewrite_driver_pool(), request_ctx);
 }
 
 RewriteDriver* ServerContext::NewRewriteDriverFromPool(
@@ -846,7 +816,7 @@ void ServerContext::ReleaseRewriteDriverImpl(RewriteDriver* rewrite_driver) {
   }
 }
 
-void ServerContext::ShutDownDrivers() {
+void ServerContext::ShutDownDrivers(int64 cutoff_time_ms) {
   // Try to get any outstanding rewrites to complete, one-by-one.
   {
     ScopedMutex lock(rewrite_drivers_mutex_.get());
@@ -871,22 +841,24 @@ void ServerContext::ShutDownDrivers() {
                               static_cast<int>(active_rewrite_drivers_.size()));
   }
 
-  for (RewriteDriverSet::iterator i = active_rewrite_drivers_.begin();
-       i != active_rewrite_drivers_.end(); ++i) {
-    // Warning: the driver may already have been mostly cleaned up except for
-    // not getting into ReleaseRewriteDriver before our lock acquisition at
-    // the start of this function; this code is relying on redundant
-    // BoundedWaitForCompletion and Cleanup being safe when
-    // trying_to_cleanup_rewrite_drivers_ is true.
-    // ServerContextTest.ShutDownAssumptions() exists to cover this scenario.
-    RewriteDriver* active = *i;
-    int64 timeout_ms = Timer::kSecondMs;
-    if (RunningOnValgrind()) {
-      timeout_ms *= 20;
+  // In the startup phase, we can be shutdown without having had a timer set.
+  // In that case we'll have no drivers, so we just bail.
+  if (active_rewrite_drivers_.empty()) {
+    return;
+  }
+
+  for (RewriteDriver* active : active_rewrite_drivers_) {
+    // <= 0 wait means forever, so we must guard against that.
+    int64 wait_ms = cutoff_time_ms - timer_->NowMs();
+    if (wait_ms <= 0) {
+      wait_ms = 1;
     }
-    active->BoundedWaitFor(RewriteDriver::kWaitForShutDown, timeout_ms);
-    active->Cleanup();  // Note: only cleans up if the rewrites are complete.
-    // TODO(jmarantz): rename RewriteDriver::Cleanup to CleanupIfDone.
+    active->BoundedWaitFor(RewriteDriver::kWaitForShutDown, wait_ms);
+    // Note: It is not safe to call Cleanup() on the driver here. Something
+    // else is planning to do that and if it happens after this point, they
+    // can DCHECK fail because the refcount is already 0. Instead we just cross
+    // our fingers and wait. If the driver is still active by the time we get
+    // to the destructor, we will log a warning and force delete it.
   }
 }
 
@@ -926,8 +898,6 @@ void ServerContext::GetRemoteOptions(RewriteOptions* remote_options,
   fetch_options.implicit_cache_ttl_ms =
       remote_options->implicit_cache_ttl_ms();
   fetch_options.respect_vary = false;
-  // Minimum TTL for cachable resources, -1 for no minimum.
-  fetch_options.min_cache_ttl_ms = -1;
   if (!remote_options->remote_configuration_url().empty()) {
     RequestContextPtr request_ctx(new RequestContext(
         fetch_options, thread_system()->NewMutex(), timer()));
@@ -946,6 +916,11 @@ bool ServerContext::GetQueryOptions(
     const RewriteOptions* domain_options, GoogleUrl* request_url,
     RequestHeaders* request_headers, ResponseHeaders* response_headers,
     RewriteQuery* rewrite_query) {
+  if (!request_url->IsWebValid()) {
+    message_handler_->Message(kError, "GetQueryOptions: Invalid URL: %s",
+                              request_url->spec_c_str());
+    return false;
+  }
   if (domain_options == NULL) {
     domain_options = global_options();
   }
@@ -956,33 +931,6 @@ bool ServerContext::GetQueryOptions(
       domain_options->allow_options_to_be_set_by_cookies(),
       domain_options->request_option_override(), request_context, factory(),
       this, request_url, request_headers, response_headers, message_handler_));
-}
-
-bool ServerContext::ScanSplitHtmlRequest(const RequestContextPtr& ctx,
-                                         const RewriteOptions* options,
-                                         GoogleString* url) {
-  if (options == NULL || !options->Enabled(RewriteOptions::kSplitHtml)) {
-    return false;
-  }
-  GoogleUrl gurl(*url);
-  QueryParams query_params;
-  // TODO(bharathbhushan): Can we use the results of any earlier query parse?
-  query_params.ParseFromUrl(gurl);
-
-  GoogleString value;
-  if (!query_params.Lookup1Unescaped(HttpAttributes::kXSplit, &value)) {
-    return false;
-  }
-  if (HttpAttributes::kXSplitBelowTheFold == value) {
-    ctx->set_split_request_type(RequestContext::SPLIT_BELOW_THE_FOLD);
-  } else if (HttpAttributes::kXSplitAboveTheFold == value) {
-    ctx->set_split_request_type(RequestContext::SPLIT_ABOVE_THE_FOLD);
-  }
-  query_params.RemoveAll(HttpAttributes::kXSplit);
-  GoogleString query_string = query_params.empty() ? "" :
-        StrCat("?", query_params.ToEscapedString());
-  *url = StrCat(gurl.AllExceptQuery(), query_string, gurl.AllAfterQuery());
-  return true;
 }
 
 // TODO(gee): Seems like this should all be in RewriteOptionsManager.
@@ -1063,38 +1011,13 @@ void ServerContext::MakePagePropertyCache(PropertyStore* property_store) {
   page_property_cache_.reset(pcache);
 }
 
-void ServerContext::set_cache_html_info_finder(CacheHtmlInfoFinder* finder) {
-  cache_html_info_finder_.reset(finder);
-}
-
 void ServerContext::set_critical_images_finder(CriticalImagesFinder* finder) {
   critical_images_finder_.reset(finder);
-}
-
-void ServerContext::set_critical_css_finder(CriticalCssFinder* finder) {
-  critical_css_finder_.reset(finder);
 }
 
 void ServerContext::set_critical_selector_finder(
     CriticalSelectorFinder* finder) {
   critical_selector_finder_.reset(finder);
-}
-
-void ServerContext::set_flush_early_info_finder(FlushEarlyInfoFinder* finder) {
-  flush_early_info_finder_.reset(finder);
-}
-
-void ServerContext::set_critical_line_info_finder(
-    CriticalLineInfoFinder* finder) {
-  critical_line_info_finder_.reset(finder);
-}
-
-void ServerContext::set_mobilize_cached_finder(MobilizeCachedFinder* finder) {
-  mobilize_cached_finder_.reset(finder);
-}
-
-RewriteDriverPool* ServerContext::SelectDriverPool(bool using_spdy) {
-  return standard_rewrite_driver_pool();
 }
 
 void ServerContext::ApplySessionFetchers(const RequestContextPtr& req,
@@ -1434,7 +1357,7 @@ GoogleString ServerContext::ShowCacheForm(StringPiece user_agent) {
       "  URL: <input id=metadata_text type=text name=url size=110 /><br>\n"
       "  User-Agent: <input id=user_agent type=text size=103 name=user_agent ",
       ua_default,
-      "/></br> \n",
+      "/><br> \n",
       "  <input id=metadata_submit type=submit "
       "   value='Show Metadata Cache Entry' />"
       "  <input id=metadata_clear type=reset value='Clear' />",

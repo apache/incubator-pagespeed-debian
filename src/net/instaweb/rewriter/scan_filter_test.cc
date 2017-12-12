@@ -187,4 +187,83 @@ TEST_F(ScanFilterTest, CharsetFromMetaTagMissingQuotes) {
   EXPECT_STREQ("us-ascii", rewrite_driver()->containing_charset());
 }
 
+
+TEST_F(ScanFilterTest, CspParse) {
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy", "img-src https:");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  ValidateNoChanges("csp_parse",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"img-src www.example.com\">");
+  EXPECT_EQ(2, rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.org/foo.png"), CspDirective::kImgSrc));
+  EXPECT_FALSE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.org/foo.png"), CspDirective::kImgSrc));
+}
+
+TEST_F(ScanFilterTest, CspParseOff) {
+  options()->set_honor_csp(false);
+
+  ResponseHeaders headers;
+  headers.Add("Content-Security-Policy", "img-src https:");
+  rewrite_driver()->set_response_headers_ptr(&headers);
+  ValidateNoChanges("csp_parse",
+                    "<meta http-equiv=\"Content-Security-Policy\" "
+                    "content=\"img-src www.example.com\">");
+  EXPECT_EQ(0, rewrite_driver()->content_security_policy().policies_size());
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.com/foo.png"), CspDirective::kImgSrc));
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("https://www.example.org/foo.png"), CspDirective::kImgSrc));
+  EXPECT_TRUE(rewrite_driver()->IsLoadPermittedByCsp(
+      GoogleUrl("http://www.example.org/foo.png"), CspDirective::kImgSrc));
+}
+
+TEST_F(ScanFilterTest, CspBase1) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  // The default base (the URL) is overridden by a base tag.
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] = "<meta http-equiv=\"Content-Security-Policy\" "
+                             "content=\"img-src www.example.com\">";
+  ValidateNoChanges(kTestName,
+                    StrCat("<head>",
+                           kCsp,
+                           "<base href=\"", kNewBase, "\">"
+                           "</head>"));
+  EXPECT_FALSE(rewrite_driver()->other_base_problem());
+}
+
+
+TEST_F(ScanFilterTest, CspBase2) {
+  rewrite_driver()->AddFilters();
+  EnableDebug();
+  // The default base (the URL) is overridden by a base tag.
+  static const char kTestName[] = "set_base";
+  static const char kNewBase[] = "http://example.com/index.html";
+  static const char kCsp[] = "<meta http-equiv=\"Content-Security-Policy\" "
+                             "content=\"base-uri www.example.com\">";
+  ValidateExpected(
+      kTestName,
+      StrCat("<head>",
+            kCsp,
+            "<base href=\"", kNewBase, "\">"
+            "</head>"),
+      StrCat("<head>",
+            kCsp,
+            "<base href=\"", kNewBase, "\">"
+            "<!--Unable to check safety of a base with CSP base-uri, "
+            "proceeding conservatively.-->"
+            "</head>"));
+  EXPECT_TRUE(rewrite_driver()->other_base_problem());
+}
+
 }  // namespace net_instaweb

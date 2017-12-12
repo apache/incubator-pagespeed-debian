@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "apr.h"
+#include "apr_network_io.h"
 #include "apr_strings.h"
 #include "apr_pools.h"
 #include "apr_thread_proc.h"
@@ -34,13 +35,12 @@
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/public/global_constants.h"
 #include "net/instaweb/public/version.h"
-#include "pagespeed/system/apr_thread_compatible_pool.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/condvar.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/pool.h"
-#include "pagespeed/kernel/base/pool_element.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -50,6 +50,7 @@
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/system/apr_thread_compatible_pool.h"
 
 // This is an easy way to turn on lots of debug messages. Note that this
 // is somewhat verbose.
@@ -63,6 +64,9 @@ enum HttpsOptions {
   kAllowUnknownCertificateAuthority     = 1 << 2,
   kAllowCertificateNotYetValid          = 1 << 3,
 };
+
+const int kReliabilityCheckPeriodMs = 30 * net_instaweb::Timer::kMinuteMs;
+const int kReliabilityCheckMinFetches = 5;
 
 }  // namespace
 
@@ -100,6 +104,13 @@ const char SerfStats::kSerfFetchActiveCount[] =
 const char SerfStats::kSerfFetchTimeoutCount[] = "serf_fetch_timeout_count";
 const char SerfStats::kSerfFetchFailureCount[] = "serf_fetch_failure_count";
 const char SerfStats::kSerfFetchCertErrors[] = "serf_fetch_cert_errors";
+const char SerfStats::kSerfFetchReadCalls[] = "serf_fetch_num_calls_to_read";
+const char SerfStats::kSerfFetchUltimateSuccess[] =
+    "serf_fetch_ultimate_success";
+const char SerfStats::kSerfFetchUltimateFailure[] =
+    "serf_fetch_ultimate_failure";
+const char SerfStats::kSerfFetchLastCheckTimestampMs[] =
+    "serf_fetch_last_check_timestamp_ms";
 
 GoogleString GetAprErrorString(apr_status_t status) {
   char error_str[1024];
@@ -117,9 +128,6 @@ SerfFetch::SerfFetch(const GoogleString& url,
       async_fetch_(async_fetch),
       parser_(async_fetch->response_headers()),
       status_line_read_(false),
-      one_byte_read_(false),
-      has_saved_byte_(false),
-      saved_byte_('\0'),
       message_handler_(message_handler),
       pool_(NULL),  // filled in once assigned to a thread, to use its pool.
       bucket_alloc_(NULL),
@@ -167,7 +175,7 @@ GoogleString SerfFetch::DebugInfo() {
   return str_url_;
 }
 
-void SerfFetch::Cancel() {
+void SerfFetch::Cancel(CancelCause cause) {
   if (connection_ != NULL) {
     // We can get here either because we're canceling the connection ourselves
     // or because Serf detected an error.
@@ -183,30 +191,32 @@ void SerfFetch::Cancel() {
     connection_ = NULL;
   }
 
-  CallCallback(false);
+  CallCallback(cause == CancelCause::kClientDecision ?
+                  SerfCompletionResult::kClientCancel :
+                  SerfCompletionResult::kFailure);
 }
 
-void SerfFetch::CallCallback(bool success) {
+void SerfFetch::CallCallback(SerfCompletionResult result) {
   if (ssl_error_message_ != NULL) {
-    success = false;
+    result = SerfCompletionResult::kFailure;
   }
 
   if (async_fetch_ != NULL) {
     fetch_end_ms_ = timer_->NowMs();
     fetcher_->ReportCompletedFetchStats(this);
-    CallbackDone(success);
+    CallbackDone(result);
     fetcher_->FetchComplete(this);
   } else if (ssl_error_message_ == NULL) {
     LOG(FATAL) << "BUG: Serf callback called more than once on same fetch "
                << DebugInfo() << " (" << this << ").  Please report this "
-               << "at http://code.google.com/p/modpagespeed/issues/";
+               << "at https://github.com/pagespeed/mod_pagespeed/issues/new";
   }
 }
 
-void SerfFetch::CallbackDone(bool success) {
+void SerfFetch::CallbackDone(SerfCompletionResult result) {
   // fetcher_==NULL if Start is called during shutdown.
   if (fetcher_ != NULL) {
-    if (!success) {
+    if (result == SerfCompletionResult::kFailure) {
       fetcher_->failure_count_->Add(1);
     }
     if (fetcher_->track_original_content_length() &&
@@ -215,8 +225,13 @@ void SerfFetch::CallbackDone(bool success) {
       async_fetch_->extra_response_headers()->SetOriginalContentLength(
           bytes_received_);
     }
+
+    if (async_fetch_ != nullptr) {
+      fetcher_->ReportFetchSuccessStats(
+          result, async_fetch_->response_headers(), this);
+    }
   }
-  async_fetch_->Done(success);
+  async_fetch_->Done(result == SerfCompletionResult::kSuccess);
   // We should always NULL the async_fetch_ out after calling otherwise we
   // could get weird double calling errors.
   async_fetch_ = NULL;
@@ -227,7 +242,7 @@ void SerfFetch::CleanupIfError() {
       serf_connection_is_in_error_state(connection_)) {
     message_handler_->Message(
         kInfo, "Serf cleanup for error'd fetch of: %s", DebugInfo().c_str());
-    Cancel();
+    Cancel(CancelCause::kSerfError);
   }
 }
 
@@ -368,21 +383,14 @@ apr_status_t SerfFetch::HandleResponse(serf_request_t* request,
 }
 
 // static
-bool SerfFetch::MoreDataAvailable(apr_status_t status) {
+bool SerfFetch::StatusIndicatesDataPossible(apr_status_t status) {
   // This OR is structured like this to make debugging easier, as it's
   // not obvious when looking at the status mask which of these conditions
   // is hit.
-  if (APR_STATUS_IS_EAGAIN(status)) {
+  if (APR_STATUS_IS_EOF(status)) {
     return true;
   }
-  return APR_STATUS_IS_EINTR(status);
-}
-
-// static
-bool SerfFetch::IsStatusOk(apr_status_t status) {
-  return ((status == APR_SUCCESS) ||
-          APR_STATUS_IS_EOF(status) ||
-          MoreDataAvailable(status));
+  return status == APR_SUCCESS;
 }
 
 #if SERF_HTTPS_FETCHING
@@ -442,7 +450,7 @@ apr_status_t SerfFetch::HandleSSLCertValidation(
   // check async_fetch before CallCallback.
   if ((ssl_error_message_ != NULL) && (async_fetch_ != NULL)) {
     fetcher_->cert_errors_->Add(1);
-    CallCallback(false);  // sets async_fetch_ to null.
+    CallCallback(SerfCompletionResult::kFailure);  // sets async_fetch_ to null.
   }
 
   // TODO(jmarantz): I think the design of this system indicates
@@ -464,50 +472,60 @@ apr_status_t SerfFetch::HandleSSLCertValidation(
 apr_status_t SerfFetch::HandleResponse(serf_bucket_t* response) {
   if (response == NULL) {
     message_handler_->Message(
-        kInfo, "serf HandlerReponse called with NULL response for %s",
+        kInfo, "serf HandleResponse called with NULL response for %s",
         DebugInfo().c_str());
-    CallCallback(false);
+    CallCallback(SerfCompletionResult::kFailure);
     return APR_EGENERAL;
   }
 
+  // If async_fetch_ is NULL, we've already finished up and have nothing more
+  // to do. In that case we *ought* to have been removed from the serf event
+  // loop making this call impossible, however in practice this does happen. So
+  // we just return EOF to have the socket cleaned up.
+  if (async_fetch_ == nullptr) {
+    return APR_EOF;
+  }
+
   // The response-handling code must be robust to packets coming in all at once,
-  // one byte at a time, or anything in between.  If we get EAGAIN we need to
-  // return it to our caller so it can do more work and call us again.  See the
-  // serf example code in serf_get.c.
-  apr_status_t status = APR_EAGAIN;
-  while (MoreDataAvailable(status) && (async_fetch_ != NULL) &&
-         !parser_.headers_complete()) {
+  // one byte at a time, or anything in between. The various reads will return
+  // EAGAIN if we have read all available data but not yet reached EOF. In
+  // that case we must return EAGAIN to our caller so it can do more work and
+  // call us again. See the serf example code in serf_get.c.
+  apr_status_t status;
+  do {
     if (!status_line_read_) {
         status = ReadStatusLine(response);
-    }
-
-    if (status_line_read_ && !one_byte_read_) {
-      status = ReadOneByteFromBody(response);
-    }
-
-    if (one_byte_read_ && !parser_.headers_complete()) {
+    } else if (!parser_.headers_complete()) {
       status = ReadHeaders(response);
+      // ReadHeaders returns EOF at the end of headers or actual EOF.
+      // If the parser has a complete set of headers, it's not real EOF and we
+      // set APR_SUCCESS to allow things to proceed.
+      if (APR_STATUS_IS_EOF(status) && parser_.headers_complete()) {
+        status = APR_SUCCESS;
+      }
+    } else {
+      status = ReadBody(response);
     }
+  } while (status == APR_SUCCESS || APR_STATUS_IS_EINTR(status));
 
-    if (APR_STATUS_IS_EAGAIN(status)) {
-      return status;
-    }
-  }
-
-  if (parser_.headers_complete()) {
-    status = ReadBody(response);
-  }
-
-  if ((async_fetch_ != NULL) &&
-      ((APR_STATUS_IS_EOF(status) && parser_.headers_complete()) ||
-       (status == APR_EGENERAL))) {
-    bool success = (IsStatusOk(status) && parser_.headers_complete());
-    if (!parser_.headers_complete() && (async_fetch_ != NULL)) {
+  // Are we now done with the socket? That is the case either at EOF or error.
+  // SERF_BUCKET_READ_ERROR considers EINTR to be an error but we shouldn't exit
+  // the loop above in that case.
+  // TODO(cheesy): Note that the error handling in the caller isn't great. If
+  // this function returns an error code but doesn't invoke the callback, the
+  // Fetch simply idles in the queue and is eventually timed out.
+  if (APR_STATUS_IS_EOF(status) || SERF_BUCKET_READ_ERROR(status)) {
+    if (!parser_.headers_complete()) {
       // Be careful not to leave headers in inconsistent state in some error
       // conditions.
       async_fetch_->response_headers()->Clear();
     }
-    CallCallback(success);
+    bool successful_completion =
+        APR_STATUS_IS_EOF(status) && parser_.headers_complete();
+    // Zeros async_fetch_.
+    CallCallback(successful_completion ?
+                     SerfCompletionResult::kSuccess :
+                     SerfCompletionResult::kFailure);
   }
   return status;
 }
@@ -526,31 +544,25 @@ apr_status_t SerfFetch::ReadStatusLine(serf_bucket_t* response) {
   return status;
 }
 
-apr_status_t SerfFetch::ReadOneByteFromBody(serf_bucket_t* response) {
-  apr_size_t len = 0;
-  const char* data = NULL;
-  apr_status_t status = serf_bucket_read(response, 1, &data, &len);
-  if (!APR_STATUS_IS_EINTR(status) && IsStatusOk(status)) {
-    one_byte_read_ = true;
-    if (len == 1) {
-      has_saved_byte_ = true;
-      saved_byte_ = data[0];
-    }
-  }
-  return status;
-}
-
 apr_status_t SerfFetch::ReadHeaders(serf_bucket_t* response) {
-  serf_bucket_t* headers = serf_bucket_response_get_headers(response);
+  // serf_bucket_response_get_headers does not guarantee that the headers
+  // have actually arrived, so call serf_bucket_response_get_headers to
+  // see if they have. With a non-blocking socket, this doesn't actually wait;
+  // It will return EAGAIN if the headers aren't yet complete.
+  apr_status_t status = serf_bucket_response_wait_for_headers(response);
+  if (!StatusIndicatesDataPossible(status)) {
+    return status;
+  }
+
   const char* data = NULL;
   apr_size_t len = 0;
-  apr_status_t status = serf_bucket_read(headers, SERF_READ_ALL_AVAIL,
-                                         &data, &len);
+  serf_bucket_t* headers = serf_bucket_response_get_headers(response);
+  status = serf_bucket_read(headers, SERF_READ_ALL_AVAIL, &data, &len);
 
   // Feed valid chunks to the header parser --- but skip empty ones,
   // which can occur for value-less headers, since otherwise they'd
   // look like parse errors.
-  if (IsStatusOk(status) && (len > 0)) {
+  if (StatusIndicatesDataPossible(status) && len > 0) {
     if (parser_.ParseChunk(StringPiece(data, len), message_handler_)) {
       if (parser_.headers_complete()) {
         ResponseHeaders* response_headers = async_fetch_->response_headers();
@@ -558,7 +570,6 @@ apr_status_t SerfFetch::ReadHeaders(serf_bucket_t* response) {
           response_headers->set_status_code(HttpStatus::kNotFound);
           message_handler_->Message(kInfo, "%s: %s", DebugInfo().c_str(),
                                     ssl_error_message_);
-          has_saved_byte_ = false;
         }
 
         if (fetcher_->track_original_content_length()) {
@@ -566,14 +577,6 @@ apr_status_t SerfFetch::ReadHeaders(serf_bucket_t* response) {
           int64 content_length;
           if (response_headers->FindContentLength(&content_length)) {
             response_headers->SetOriginalContentLength(content_length);
-          }
-        }
-        // Stream the one byte read from ReadOneByteFromBody to writer.
-        if (has_saved_byte_) {
-          ++bytes_received_;
-          if (!async_fetch_->Write(StringPiece(&saved_byte_, 1),
-                                   message_handler_)) {
-            status = APR_EGENERAL;
           }
         }
       }
@@ -585,20 +588,25 @@ apr_status_t SerfFetch::ReadHeaders(serf_bucket_t* response) {
 }
 
 apr_status_t SerfFetch::ReadBody(serf_bucket_t* response) {
-  apr_status_t status = APR_EAGAIN;
-  const char* data = NULL;
-  apr_size_t len = 0;
+  apr_status_t status = APR_SUCCESS;
   apr_size_t bytes_to_flush = 0;
-  while (MoreDataAvailable(status) && (async_fetch_ != NULL)) {
-    status = serf_bucket_read(response, SERF_READ_ALL_AVAIL, &data, &len);
-    if (APR_STATUS_IS_EAGAIN(status)) {
-      break;
+  // Read as many times as required to gobble up all the data, then call Flush
+  // once when done. In theory we could depend on the loop in HandleResponse to
+  // take care of this, but ultimately this approach seems to make the code more
+  // readable.
+  while (status == APR_SUCCESS || APR_STATUS_IS_EINTR(status)) {
+    if (fetcher_->read_calls_count_ != nullptr) {
+      fetcher_->read_calls_count_->Add(1);
     }
-    bytes_received_ += len;
-    bytes_to_flush += len;
-    if (IsStatusOk(status) && (len != 0) &&
-        !async_fetch_->Write(StringPiece(data, len), message_handler_)) {
-      status = APR_EGENERAL;
+    apr_size_t len;
+    const char* data;
+    status = serf_bucket_read(response, SERF_READ_ALL_AVAIL, &data, &len);
+    if (StatusIndicatesDataPossible(status) && len > 0) {
+      bytes_received_ += len;
+      bytes_to_flush += len;
+      if (!async_fetch_->Write(StringPiece(data, len), message_handler_)) {
+        status = APR_EGENERAL;
+      }
     }
   }
   if ((bytes_to_flush != 0) && !async_fetch_->Flush(message_handler_)) {
@@ -630,7 +638,7 @@ void SerfFetch::FixUserAgent() {
   GoogleString version = StrCat(
       " (", kModPagespeedSubrequestUserAgent,
       "/" MOD_PAGESPEED_VERSION_STRING "-" LASTCHANGE_STRING ")");
-  if (!StringPiece(user_agent).ends_with(version)) {
+  if (!strings::EndsWith(StringPiece(user_agent), version)) {
     user_agent += version;
   }
   request_headers->Add(HttpAttributes::kUserAgent, user_agent);
@@ -984,7 +992,8 @@ class SerfThreadedFetcher : public SerfUrlAsyncFetcher {
   DISALLOW_COPY_AND_ASSIGN(SerfThreadedFetcher);
 };
 
-bool SerfFetch::Start(SerfUrlAsyncFetcher* fetcher) {
+bool SerfFetch::Start(SerfUrlAsyncFetcher* fetcher,
+                      serf_context_t* serf_context) {
   // Note: this is called in the thread's context, so this is when we do
   // the pool ops.
   fetcher_ = fetcher;
@@ -1001,7 +1010,7 @@ bool SerfFetch::Start(SerfUrlAsyncFetcher* fetcher) {
   DCHECK(fetcher->allow_https() || !using_https_);
 
   apr_status_t status = serf_connection_create2(&connection_,
-                                                fetcher_->serf_context(),
+                                                serf_context,
                                                 url_,
                                                 ConnectionSetup, this,
                                                 ClosedConnection, this,
@@ -1016,8 +1025,8 @@ bool SerfFetch::Start(SerfUrlAsyncFetcher* fetcher) {
 
   // Start the fetch. It will connect to the remote host, send the request,
   // and accept the response, without blocking.
-  status = serf_context_run(
-      fetcher_->serf_context(), SERF_DURATION_NOBLOCK, fetcher_->pool());
+  status =
+      serf_context_run(serf_context, SERF_DURATION_NOBLOCK, fetcher_->pool());
 
   if (status == APR_SUCCESS || APR_STATUS_IS_TIMEUP(status)) {
     return true;
@@ -1076,9 +1085,9 @@ SerfUrlAsyncFetcher::SerfUrlAsyncFetcher(const char* proxy, apr_pool_t* pool,
       thread_system_(thread_system),
       timer_(timer),
       mutex_(NULL),
-      serf_context_(NULL),
       threaded_fetcher_(NULL),
       active_count_(NULL),
+      serf_context_(NULL),
       request_count_(NULL),
       byte_count_(NULL),
       time_duration_ms_(NULL),
@@ -1086,6 +1095,10 @@ SerfUrlAsyncFetcher::SerfUrlAsyncFetcher(const char* proxy, apr_pool_t* pool,
       timeout_count_(NULL),
       failure_count_(NULL),
       cert_errors_(NULL),
+      read_calls_count_(NULL),
+      ultimate_success_(NULL),
+      ultimate_failure_(NULL),
+      last_check_timestamp_ms_(NULL),
       timeout_ms_(timeout_ms),
       shutdown_(false),
       list_outstanding_urls_on_error_(false),
@@ -1104,6 +1117,14 @@ SerfUrlAsyncFetcher::SerfUrlAsyncFetcher(const char* proxy, apr_pool_t* pool,
   timeout_count_ = statistics->GetVariable(SerfStats::kSerfFetchTimeoutCount);
   failure_count_ = statistics->GetVariable(SerfStats::kSerfFetchFailureCount);
   cert_errors_ = statistics->GetVariable(SerfStats::kSerfFetchCertErrors);
+  // Using FindVariable for this one since it's only set in debug builds.
+  read_calls_count_ = statistics->FindVariable(SerfStats::kSerfFetchReadCalls);
+  ultimate_success_ =
+      statistics->GetVariable(SerfStats::kSerfFetchUltimateSuccess);
+  ultimate_failure_ =
+      statistics->GetVariable(SerfStats::kSerfFetchUltimateFailure);
+  last_check_timestamp_ms_ =
+      statistics->GetUpDownCounter(SerfStats::kSerfFetchLastCheckTimestampMs);
   Init(pool, proxy);
   threaded_fetcher_ = new SerfThreadedFetcher(this, proxy);
 }
@@ -1114,9 +1135,9 @@ SerfUrlAsyncFetcher::SerfUrlAsyncFetcher(SerfUrlAsyncFetcher* parent,
       thread_system_(parent->thread_system_),
       timer_(parent->timer_),
       mutex_(NULL),
-      serf_context_(NULL),
       threaded_fetcher_(NULL),
       active_count_(parent->active_count_),
+      serf_context_(NULL),
       request_count_(parent->request_count_),
       byte_count_(parent->byte_count_),
       time_duration_ms_(parent->time_duration_ms_),
@@ -1124,6 +1145,10 @@ SerfUrlAsyncFetcher::SerfUrlAsyncFetcher(SerfUrlAsyncFetcher* parent,
       timeout_count_(parent->timeout_count_),
       failure_count_(parent->failure_count_),
       cert_errors_(parent->cert_errors_),
+      read_calls_count_(parent->read_calls_count_),
+      ultimate_success_(parent->ultimate_success_),
+      ultimate_failure_(parent->ultimate_failure_),
+      last_check_timestamp_ms_(parent->last_check_timestamp_ms_),
       timeout_ms_(parent->timeout_ms()),
       shutdown_(false),
       list_outstanding_urls_on_error_(parent->list_outstanding_urls_on_error_),
@@ -1195,7 +1220,7 @@ void SerfUrlAsyncFetcher::CancelActiveFetchesMutexHeld() {
     // trouble, we simply ask for the oldest element, knowing it will go away.
     SerfFetch* fetch = active_fetches_.oldest();
     LOG(WARNING) << "Aborting fetch of " << fetch->DebugInfo();
-    fetch->Cancel();
+    fetch->Cancel(SerfFetch::CancelCause::kClientDecision);
     ++num_canceled;
   }
 
@@ -1209,13 +1234,15 @@ void SerfUrlAsyncFetcher::CancelActiveFetchesMutexHeld() {
 bool SerfUrlAsyncFetcher::StartFetch(SerfFetch* fetch) {
   active_fetches_.Add(fetch);
   active_count_->Add(1);
-  bool started = !shutdown_ && fetch->Start(this);
+  bool started = !shutdown_ && fetch->Start(this, serf_context_);
   if (!started) {
     fetch->message_handler()->Message(kWarning, "Fetch failed to start: %s",
                                       fetch->DebugInfo().c_str());
     active_fetches_.Remove(fetch);
     active_count_->Add(-1);
-    fetch->CallbackDone(false);
+    fetch->CallbackDone(shutdown_ ?
+                            SerfCompletionResult::kClientCancel :
+                            SerfCompletionResult::kFailure);
     delete fetch;
   }
   return started;
@@ -1276,7 +1303,7 @@ int SerfUrlAsyncFetcher::Poll(int64 max_wait_ms) {
         if (timeout_count_ != NULL) {
           timeout_count_->Add(1);
         }
-        fetch->Cancel();
+        fetch->Cancel(SerfFetch::CancelCause::kFetchTimeout);
       }
     }
     bool success = ((status == APR_SUCCESS) || APR_STATUS_IS_TIMEUP(status));
@@ -1322,16 +1349,21 @@ int SerfUrlAsyncFetcher::Poll(int64 max_wait_ms) {
   return active_fetches_.size();
 }
 
-void SerfUrlAsyncFetcher::FetchComplete(SerfFetch* fetch) {
-  // We do not have a ScopedMutex in FetchComplete, because it is only
-  // called from Poll and CancelActiveFetches, which have ScopedMutexes.
+void SerfUrlAsyncFetcher::FetchComplete(SerfFetch* fetch)
+    NO_THREAD_SAFETY_ANALYSIS {
+  // This method should really be EXCLUSIVE_LOCKS_REQUIRED(mutex_).
+  // However, because it's called very indirectly through through SerfFetch,
+  // it is at least very annoying, and possibly impossible to add the various
+  // annotations to make that work. Thus, NO_THREAD_SAFETY_ANALYSIS.
+  // We happen to know that SerfFetch will only call this in response to being
+  // poked via Poll or CancelActiveFetches, both of which do lock mutex_.
   // Note that SerfFetch::Cancel is currently not exposed from outside this
   // class.
   active_fetches_.Remove(fetch);
   completed_fetches_.Add(fetch);
 }
 
-void SerfUrlAsyncFetcher::ReportCompletedFetchStats(SerfFetch* fetch) {
+void SerfUrlAsyncFetcher::ReportCompletedFetchStats(const SerfFetch* fetch) {
   if (time_duration_ms_) {
     time_duration_ms_->Add(fetch->TimeDuration());
   }
@@ -1340,6 +1372,45 @@ void SerfUrlAsyncFetcher::ReportCompletedFetchStats(SerfFetch* fetch) {
   }
   if (active_count_) {
     active_count_->Add(-1);
+  }
+}
+
+void SerfUrlAsyncFetcher::ReportFetchSuccessStats(
+    SerfCompletionResult result,
+    const ResponseHeaders* headers,
+    const SerfFetch* fetch) {
+  if (result != SerfCompletionResult::kClientCancel) {
+    if (result == SerfCompletionResult::kSuccess &&
+        !headers->IsErrorStatus()) {
+      ultimate_success_->Add(1);
+    } else {
+      ultimate_failure_->Add(1);
+    }
+
+    // We clear "failures" first, read it last, so if we get an
+    // interleaving, failures will be 0, which of course won't
+    // issue a warning.
+    int64 last_check_ms = last_check_timestamp_ms_->Get();
+    int64 success = ultimate_success_->Get();
+    int64 failure = ultimate_failure_->Get();
+
+    int64 now_ms = timer_->NowMs();
+    if (now_ms > (last_check_ms + kReliabilityCheckPeriodMs)) {
+      ultimate_failure_->Clear();
+      ultimate_success_->Clear();
+      last_check_timestamp_ms_->Set(now_ms);
+
+      int64 total = success + failure;
+      if (total >= kReliabilityCheckMinFetches &&
+          (double(success) / total) < 0.5) {
+        message_handler_->Message(
+          kError, "PageSpeed Serf fetch failure rate extremely high; "
+          "only %s of %s recent fetches fully successful; is fetching "
+          "working?",
+          Integer64ToString(success).c_str(),
+          Integer64ToString(total).c_str());
+      }
+    }
   }
 }
 
@@ -1419,6 +1490,12 @@ void SerfUrlAsyncFetcher::InitStats(Statistics* statistics) {
   statistics->AddVariable(SerfStats::kSerfFetchTimeoutCount);
   statistics->AddVariable(SerfStats::kSerfFetchFailureCount);
   statistics->AddVariable(SerfStats::kSerfFetchCertErrors);
+#ifndef NDEBUG
+  statistics->AddVariable(SerfStats::kSerfFetchReadCalls);
+#endif
+  statistics->AddVariable(SerfStats::kSerfFetchUltimateSuccess);
+  statistics->AddVariable(SerfStats::kSerfFetchUltimateFailure);
+  statistics->AddUpDownCounter(SerfStats::kSerfFetchLastCheckTimestampMs);
 }
 
 void SerfUrlAsyncFetcher::set_list_outstanding_urls_on_error(bool x) {

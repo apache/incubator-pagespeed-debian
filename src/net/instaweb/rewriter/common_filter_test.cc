@@ -32,7 +32,6 @@
 #include "pagespeed/kernel/http/google_url.h"
 
 namespace net_instaweb {
-class HtmlElement;
 
 namespace {
 
@@ -71,7 +70,8 @@ class CommonFilterTest : public RewriteTestBase {
 
   bool CanRewriteResource(CommonFilter* filter, const StringPiece& url) {
     bool unused;
-    ResourcePtr resource(filter->CreateInputResource(url, &unused));
+    ResourcePtr resource(filter->CreateInputResource(
+        url, RewriteDriver::InputRole::kUnknown, &unused));
     return (resource.get() != NULL);
   }
 
@@ -82,6 +82,7 @@ class CommonFilterTest : public RewriteTestBase {
     options->WriteableDomainLawyer()->AddDomain(domain, message_handler());
     CountingFilter* filter = new CountingFilter(driver);
     driver->AddOwnedPostRenderFilter(filter);
+    driver->AddFilters();
     driver->StartParse(base_url);
     driver->Flush();
     return filter;
@@ -109,6 +110,7 @@ TEST_F(CommonFilterTest, DoesCallImpls) {
 TEST_F(CommonFilterTest, StoresCorrectBaseUrl) {
   GoogleString doc_url = "http://www.example.com/";
   RewriteDriver* driver = rewrite_driver();
+  driver->AddFilters();
   driver->StartParse(doc_url);
   driver->Flush();
   // Base URL starts out as document URL.
@@ -157,6 +159,7 @@ TEST_F(CommonFilterTest, ResolveUrl) {
   // Normal parse, no <base>
   GoogleString doc_url = "http://www.example.com/";
   RewriteDriver* driver = rewrite_driver();
+  driver->AddFilters();
   driver->StartParse(doc_url);
   filter_->ResolveUrl("a.css", &out);
   ExpectUrl("http://www.example.com/a.css", out);
@@ -173,10 +176,11 @@ TEST_F(CommonFilterTest, ResolveUrl) {
   // Nasty case: refs before base.
   driver->StartParse(doc_url);
   driver->set_refs_before_base();
+  driver->ParseText("<html>");  // Establish non-AMP, allowing filters to run.
   driver->Flush();
   filter_->ResolveUrl("a.css", &out);
   EXPECT_FALSE(out.IsAnyValid());
-  driver->ParseText("<base href='https://www.example.org/' >");
+  driver->ParseText("<base href='https://www.example.org/' ></html>");
   driver->Flush();
   filter_->ResolveUrl("a.css", &out);
   ExpectUrl("https://www.example.org/a.css", out);
@@ -186,6 +190,7 @@ TEST_F(CommonFilterTest, ResolveUrl) {
 TEST_F(CommonFilterTest, DetectsNoScriptCorrectly) {
   GoogleString doc_url = "http://www.example.com/";
   RewriteDriver* driver = rewrite_driver();
+  driver->AddFilters();
   driver->StartParse(doc_url);
   driver->Flush();
   EXPECT_TRUE(filter_->noscript_element() == NULL);

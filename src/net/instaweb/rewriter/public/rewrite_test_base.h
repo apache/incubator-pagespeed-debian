@@ -36,7 +36,6 @@
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "net/instaweb/rewriter/public/test_distributed_fetcher.h"
 #include "net/instaweb/rewriter/public/test_rewrite_driver_factory.h"
 #include "net/instaweb/util/public/mock_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
@@ -108,7 +107,6 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   };
 
   RewriteTestBase();
-  explicit RewriteTestBase(Statistics* statistics);
 
   // Specifies alternate factories to be initialized on construction.
   // By default, TestRewriteDriverFactory is used, but you can employ
@@ -196,12 +194,6 @@ class RewriteTestBase : public RewriteOptionsTestBase {
                                          StringPiece canonical_url,
                                          GoogleString* text);
 
-  // Append default headers to the given string, including
-  // X-Original-Content-Length for tests that depend on this.
-  void AppendDefaultHeaders(const ContentType& content_type,
-                            int64 original_content_length,
-                            GoogleString* text);
-
   void ServeResourceFromManyContexts(const GoogleString& resource_url,
                                      const StringPiece& expected_content);
 
@@ -249,7 +241,9 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // Use managed rewrite drivers for the test so that we see the same behavior
   // in tests that we see in real servers. By default, tests use unmanaged
   // drivers so that _test.cc files can add options after the driver was created
-  // and before the filters are added.
+  // and before the filters are added.  Note that this will only clean them up
+  // via shutdown codepath if you don't actually use them, unless an explicit
+  // Cleanup() call is made.
   void SetUseManagedRewriteDrivers(bool use_managed_rewrite_drivers);
 
   GoogleString CssLinkHref(const StringPiece& url) {
@@ -500,9 +494,6 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   MockUrlFetcher* mock_url_fetcher() {
     return &mock_url_fetcher_;
   }
-  TestDistributedFetcher* test_distributed_fetcher() {
-    return &test_distributed_fetcher_;
-  }
   Hasher* hasher() { return server_context_->hasher(); }
   DelayCache* delay_cache() { return factory_->delay_cache(); }
   LRUCache* lru_cache() { return factory_->lru_cache(); }
@@ -543,14 +534,13 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   CountingUrlAsyncFetcher* counting_url_async_fetcher() {
     return factory_->counting_url_async_fetcher();
   }
-  CountingUrlAsyncFetcher* counting_distributed_fetcher() {
-    return factory_->counting_distributed_async_fetcher();
-  }
   void SetMockHashValue(const GoogleString& value) {
     factory_->mock_hasher()->set_hash_value(value);
   }
 
   void SetCacheDelayUs(int64 delay_us);
+
+  void SetupWriter() override;
 
   // Creates a RewriteDriver using the passed-in options, object, but
   // does *not* finalize the driver.  This gives individual _test.cc
@@ -704,6 +694,13 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // explicitly.
   static const ProcessContext& process_context();
 
+  // Turns off gzip capability in the cache.  Note that requests will still be
+  // formulated with Accept-Encoding:gzip.
+  void DisableGzip();
+
+  // Determines whether a response was originally gzipped.
+  bool WasGzipped(const ResponseHeaders& response_headers);
+
  protected:
   // Common values for HttpBlockingFind* result.
   const HTTPCache::FindResult kFoundResult;
@@ -743,6 +740,13 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // Accessor for TimingInfo.
   const RequestTimingInfo& timing_info();
   RequestTimingInfo* mutable_timing_info();
+
+  // Returns the current request context.  The default implementation takes
+  // the request context from rewrite_driver().  ProxyInterfaceTestBase
+  // overrides.
+  //
+  // This method check-fails if the current request-context is null.
+  virtual RequestContextPtr request_context();
 
   // Convenience method to pull the logging info proto out of the current
   // request context's log record. The request context owns the log record, and
@@ -816,7 +820,6 @@ class RewriteTestBase : public RewriteOptionsTestBase {
   // The mock fetchers & stats are global across all Factories used in the
   // tests.
   MockUrlFetcher mock_url_fetcher_;
-  TestDistributedFetcher test_distributed_fetcher_;
   scoped_ptr<Statistics> statistics_;
 
   // We have two independent RewriteDrivers representing two completely

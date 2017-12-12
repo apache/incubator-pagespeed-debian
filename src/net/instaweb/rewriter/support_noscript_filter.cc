@@ -18,12 +18,11 @@
 #include "net/instaweb/rewriter/public/support_noscript_filter.h"
 
 #include "net/instaweb/public/global_constants.h"
-#include "net/instaweb/rewriter/public/mobilize_rewrite_filter.h"
 #include "net/instaweb/rewriter/public/request_properties.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
-#include "net/instaweb/rewriter/public/split_html_beacon_filter.h"
+#include "net/instaweb/rewriter/public/server_context.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
@@ -32,6 +31,7 @@
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/user_agent_matcher.h"
 
 namespace net_instaweb {
 
@@ -81,13 +81,8 @@ bool SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() const {
     switch (filter) {
       case RewriteOptions::kDeferIframe:
       case RewriteOptions::kDeferJavascript:
-      case RewriteOptions::kSplitHtml:
-        // We don't need to insert a noscript redirect if we are just
-        // instrumenting the page, instead of actually running split HTML.
-        filter_enabled =
-            (request_properties->SupportsJsDefer(
-                 options->enable_aggressive_rewriters_for_mobile()) &&
-             !SplitHtmlBeaconFilter::ShouldApply(rewrite_driver_));
+        filter_enabled = request_properties->SupportsJsDefer(
+            options->enable_aggressive_rewriters_for_mobile());
         break;
       case RewriteOptions::kDedupInlinedImages:
       case RewriteOptions::kDelayImages:
@@ -95,15 +90,8 @@ bool SupportNoscriptFilter::IsAnyFilterRequiringScriptExecutionEnabled() const {
       case RewriteOptions::kLocalStorageCache:
         filter_enabled = request_properties->SupportsImageInlining();
         break;
-      case RewriteOptions::kFlushSubresources:
-        filter_enabled = rewrite_driver_->flushed_early();;
-        break;
-      case RewriteOptions::kCachePartialHtml:
-        filter_enabled = rewrite_driver_->flushing_cached_html();
-        break;
       case RewriteOptions::kMobilize:
-        filter_enabled =
-            MobilizeRewriteFilter::IsApplicableFor(rewrite_driver_);
+        filter_enabled = false;
         break;
       default:
         break;

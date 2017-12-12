@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "net/instaweb/rewriter/public/common_filter.h"
+#include "net/instaweb/rewriter/public/csp.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/resource_tag_scanner.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
@@ -59,6 +60,17 @@ void ScanFilter::StartDocument() {
   const ResponseHeaders* headers = driver_->response_headers();
   driver_->set_containing_charset(headers == NULL ? "" :
                                   headers->DetermineCharset());
+
+  driver_->mutable_content_security_policy()->Clear();
+  if (driver_->options()->honor_csp() && headers != nullptr) {
+    ConstStringStarVector values;
+    if (headers->Lookup(HttpAttributes::kContentSecurityPolicy, &values)) {
+      for (const GoogleString* policy : values) {
+        driver_->mutable_content_security_policy()->AddPolicy(
+            CspPolicy::Parse(*policy));
+      }
+    }
+  }
 }
 
 void ScanFilter::Cdata(HtmlCdataNode* cdata) {
@@ -98,9 +110,27 @@ void ScanFilter::StartElement(HtmlElement* element) {
     // See http://www.whatwg.org/specs/web-apps/current-work/multipage
     // /semantics.html#the-base-element
     //
-    // TODO(jmarantz): If the base is present but cannot be decoded, we should
-    // probably not do any resource rewriting at all.
-    if ((href != NULL) && (href->DecodedValueOrNull() != NULL)) {
+    if (href != nullptr) {
+      if (href->DecodedValueOrNull() == nullptr) {
+        // Can't decode base well, so give up on using.
+        driver_->set_other_base_problem();
+        return;
+      }
+
+      // It would be much better if we were to use IsBasePermitted here, but
+      // we may not be able to set previous_origin accurately. So instead,
+      // we act overly conservatively and handle
+      if (driver_->content_security_policy().HasDirective(
+              CspDirective::kBaseUri)) {
+        driver_->InsertDebugComment(
+            "Unable to check safety of a base with CSP base-uri, "
+            "proceeding conservatively.",
+            element);
+        driver_->set_other_base_problem();
+        return;
+      }
+
+
       // TODO(jmarantz): consider having rewrite_driver access the url in this
       // class, rather than poking it into rewrite_driver.
       GoogleString new_base = href->DecodedValueOrNull();
@@ -125,6 +155,23 @@ void ScanFilter::StartElement(HtmlElement* element) {
             attributes[i].url->keyword() == HtmlName::kManifest)) {
         seen_refs_ = true;
       }
+    }
+  }
+
+  if (driver_->options()->honor_csp() &&
+      element->keyword() == HtmlName::kMeta) {
+    // Note: https://html.spec.whatwg.org/multipage/semantics.html#attr-meta-http-equiv-content-security-policy
+    // requires us to check whether the meta element is a child of a <head>.
+    // We cannot do it reliably since we don't do full HTML5 parsing (complete
+    // with inventing missing nodes), so we conservatively assume that the
+    // policy applies.
+    const char* equiv = element->AttributeValue(HtmlName::kHttpEquiv);
+    const char* content = element->AttributeValue(HtmlName::kContent);
+    if (equiv && content &&
+        StringCaseEqual(equiv, HttpAttributes::kContentSecurityPolicy) &&
+        !StringPiece(content).empty()) {
+      driver_->mutable_content_security_policy()->AddPolicy(
+          CspPolicy::Parse(content));
     }
   }
 

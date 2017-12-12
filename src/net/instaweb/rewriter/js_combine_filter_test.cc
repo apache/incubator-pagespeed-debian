@@ -467,7 +467,8 @@ TEST_F(JsFilterAndCombineFilterTest, TestCrossDomainRejectUnauthEnabled) {
   server_context()->ComputeSignature(options());
   GoogleUrl gurl(StrCat(other_domain_, kJsUrl1));
   GoogleString debug_message = StrCat(
-      "<!--", RewriteDriver::GenerateUnauthorizedDomainDebugComment(gurl),
+      "<!--", rewrite_driver()->GenerateUnauthorizedDomainDebugComment(
+                  gurl, RewriteDriver::InputRole::kScript),
       "-->");
   // Note that we get the debug message twice, once for the combining attempt
   // and once for the rewriting attempt, both of which fail due to the domain
@@ -571,7 +572,7 @@ TEST_F(JsFilterAndCombineProxyTest, MinifyCombineAcrossHostsProxy) {
 }
 
 TEST_F(JsCombineFilterTest, NotReallyStrict) {
-  // https://code.google.com/p/modpagespeed/issues/detail?id=909
+  // https://github.com/pagespeed/mod_pagespeed/issues/909
   GoogleString simple_rel_url =
       Encode("", "jc", "DuUKa0RTAg",
              MultiUrl(kPseudoStrictUrl1, kPseudoStrictUrl2), "js");
@@ -1297,6 +1298,46 @@ TEST_F(JsCombineFilterTest, MapRewriteDomainAccrossDirs) {
   EXPECT_TRUE(combination_src.find(kDataHash2) != GoogleString::npos)
       << combination_src;
   EXPECT_GT(lru_cache()->num_inserts(), 0);  // Actually did work.
+}
+
+TEST_F(JsCombineFilterTest, Csp) {
+  // Can't use EnableDebug since fixture uses SoftEnableFilterForTesting.
+  options()->ClearSignatureForTesting();
+  options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
+  server_context()->ComputeSignature(options());
+
+  static const char kCsp[] = "<meta http-equiv=\"Content-Security-Policy\" "
+                             "content=\"script-src *\">";
+  ValidateExpected(
+      "csp",
+      StrCat(kCsp,
+             "<script src=", kJsUrl1, "></script>",
+             "<script src=", kJsUrl2, "></script>"),
+      StrCat(kCsp,
+             "<script src=", kJsUrl1, "></script>",
+             "<!--Not considering JS combining since CSP forbids eval-->",
+             "<script src=", kJsUrl2, "></script>",
+             "<!--Not considering JS combining since CSP forbids eval-->"));
+}
+
+TEST_F(JsCombineFilterTest, Csp2) {
+  // Can't use EnableDebug since fixture uses SoftEnableFilterForTesting.
+  options()->ClearSignatureForTesting();
+  options()->SoftEnableFilterForTesting(RewriteOptions::kDebug);
+  server_context()->ComputeSignature(options());
+
+  // This one has unsafe-eval, so we can work.
+  static const char kCsp[] = "<meta http-equiv=\"Content-Security-Policy\" "
+                             "content=\"script-src * 'unsafe-eval'\">";
+  ValidateExpected(
+      "csp",
+      StrCat(kCsp,
+             "<script src=", kJsUrl1, "></script>",
+             "<script src=", kJsUrl2, "></script>"),
+      StrCat(kCsp,
+             "<script src=\"a.js+b.js.pagespeed.jc.g2Xe9o4bQ2.js\"></script>",
+             "<script>eval(mod_pagespeed_KecOGCIjKt);</script>",
+             "<script>eval(mod_pagespeed_dzsx6RqvJJ);</script>"));
 }
 
 }  // namespace net_instaweb

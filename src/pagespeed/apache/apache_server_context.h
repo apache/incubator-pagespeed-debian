@@ -17,6 +17,8 @@
 #ifndef PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 #define PAGESPEED_APACHE_APACHE_SERVER_CONTEXT_H_
 
+#include <memory>
+
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/rewrite_stats.h"
 #include "pagespeed/apache/apache_config.h"
@@ -34,6 +36,7 @@ namespace net_instaweb {
 
 class ApacheRewriteDriverFactory;
 class ApacheRequestContext;
+class MeasurementProxyUrlNamer;
 class ProxyFetchFactory;
 class RewriteDriverPool;
 class RewriteDriver;
@@ -48,6 +51,9 @@ class Variable;
 // that require a phased initialization.
 class ApacheServerContext : public SystemServerContext {
  public:
+  // Prefix for ProxyInterface stats (active in proxy_all_requests_mode() only).
+  static const char kProxyInterfaceStatsPrefix[];
+
   ApacheServerContext(ApacheRewriteDriverFactory* factory,
                       server_rec* server,
                       const StringPiece& version);
@@ -58,6 +64,7 @@ class ApacheServerContext : public SystemServerContext {
 
   ApacheRewriteDriverFactory* apache_factory() { return apache_factory_; }
   ApacheConfig* global_config();
+  const ApacheConfig* global_config() const;
   bool InitPath(const GoogleString& path);
 
   // These return configuration objects that hold settings from
@@ -89,18 +96,6 @@ class ApacheServerContext : public SystemServerContext {
     non_spdy_config_overlay_.reset(x);
   }
 
-  // Returns special configuration that should be used for SPDY sessions
-  // instead of global_config(). Returns NULL if global_config() should be
-  // used instead.
-  virtual const ApacheConfig* SpdyGlobalConfig() const {
-    return spdy_specific_config_.get();
-  }
-
-  // Pool to pass to NewRewriteDriverFromPool to get a RewriteDriver configured
-  // with SPDY-specific options. May be NULL in case there is no spdy-specific
-  // configuration.
-  RewriteDriverPool* spdy_driver_pool() { return spdy_driver_pool_; }
-
   // This should be called after all configuration parsing is done to collapse
   // configuration inside the config overlays into actual ApacheConfig objects.
   // It will also compute signatures when done.
@@ -112,32 +107,20 @@ class ApacheServerContext : public SystemServerContext {
 
   const server_rec* server() const { return server_rec_; }
 
-  virtual RewriteDriverPool* SelectDriverPool(bool using_spdy);
-
-  // Hook for implementations to support fetching directly from the spdy module.
-  virtual void MaybeApplySpdySessionFetcher(const RequestContextPtr& request,
-                                            RewriteDriver* driver);
-
   ProxyFetchFactory* proxy_fetch_factory() {
     return proxy_fetch_factory_.get();
   }
 
   void InitProxyFetchFactory();
 
-  // We do not proxy external HTML from mod_pagespeed in Apache using the
-  // ProxyFetch flow.  Currently we must rely on a separate module to
-  // let mod_pagespeed behave as an origin fetcher.
-  virtual bool ProxiesHtml() const { return false; }
+  // We only proxy external HTML from mod_pagespeed in Apache using the
+  // ProxyFetch flow if proxy_all_requests_mode() is on in config.  In the usual
+  // case, we handle HTML as an Apache filter, letting something like mod_proxy
+  // (or one of our own test modes like slurp) do the fetching.
+  virtual bool ProxiesHtml() const {
+    return global_config()->proxy_all_requests_mode();
+  }
 
-  // Creates a request context which is suitable for resolving
-  // options, but is not yet suitable for establishing a context from
-  // which to do fetches.  Establishing that context is slightly
-  // expensive so we want to only do that in request-paths that can
-  // lead to spdy fetches.
-  //
-  // To enable a rewrite context for fetching, call
-  //   apache_request_context->SetupSpdyConnectionIfNeeded(request);
-  // after the object is context is constructed.
   ApacheRequestContext* NewApacheRequestContext(request_rec* request);
 
   // Reports an error status to the HTTP resource request, and logs
@@ -166,7 +149,7 @@ class ApacheServerContext : public SystemServerContext {
   virtual GoogleString FormatOption(StringPiece option_name, StringPiece args);
 
  private:
-  virtual bool UpdateCacheFlushTimestampMs(int64 timestamp_ms);
+  void ChildInit(SystemRewriteDriverFactory* factory) override;
 
   void ReportNotFoundHelper(MessageType message_type,
                             StringPiece url,
@@ -182,12 +165,8 @@ class ApacheServerContext : public SystemServerContext {
   scoped_ptr<ApacheConfig> spdy_config_overlay_;
   scoped_ptr<ApacheConfig> non_spdy_config_overlay_;
 
-  // May be NULL if we don't have any special settings for when using SPDY.
-  scoped_ptr<ApacheConfig> spdy_specific_config_;
-
-  // Owned by ServerContext via a call to ManageRewriteDriverPool.
-  // May be NULL if we don't have a spdy-specific configuration.
-  RewriteDriverPool* spdy_driver_pool_;
+  // May be NULL. Only constructed in measurement proxy mode.
+  std::unique_ptr<MeasurementProxyUrlNamer> measurement_url_namer_;
 
   scoped_ptr<ProxyFetchFactory> proxy_fetch_factory_;
 

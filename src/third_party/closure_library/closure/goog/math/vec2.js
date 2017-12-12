@@ -199,14 +199,12 @@ goog.math.Vec2.rotateAroundPoint = function(v, axisPoint, angle) {
 };
 
 
-/**
- * Compares this vector with another for equality.
- * @param {!goog.math.Vec2} b The other vector.
- * @return {boolean} Whether this vector has the same x and y as the given
- *     vector.
- */
+/** @override */
 goog.math.Vec2.prototype.equals = function(b) {
-  return this == b || !!b && this.x == b.x && this.y == b.y;
+  if (this == b) {
+    return true;
+  }
+  return b instanceof goog.math.Vec2 && !!b && this.x == b.x && this.y == b.y;
 };
 
 
@@ -271,6 +269,17 @@ goog.math.Vec2.dot = function(a, b) {
 
 
 /**
+ * Returns the determinant of two vectors.
+ * @param {!goog.math.Vec2} a The first vector.
+ * @param {!goog.math.Vec2} b The second vector.
+ * @return {number} The determinant of the two vectors.
+ */
+goog.math.Vec2.determinant = function(a, b) {
+  return a.x * b.y - a.y * b.x;
+};
+
+
+/**
  * Returns a new Vec2 that is the linear interpolant between vectors a and b at
  * scale-value x.
  * @param {!goog.math.Coordinate} a Vector a.
@@ -279,6 +288,6 @@ goog.math.Vec2.dot = function(a, b) {
  * @return {!goog.math.Vec2} The interpolated vector.
  */
 goog.math.Vec2.lerp = function(a, b, x) {
-  return new goog.math.Vec2(goog.math.lerp(a.x, b.x, x),
-                            goog.math.lerp(a.y, b.y, x));
+  return new goog.math.Vec2(
+      goog.math.lerp(a.x, b.x, x), goog.math.lerp(a.y, b.y, x));
 };

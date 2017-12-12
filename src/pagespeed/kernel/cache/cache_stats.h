@@ -21,6 +21,7 @@
 
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
@@ -28,7 +29,6 @@
 namespace net_instaweb {
 
 class Histogram;
-class SharedString;
 class Statistics;
 class Timer;
 class Variable;
@@ -51,7 +51,7 @@ class CacheStats : public CacheInterface {
 
   virtual void Get(const GoogleString& key, Callback* callback);
   virtual void MultiGet(MultiGetRequest* request);
-  virtual void Put(const GoogleString& key, SharedString* value);
+  virtual void Put(const GoogleString& key, const SharedString& value);
   virtual void Delete(const GoogleString& key);
   virtual CacheInterface* Backend() { return cache_; }
   virtual bool IsBlocking() const { return cache_->IsBlocking(); }

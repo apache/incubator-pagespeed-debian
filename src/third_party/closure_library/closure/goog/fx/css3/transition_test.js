@@ -17,6 +17,7 @@ goog.setTestOnly('goog.fx.css3.TransitionTest');
 
 goog.require('goog.dispose');
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.events');
 goog.require('goog.fx.Transition');
 goog.require('goog.fx.css3.Transition');
@@ -39,7 +40,7 @@ function createTransition(element, duration) {
 
 function setUp() {
   mockClock = new goog.testing.MockClock(true);
-  element = goog.dom.createElement('div');
+  element = goog.dom.createElement(goog.dom.TagName.DIV);
   document.body.appendChild(element);
 }
 
@@ -56,10 +57,9 @@ function testPlayEventFiredOnPlay() {
 
   transition = createTransition(element, 10);
   var handlerCalled = false;
-  goog.events.listen(transition, goog.fx.Transition.EventType.PLAY,
-      function() {
-        handlerCalled = true;
-      });
+  goog.events.listen(transition, goog.fx.Transition.EventType.PLAY, function() {
+    handlerCalled = true;
+  });
 
   transition.play();
   assertTrue(handlerCalled);
@@ -71,10 +71,9 @@ function testBeginEventFiredOnPlay() {
 
   transition = createTransition(element, 10);
   var handlerCalled = false;
-  goog.events.listen(transition, goog.fx.Transition.EventType.BEGIN,
-      function() {
-        handlerCalled = true;
-      });
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.BEGIN,
+      function() { handlerCalled = true; });
 
   transition.play();
   assertTrue(handlerCalled);
@@ -87,14 +86,12 @@ function testFinishEventsFiredAfterFinish() {
   transition = createTransition(element, 10);
   var finishHandlerCalled = false;
   var endHandlerCalled = false;
-  goog.events.listen(transition, goog.fx.Transition.EventType.FINISH,
-      function() {
-        finishHandlerCalled = true;
-      });
-  goog.events.listen(transition, goog.fx.Transition.EventType.END,
-      function() {
-        endHandlerCalled = true;
-      });
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.FINISH,
+      function() { finishHandlerCalled = true; });
+  goog.events.listen(transition, goog.fx.Transition.EventType.END, function() {
+    endHandlerCalled = true;
+  });
 
   transition.play();
 
@@ -113,26 +110,21 @@ function testEventsWhenTransitionIsUnsupported() {
   var stopHandlerCalled = false;
   var finishHandlerCalled = false, endHandlerCalled = false;
   var beginHandlerCalled = false, playHandlerCalled = false;
-  goog.events.listen(transition, goog.fx.Transition.EventType.BEGIN,
-      function() {
-        beginHandlerCalled = true;
-      });
-  goog.events.listen(transition, goog.fx.Transition.EventType.PLAY,
-      function() {
-        playHandlerCalled = true;
-      });
-  goog.events.listen(transition, goog.fx.Transition.EventType.FINISH,
-      function() {
-        finishHandlerCalled = true;
-      });
-  goog.events.listen(transition, goog.fx.Transition.EventType.END,
-      function() {
-        endHandlerCalled = true;
-      });
-  goog.events.listen(transition, goog.fx.Transition.EventType.STOP,
-      function() {
-        stopHandlerCalled = true;
-      });
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.BEGIN,
+      function() { beginHandlerCalled = true; });
+  goog.events.listen(transition, goog.fx.Transition.EventType.PLAY, function() {
+    playHandlerCalled = true;
+  });
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.FINISH,
+      function() { finishHandlerCalled = true; });
+  goog.events.listen(transition, goog.fx.Transition.EventType.END, function() {
+    endHandlerCalled = true;
+  });
+  goog.events.listen(transition, goog.fx.Transition.EventType.STOP, function() {
+    stopHandlerCalled = true;
+  });
 
   assertFalse(transition.play());
 
@@ -155,12 +147,11 @@ function testCallingStopDuringAnimationWorks() {
   var stopHandler = goog.testing.recordFunction();
   var endHandler = goog.testing.recordFunction();
   var finishHandler = goog.testing.recordFunction();
-  goog.events.listen(transition, goog.fx.Transition.EventType.STOP,
-      stopHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.END,
-      endHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.FINISH,
-      finishHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.STOP, stopHandler);
+  goog.events.listen(transition, goog.fx.Transition.EventType.END, endHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.FINISH, finishHandler);
 
   transition.play();
   mockClock.tick(1);
@@ -180,12 +171,11 @@ function testCallingStopImmediatelyWorks() {
   var stopHandler = goog.testing.recordFunction();
   var endHandler = goog.testing.recordFunction();
   var finishHandler = goog.testing.recordFunction();
-  goog.events.listen(transition, goog.fx.Transition.EventType.STOP,
-      stopHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.END,
-      endHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.FINISH,
-      finishHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.STOP, stopHandler);
+  goog.events.listen(transition, goog.fx.Transition.EventType.END, endHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.FINISH, finishHandler);
 
   transition.play();
   transition.stop();
@@ -203,12 +193,11 @@ function testCallingStopAfterAnimationDoesNothing() {
   var stopHandler = goog.testing.recordFunction();
   var endHandler = goog.testing.recordFunction();
   var finishHandler = goog.testing.recordFunction();
-  goog.events.listen(transition, goog.fx.Transition.EventType.STOP,
-      stopHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.END,
-      endHandler);
-  goog.events.listen(transition, goog.fx.Transition.EventType.FINISH,
-      finishHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.STOP, stopHandler);
+  goog.events.listen(transition, goog.fx.Transition.EventType.END, endHandler);
+  goog.events.listen(
+      transition, goog.fx.Transition.EventType.FINISH, finishHandler);
 
   transition.play();
   mockClock.tick(10000);

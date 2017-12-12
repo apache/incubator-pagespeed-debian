@@ -1,14 +1,29 @@
 Updating BoringSSL can sometimes be tricky!
 
 Because sometimes the gypi file can change drastically upstream, we will
-have to take the gypi file from chromium's trunk and modify the paths.
+have to take the gypi file from chromium's stable and modify the paths.
+The latest stable version of chromium can be found here.
+http://googlechromereleases.blogspot.com/search/label/Stable%20updates
 
-  SERF_DIR=/path/to/client/google3/third_party/instaweb/src/third_party/serf
+Export the version number as $CHROMIUM_VERSION
+
+  To update BoringSSL to latest chromium-stable proper, and include the update
+  in a pending commit:
+    cd third_party/boringssl/src
+    git checkout chromium-stable
+    cd ..
+    git add src
+    cd ../../
+
+  Then:
+  SERF_DIR=$PWD/third_party/serf
+
+  Move to a fresh/temporary working directory.
+
   git clone https://chromium.googlesource.com/chromium/src
-
-  # Look up what boringssl commit to use
-  cat src/DEPS | grep "boringssl_revision':"
-  # edit our DEPS file to use that commit
+  cd src
+  git checkout $CHROMIUM_VERSION
+  cd ..
 
   # Now copy the build files
   cat src/third_party/boringssl/boringssl.gypi \
@@ -25,6 +40,3 @@ have to take the gypi file from chromium's trunk and modify the paths.
     cp -r src/third_party/boringssl/$arch $SERF_DIR/$arch/
   done
 
-Then run:
-
-  make gclient_update

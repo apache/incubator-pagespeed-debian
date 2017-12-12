@@ -34,7 +34,6 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/http/http_names.h"
-#include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 
 namespace net_instaweb {
@@ -45,8 +44,8 @@ void ResourceFetch::ApplyExperimentOptions(const GoogleUrl& url,
                                            RewriteOptions** custom_options) {
   const RewriteOptions* active_options;
   if (*custom_options == NULL) {
-    RewriteDriverPool* driver_pool = server_context->SelectDriverPool(
-        request_ctx->using_spdy());
+    RewriteDriverPool* driver_pool =
+        server_context->standard_rewrite_driver_pool();
     active_options = driver_pool->TargetOptions();
   } else {
     active_options = *custom_options;
@@ -93,7 +92,6 @@ void ResourceFetch::StartWithDriver(
 
 void ResourceFetch::Start(const GoogleUrl& url,
                           RewriteOptions* custom_options,
-                          bool using_spdy,
                           ServerContext* server_context,
                           AsyncFetch* async_fetch) {
   RewriteDriver* driver = GetDriver(
@@ -171,6 +169,12 @@ void ResourceFetch::HandleHeadersComplete() {
   DCHECK(!response_headers()->Lookup(HttpAttributes::kSetCookie2, &v));
   response_headers()->RemoveAll(HttpAttributes::kSetCookie);
   response_headers()->RemoveAll(HttpAttributes::kSetCookie2);
+
+  for (int i = 0; i < driver_->options()->num_resource_headers(); ++i) {
+    const RewriteOptions::NameValue* nv =
+        driver_->options()->resource_header(i);
+    response_headers()->Add(nv->name, nv->value);
+  }
 
   // "Vary: Accept-Encoding" for all resources that are transmitted compressed.
   // Server ought to set these, I suppose.

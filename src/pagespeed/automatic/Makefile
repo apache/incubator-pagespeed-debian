@@ -20,7 +20,7 @@
 
 # MOD_PAGESPEED_ROOT should be set to the 'src' directory where mod_pagespeed
 # was built.  See:
-# https://developers.google.com/speed/pagespeed/module/build_from_source
+# https://modpagespeed.com/doc/build_from_source
 #
 # When running this Makefile from the 'automatic' directory then it will
 # be set automatically.
@@ -45,7 +45,6 @@ BASE_LIBS = \
   build/libwebp_dec.a \
   build/libwebp_dsp.a \
   build/libwebp_enc.a \
-  build/libwebp_enc_mux.a \
   build/libwebp_mux.a \
   build/libwebp_utils.a \
   net/instaweb/libautomatic_util.a \
@@ -54,7 +53,6 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_admin_site_css_data2c.a \
   net/instaweb/libinstaweb_apr.a \
   net/instaweb/libinstaweb_automatic.a \
-  net/instaweb/libinstaweb_cache_html_info_pb.a \
   net/instaweb/libinstaweb_caches_css_data2c.a \
   net/instaweb/libinstaweb_caches_js_data2c.a \
   net/instaweb/libinstaweb_caches_js_opt_data2c.a \
@@ -67,12 +65,10 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_critical_css_beacon_opt_data2c.a \
   net/instaweb/libinstaweb_critical_css_loader_data2c.a \
   net/instaweb/libinstaweb_critical_css_loader_opt_data2c.a \
-  net/instaweb/libinstaweb_critical_css_pb.a \
   net/instaweb/libinstaweb_critical_images_beacon_data2c.a \
   net/instaweb/libinstaweb_critical_images_beacon_opt_data2c.a \
   net/instaweb/libinstaweb_critical_images_pb.a \
   net/instaweb/libinstaweb_critical_keys_pb.a \
-  net/instaweb/libinstaweb_critical_line_info_pb.a \
   net/instaweb/libinstaweb_dedup_inlined_images_data2c.a \
   net/instaweb/libinstaweb_dedup_inlined_images_opt_data2c.a \
   net/instaweb/libinstaweb_defer_iframe_data2c.a \
@@ -81,15 +77,16 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_delay_images_inline_data2c.a \
   net/instaweb/libinstaweb_delay_images_inline_opt_data2c.a \
   net/instaweb/libinstaweb_delay_images_opt_data2c.a \
+  net/instaweb/libinstaweb_dependencies_pb.a \
   net/instaweb/libinstaweb_deterministic_data2c.a \
   net/instaweb/libinstaweb_deterministic_opt_data2c.a \
   net/instaweb/libinstaweb_extended_instrumentation_data2c.a \
   net/instaweb/libinstaweb_extended_instrumentation_opt_data2c.a \
   net/instaweb/libinstaweb_flush_early_pb.a \
-  net/instaweb/libinstaweb_ghost_click_buster_opt_data2c.a \
   net/instaweb/libinstaweb_graphs_css_data2c.a \
   net/instaweb/libinstaweb_graphs_js_data2c.a \
   net/instaweb/libinstaweb_graphs_js_opt_data2c.a \
+  net/instaweb/libinstaweb_input_info_pb.a \
   net/instaweb/libinstaweb_js_defer_data2c.a \
   net/instaweb/libinstaweb_js_defer_opt_data2c.a \
   net/instaweb/libinstaweb_lazyload_images_data2c.a \
@@ -98,10 +95,6 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_local_storage_cache_opt_data2c.a \
   net/instaweb/libinstaweb_messages_js_data2c.a \
   net/instaweb/libinstaweb_messages_js_opt_data2c.a \
-  net/instaweb/libinstaweb_mobilize_cached_pb.a \
-  net/instaweb/libinstaweb_mobilize_labeling_pb.a \
-  net/instaweb/libinstaweb_mobilize_menu_pb.a \
-  net/instaweb/libinstaweb_panel_loader_opt_data2c.a \
   net/instaweb/libinstaweb_rendered_image_pb.a \
   net/instaweb/libinstaweb_responsive_js_data2c.a \
   net/instaweb/libinstaweb_responsive_js_opt_data2c.a \
@@ -110,11 +103,10 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_rewriter_css.a \
   net/instaweb/libinstaweb_rewriter_html.a \
   net/instaweb/libinstaweb_rewriter_html_gperf.a \
+  net/instaweb/libinstaweb_rewriter_csp_gperf.a \
   net/instaweb/libinstaweb_rewriter_image.a \
   net/instaweb/libinstaweb_rewriter_javascript.a \
   net/instaweb/libinstaweb_rewriter_pb.a \
-  net/instaweb/libinstaweb_split_html_beacon_data2c.a \
-  net/instaweb/libinstaweb_split_html_beacon_opt_data2c.a \
   net/instaweb/libinstaweb_spriter.a \
   net/instaweb/libinstaweb_spriter_pb.a \
   net/instaweb/libinstaweb_static_asset_config_pb.a \
@@ -125,19 +117,16 @@ BASE_LIBS = \
   net/instaweb/libinstaweb_util.a \
   net/instaweb/libprocess_context.a \
   net/instaweb/libtest_infrastructure.a \
-  pagespeed/libinstaweb_mobilize_css_data2c.a \
-  pagespeed/libinstaweb_mobilize_js_data2c.a \
-  pagespeed/libinstaweb_mobilize_js_opt_data2c.a \
-  pagespeed/libinstaweb_mobilize_layout_css_data2c.a \
-  pagespeed/libinstaweb_mobilize_xhr_js_data2c.a \
-  pagespeed/libinstaweb_mobilize_xhr_js_opt_data2c.a \
   pagespeed/libjs_tokenizer.a \
   pagespeed/libjsminify.a \
+  pagespeed/libmem_lock.a \
   pagespeed/libpagespeed_ads_util.a \
   pagespeed/libpagespeed_base.a \
   pagespeed/libpagespeed_base_core.a \
   pagespeed/libpagespeed_base_test_infrastructure.a \
   pagespeed/libpagespeed_cache.a \
+  pagespeed/libpagespeed_controller.a \
+  pagespeed/libpagespeed_controller_proto.a \
   pagespeed/libpagespeed_html.a \
   pagespeed/libpagespeed_html_gperf.a \
   pagespeed/libpagespeed_http.a \
@@ -170,6 +159,10 @@ BASE_LIBS = \
   third_party/gflags/libgflags.a \
   third_party/giflib/libdgiflib.a \
   third_party/giflib/libgiflib_core.a \
+  third_party/grpc/libgpr.a \
+  third_party/grpc/libgrpc_core.a \
+  third_party/grpc/libgrpc_cpp.a \
+  third_party/hiredis/libhiredis.a \
   third_party/icu/libicudata.a \
   third_party/icu/libicuuc.a \
   third_party/jsoncpp/libjsoncpp.a \
@@ -218,7 +211,7 @@ else
 endif
 INCLUDE_ARCH = arch/linux/x64
 LIBS = $(addprefix $(MOD_PAGESPEED_ROOT)/out/$(BUILDTYPE)/obj.target/, $(BASE_LIBS))
-SYSLIBS = -lpthread -lrt
+SYSLIBS = -lpthread -lrt -luuid
 TESTBENCH_LIB = $(MOD_PAGESPEED_ROOT)/out/$(BUILDTYPE)/obj.target/third_party/re2/libre2_bench_util.a
 
 build_libraries :
@@ -230,8 +223,8 @@ INCLUDE_PATH = \
     -I$(MOD_PAGESPEED_ROOT) \
     -I$(MOD_PAGESPEED_ROOT)/out/$(BUILDTYPE)/obj/gen/protoc_out/instaweb \
     -I$(MOD_PAGESPEED_ROOT)/third_party/chromium/src \
-    -I$(MOD_PAGESPEED_ROOT)/third_party/gflags/gen/$(INCLUDE_ARCH)/include \
-    -I$(MOD_PAGESPEED_ROOT)/third_party/google-sparsehash/src \
+    -I$(MOD_PAGESPEED_ROOT)/third_party/gflags/arch/gen/$(INCLUDE_ARCH)/include \
+    -I$(MOD_PAGESPEED_ROOT)/third_party/google-sparsehash/src/src \
     -I$(MOD_PAGESPEED_ROOT)/third_party/google-sparsehash/gen/$(INCLUDE_ARCH)/include \
     -I$(MOD_PAGESPEED_ROOT)/third_party/protobuf/src/src \
     -I$(MOD_PAGESPEED_ROOT)/third_party/re2/src \
@@ -266,7 +259,10 @@ all : build_libraries
 # Flags used to compile static_rewriter.cc.  Note that these are not
 # the flags used to compile pagespeed_automatic, which is compiled
 # with either BUILDTYPE=Release or BUILDTYPE=Debug
-CXXFLAGS = -g
+#
+# These are the same flags as we set in common.gypi, but this Makefile doesn't
+# know about gyp.
+override CXXFLAGS := $(CXXFLAGS) -std=gnu++0x -D_GLIBCXX_USE_CXX11_ABI=0 -static-libstdc++
 
 $(PSOL) : $(LIBS)
 	@echo Merging libraries, logs in $(MERGE_LOG) ...

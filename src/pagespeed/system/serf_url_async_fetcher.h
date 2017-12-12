@@ -18,18 +18,22 @@
 #ifndef PAGESPEED_SYSTEM_SERF_URL_ASYNC_FETCHER_H_
 #define PAGESPEED_SYSTEM_SERF_URL_ASYNC_FETCHER_H_
 
+#include <cstddef>
 #include <vector>
 
+#include "apr_network_io.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
 #include "pagespeed/kernel/base/pool.h"
+#include "pagespeed/kernel/base/pool_element.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/http/response_headers_parser.h"
 
-#include "third_party/serf/src/serf.h"
+#include "serf-1/serf.h"
 
 // To enable HTTPS fetching with serf, we must link against OpenSSL,
 // which is a a large library with licensing restrictions not known to
@@ -69,6 +73,25 @@ struct SerfStats {
   static const char kSerfFetchTimeoutCount[];
   static const char kSerfFetchFailureCount[];
   static const char kSerfFetchCertErrors[];
+  static const char kSerfFetchReadCalls[];
+
+  // A fetch that finished with a 2xx or a 3xx code --- and not just a
+  // mechanically successful one that's a 4xx or such.
+  static const char kSerfFetchUltimateSuccess[];
+
+  // A failure or an error status. Doesn't include fetches dropped due to
+  // process exit and the like.
+  static const char kSerfFetchUltimateFailure[];
+
+  // When we last checked the ultimate failure/success numbers for a
+  // possible concern.
+  static const char kSerfFetchLastCheckTimestampMs[];
+};
+
+enum class SerfCompletionResult {
+  kClientCancel,
+  kSuccess,
+  kFailure
 };
 
 // Identifies the set of HTML keywords.  This is used in error messages emitted
@@ -123,10 +146,15 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
   void FetchComplete(SerfFetch* fetch);
 
   // Update the statistics object with results of the (completed) fetch.
-  void ReportCompletedFetchStats(SerfFetch* fetch);
+  void ReportCompletedFetchStats(const SerfFetch* fetch);
+
+  // Updates states used for success/failure monitoring.
+  void ReportFetchSuccessStats(SerfCompletionResult result,
+                               const ResponseHeaders* headers,
+                               const SerfFetch* fetch);
+
 
   apr_pool_t* pool() const { return pool_; }
-  serf_context_t* serf_context() const { return serf_context_; }
 
   void PrintActiveFetches(MessageHandler* handler) const;
   virtual int64 timeout_ms() { return timeout_ms_; }
@@ -185,14 +213,13 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
     https_options_ = https_options;
   }
 
-  void Init(apr_pool_t* parent_pool, const char* proxy);
-  bool SetupProxy(const char* proxy);
+  void Init(apr_pool_t* parent_pool, const char* proxy)
+      EXCLUSIVE_LOCKS_REQUIRED(mutex_);
+  bool SetupProxy(const char* proxy) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Start a SerfFetch. Takes ownership of fetch and makes sure callback is
   // called even if fetch fails to start.
-  //
-  // mutex_ must be held before calling StartFetch.
-  bool StartFetch(SerfFetch* fetch);
+  bool StartFetch(SerfFetch* fetch) EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // AnyPendingFetches is accurate only at the time of call; this is
   // used conservatively during shutdown.  It counts fetches that have been
@@ -204,27 +231,24 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
   int ApproximateNumActiveFetches();
 
   void CancelActiveFetches();
-  void CancelActiveFetchesMutexHeld();
+  void CancelActiveFetchesMutexHeld() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   bool WaitForActiveFetchesHelper(int64 max_ms,
                                   MessageHandler* message_handler);
 
   // This cleans up the serf resources for fetches that errored out.
   // Must be called only immediately after running the serf event loop.
-  // Must be called with mutex_ held.
-  void CleanupFetchesWithErrors();
+  void CleanupFetchesWithErrors() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-  // These must be accessed with mutex_ held.
-  bool shutdown() const { return shutdown_; }
-  void set_shutdown(bool s) { shutdown_ = s; }
+  bool shutdown() const EXCLUSIVE_LOCKS_REQUIRED(mutex_) { return shutdown_; }
+  void set_shutdown(bool s) EXCLUSIVE_LOCKS_REQUIRED(mutex_) { shutdown_ = s; }
 
   apr_pool_t* pool_;
   ThreadSystem* thread_system_;
   Timer* timer_;
 
-  // mutex_ protects serf_context_ and active_fetches_.
+  // mutex_ protects serf_context_, active_fetches_ and shutdown_. It's
+  // protected because SerfThreadedFetcher needs access.
   ThreadSystem::CondvarCapableMutex* mutex_;
-  serf_context_t* serf_context_;
-  SerfFetchPool active_fetches_;
 
   typedef std::vector<SerfFetch*> FetchVector;
   SerfFetchPool completed_fetches_;
@@ -250,6 +274,9 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
   static bool ParseHttpsOptions(StringPiece directive, uint32* options,
                                 GoogleString* error_message);
 
+  serf_context_t* serf_context_ GUARDED_BY(mutex_);
+  SerfFetchPool active_fetches_ GUARDED_BY(mutex_);
+
   Variable* request_count_;
   Variable* byte_count_;
   Variable* time_duration_ms_;
@@ -257,8 +284,12 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
   Variable* timeout_count_;
   Variable* failure_count_;
   Variable* cert_errors_;
+  Variable* read_calls_count_;  // Non-NULL only on debug builds.
+  Variable* ultimate_success_;
+  Variable* ultimate_failure_;
+  UpDownCounter* last_check_timestamp_ms_;
   const int64 timeout_ms_;
-  bool shutdown_;
+  bool shutdown_ GUARDED_BY(mutex_);
   bool list_outstanding_urls_on_error_;
   bool track_original_content_length_;
   uint32 https_options_;  // Composed of HttpsOptions ORed together.
@@ -272,6 +303,12 @@ class SerfUrlAsyncFetcher : public UrlAsyncFetcher {
 // TODO(lsong): Move this to a separate file. Necessary?
 class SerfFetch : public PoolElement<SerfFetch> {
  public:
+  enum class CancelCause {
+    kClientDecision,
+    kSerfError,
+    kFetchTimeout,
+  };
+
   // TODO(lsong): make use of request_headers.
   SerfFetch(const GoogleString& url,
             AsyncFetch* async_fetch,
@@ -281,12 +318,12 @@ class SerfFetch : public PoolElement<SerfFetch> {
 
   // Start the fetch. It returns immediately.  This can only be run when
   // locked with fetcher->mutex_.
-  bool Start(SerfUrlAsyncFetcher* fetcher);
+  bool Start(SerfUrlAsyncFetcher* fetcher, serf_context_t* context);
 
   GoogleString DebugInfo();
 
   // This must be called while holding SerfUrlAsyncFetcher's mutex_.
-  void Cancel();
+  void Cancel(CancelCause cause);
 
   // Calls the callback supplied by the user.  This needs to happen
   // exactly once.  In some error cases it appears that Serf calls
@@ -296,8 +333,8 @@ class SerfFetch : public PoolElement<SerfFetch> {
   //
   // Note that when there are SSL error messages, we immediately call
   // CallCallback, which is robust against duplicate calls in that case.
-  void CallCallback(bool success);
-  void CallbackDone(bool success);
+  void CallCallback(SerfCompletionResult result);
+  void CallbackDone(SerfCompletionResult result);
 
   // If last poll of this fetch's connection resulted in an error, clean it up.
   // Must be called after serf_context_run, with fetcher's mutex_ held.
@@ -352,8 +389,12 @@ class SerfFetch : public PoolElement<SerfFetch> {
                                      serf_bucket_t* response,
                                      void* handler_baton,
                                      apr_pool_t* pool);
-  static bool MoreDataAvailable(apr_status_t status);
-  static bool IsStatusOk(apr_status_t status);
+  // After a serf read operation, return true if the status indicates that
+  // data might have been read. The "number of bytes read" paramater is not
+  // guaranteed to be updated if the status is anything other than SUCCESS or
+  // EOF. So, one must either zero "nread" before calling serf_bucket_read or
+  // check for one of those statuses before consulting the value in "nread".
+  static bool StatusIndicatesDataPossible(apr_status_t status);
 
 #if SERF_HTTPS_FETCHING
   // Called indicating whether SSL certificate errors have occurred detected.
@@ -374,21 +415,7 @@ class SerfFetch : public PoolElement<SerfFetch> {
 
   apr_status_t ReadStatusLine(serf_bucket_t* response);
 
-  // Know what's weird?  You have do a body-read to get access to the
-  // headers.  You need to read 1 byte of body to force an FSM inside
-  // Serf to parse the headers.  Then you can parse the headers and
-  // finally read the rest of the body.  I know, right?
-  //
-  // The simpler approach, and likely what the Serf designers intended,
-  // is that you read the entire body first, and then read the headers.
-  // But if you are trying to stream the data as its fetched through some
-  // kind of function that needs to know the content-type, then it's
-  // really a drag to have to wait till the end of the body to get the
-  // content type.
-  apr_status_t ReadOneByteFromBody(serf_bucket_t* response);
-
-  // Once that one byte is read from the body, we can go ahead and
-  // parse the headers.  The dynamics of this appear that for N
+  // Parse the headers.  The dynamics of this appear that for N
   // headers we'll get 2N calls to serf_bucket_read: one each for
   // attribute names & values.
   apr_status_t ReadHeaders(serf_bucket_t* response);
@@ -417,9 +444,6 @@ class SerfFetch : public PoolElement<SerfFetch> {
   AsyncFetch* async_fetch_;
   ResponseHeadersParser parser_;
   bool status_line_read_;
-  bool one_byte_read_;
-  bool has_saved_byte_;
-  char saved_byte_;
   MessageHandler* message_handler_;
 
   apr_pool_t* pool_;

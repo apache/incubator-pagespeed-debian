@@ -16,14 +16,11 @@
 
 // Author: Huibao Lin
 
-#include <vector>
-
 #include "base/logging.h"
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/mock_message_handler.h"
 #include "pagespeed/kernel/base/null_mutex.h"
-#include "pagespeed/kernel/base/stdio_file_system.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/image/image_converter.h"
@@ -135,7 +132,8 @@ class WebpScanlineOptimizerTest : public testing::Test {
       ASSERT_TRUE(webp_writer->WriteNextScanline(
           reinterpret_cast<void*>(scanline)));
     }
-    ASSERT_TRUE(webp_writer->FinalizeWrite());
+    ScanlineStatus status = webp_writer->FinalizeWriteWithStatus();
+    ASSERT_TRUE(status.Success()) << "Status=" << status.ToString();
   }
 
  protected:
@@ -166,8 +164,8 @@ TEST_F(WebpScanlineOptimizerTest, ConvertToAndReadLossyWebp) {
 
   for (size_t i = 0; i < kValidImageCount; ++i) {
     GoogleString original_image, gold_image, webp_image;
-    ReadTestFile(kWebpTestDir, kValidImages[i].original_file, "png",
-                 &original_image);
+    GoogleString file_name = kValidImages[i].original_file;
+    ReadTestFile(kWebpTestDir, file_name.c_str(), "png", &original_image);
     ConvertPngToWebp(original_image, webp_config, &webp_image);
     ReadTestFile(kWebpTestDir, kValidImages[i].gold_file, "png",
                  &gold_image);
@@ -176,6 +174,7 @@ TEST_F(WebpScanlineOptimizerTest, ConvertToAndReadLossyWebp) {
                                  webp_image.c_str(), webp_image.length(),
                                  kMinPSNR,
                                  true,  // ignore_transparent_rgb
+                                 false,  // do not expand colors
                                  &message_handler_);
   }
 }
@@ -216,6 +215,7 @@ TEST_F(WebpScanlineOptimizerTest, CompareToWebpGolds) {
                                  png_image.length(), IMAGE_WEBP,
                                  webp_image.c_str(), webp_image.length(), 55,
                                  true,  // ignore_transparent_rgb
+                                 false,  // do not expand colors
                                  &message_handler_);
   }
 }
@@ -292,13 +292,6 @@ class AnimatedWebpTest : public testing::Test {
         << " for '" << filename << "'";
   }
 
-  bool PicturesEqual(const GoogleString& compare,
-                     const GoogleString& input_file_name,
-                     const GoogleString& output_file_name) {
-    // TODO(vchudnov): Fill this in.
-    return true;
-  }
-
   void CheckGifVsWebP(const char* filename, WebpConfiguration* webp_config,
                       bool check_pixels) {
     GoogleString input_path = net_instaweb::StrCat(net_instaweb::GTestSrcDir(),
@@ -316,14 +309,10 @@ class AnimatedWebpTest : public testing::Test {
                              kTestRootDir,
                              filename, ".webp");
 
-    net_instaweb::StdioFileSystem file_system;
-    file_system.WriteFile(output_path.c_str(), output_image, &message_handler_);
-    DVLOG(1) << "Wrote image: " << output_path;
-
     if (check_pixels) {
-      // TODO(vchudnov): Employ a pixel-by-pixel comparison program.
-      GoogleString compare;
-      EXPECT_TRUE(PicturesEqual(compare, input_path, output_path));
+      EXPECT_TRUE(
+          pagespeed::image_compression::CompareAnimatedImages(
+              filename, output_image, &message_handler_));
     }
   }
 
@@ -382,53 +371,43 @@ TEST_F(AnimatedWebpTest, ConvertGifs) {
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // Fails because of b/15484578                                 [google]
-  CheckGifVsWebP("gif/completely_transparent.gif", &webp_config, false);
+  CheckGifVsWebP("gif/completely_transparent.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: canvas reporting issue: b/15755291            [google]
-  CheckGifVsWebP("gif/square2loop.gif", &webp_config, false);
+  CheckGifVsWebP("gif/square2loop.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: loop count mismatch: b/15758805               [google]
-  CheckGifVsWebP("gif/full2loop.gif", &webp_config, false);
+  CheckGifVsWebP("gif/full2loop.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: loop count mismatch: b/15758805               [google]
-  CheckGifVsWebP("gif/interlaced.gif", &webp_config, false);
+  CheckGifVsWebP("gif/interlaced.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: SEGV: b/15758908                              [google]
-  CheckGifVsWebP("gif/red_empty_screen.gif", &webp_config, false);
+  CheckGifVsWebP("gif/red_empty_screen.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: loop count mismatch: b/15758805               [google]
-  CheckGifVsWebP("gif/red_unused_invalid_background.gif", &webp_config, false);
+  CheckGifVsWebP("gif/red_unused_invalid_background.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: loop count mismatch: b/15758805               [google]
-  CheckGifVsWebP("gif/transparent.gif", &webp_config, false);
+  CheckGifVsWebP("gif/transparent.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: SEGV: b/15758908                              [google]
   CheckGifVsWebP("gif/zero_size_animation.gif", &webp_config, false);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: canvas reporting issue: b/15755291            [google]
-  CheckGifVsWebP("webp/multiple_frame_opaque.gif", &webp_config, false);
+  CheckGifVsWebP("webp/multiple_frame_opaque.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 
   progress_data.times_called = 0;
-  // animdiff bug: canvas reporting issue: b/15755291            [google]
-  CheckGifVsWebP("webp/multiple_frame_opaque_gray.gif", &webp_config, false);
+  CheckGifVsWebP("webp/multiple_frame_opaque_gray.gif", &webp_config, true);
   EXPECT_LT(3, progress_data.times_called);
 }
 

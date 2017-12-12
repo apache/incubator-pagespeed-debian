@@ -18,6 +18,7 @@
 
 #include "pagespeed/kernel/base/charset_util.h"
 
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
@@ -27,7 +28,7 @@ bool StripUtf8Bom(StringPiece* contents) {
   bool result = false;
   StringPiece bom;
   bom.set(kUtf8Bom, STATIC_STRLEN(kUtf8Bom));
-  if (contents->starts_with(bom)) {
+  if (strings::StartsWith(*contents, bom)) {
     contents->remove_prefix(bom.length());
     result = true;
   }
@@ -36,7 +37,7 @@ bool StripUtf8Bom(StringPiece* contents) {
 
 const StringPiece GetCharsetForBom(const StringPiece contents) {
   // Bad/empty data?
-  if (contents == NULL || contents.length() == 0) {
+  if (contents.empty()) {
     return StringPiece();
   }
   // If it starts with a printable ASCII character it can't have a BOM, and
@@ -50,25 +51,25 @@ const StringPiece GetCharsetForBom(const StringPiece contents) {
   // to use STATIC_STRLEN and manual StringPiece construction.
   StringPiece bom;
   bom.set(kUtf8Bom, STATIC_STRLEN(kUtf8Bom));
-  if (contents.starts_with(bom)) {
+  if (strings::StartsWith(contents, bom)) {
     return kUtf8Charset;
   }
   bom.set(kUtf16BigEndianBom, STATIC_STRLEN(kUtf16BigEndianBom));
-  if (contents.starts_with(bom)) {
+  if (strings::StartsWith(contents, bom)) {
     return kUtf16BigEndianCharset;
   }
   // UTF-16LE's BOM is a leading substring of UTF-32LE's BOM, so we must
   // check the longer one first. All the others have unique prefixes.
   bom.set(kUtf32LittleEndianBom, STATIC_STRLEN(kUtf32LittleEndianBom));
-  if (contents.starts_with(bom)) {
+  if (strings::StartsWith(contents, bom)) {
     return kUtf32LittleEndianCharset;
   }
   bom.set(kUtf16LittleEndianBom, STATIC_STRLEN(kUtf16LittleEndianBom));
-  if (contents.starts_with(bom)) {
+  if (strings::StartsWith(contents, bom)) {
     return kUtf16LittleEndianCharset;
   }
   bom.set(kUtf32BigEndianBom, STATIC_STRLEN(kUtf32BigEndianBom));
-  if (contents.starts_with(bom)) {
+  if (strings::StartsWith(contents, bom)) {
     return kUtf32BigEndianCharset;
   }
 

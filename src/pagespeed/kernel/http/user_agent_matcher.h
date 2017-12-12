@@ -46,15 +46,6 @@ class UserAgentMatcher {
   // Note that this must not contain the substring "webp".
   static const char kTestUserAgentNoWebP[];  // non-webp user agent
 
-  enum BlinkRequestType {
-    kBlinkWhiteListForDesktop,
-    kBlinkBlackListForDesktop,
-    kBlinkWhiteListForMobile,
-    kDoesNotSupportBlinkForMobile,
-    kNullOrEmpty,
-    kDoesNotSupportBlink,
-  };
-
   enum DeviceType {
     kDesktop,
     kTablet,
@@ -62,13 +53,6 @@ class UserAgentMatcher {
     // This should always be the last type. This is used to mark the size of an
     // array containing various DeviceTypes.
     kEndOfDeviceType
-  };
-
-  enum PrefetchMechanism {
-    kPrefetchNotSupported,
-    kPrefetchImageTag,
-    kPrefetchLinkScriptTag,
-    kPrefetchLinkRelPrefetchTag,
   };
 
   UserAgentMatcher();
@@ -84,14 +68,6 @@ class UserAgentMatcher {
 
   virtual bool SupportsImageInlining(const StringPiece& user_agent) const;
   bool SupportsLazyloadImages(StringPiece user_agent) const;
-
-  // Returns the request type for the given request. The return type currently
-  // supports desktop, mobile and not supported.
-  virtual BlinkRequestType GetBlinkRequestType(
-      const char* user_agent, const RequestHeaders* request_headers) const;
-
-  // Returns the supported prefetch mechanism depending upon the user agent.
-  PrefetchMechanism GetPrefetchMechanism(const StringPiece& user_agent) const;
 
   // Returns the DeviceType for the given user agent string.
   virtual DeviceType GetDeviceTypeForUA(const StringPiece& user_agent) const;
@@ -141,9 +117,6 @@ class UserAgentMatcher {
   virtual bool GetChromeBuildNumber(const StringPiece& user_agent, int* major,
                                     int* minor, int* build, int* patch) const;
 
-  virtual bool SupportsSplitHtml(const StringPiece& user_agent,
-                                 bool allow_mobile) const;
-
   bool UserAgentExceedsChromeAndroidBuildAndPatch(
       const StringPiece& user_agent, int required_build,
       int required_patch) const;
@@ -162,15 +135,10 @@ class UserAgentMatcher {
   FastWildcardGroup supports_image_inlining_;
   FastWildcardGroup supports_lazyload_images_;
   FastWildcardGroup defer_js_whitelist_;
-  FastWildcardGroup blink_desktop_whitelist_;
-  FastWildcardGroup blink_desktop_blacklist_;
-  FastWildcardGroup blink_mobile_whitelist_;
+  FastWildcardGroup defer_js_mobile_whitelist_;
   FastWildcardGroup legacy_webp_;
   FastWildcardGroup supports_webp_lossless_alpha_;
   FastWildcardGroup supports_webp_animated_;
-  FastWildcardGroup supports_prefetch_link_rel_subresource_;
-  FastWildcardGroup supports_prefetch_image_tag_;
-  FastWildcardGroup supports_prefetch_link_script_tag_;
   FastWildcardGroup supports_dns_prefetch_;
   FastWildcardGroup mobile_user_agents_;
   FastWildcardGroup tablet_user_agents_;

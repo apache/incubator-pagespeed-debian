@@ -17,6 +17,7 @@
 goog.provide('pagespeed.CriticalImages');
 
 goog.require('goog.array');
+goog.require('goog.dom');
 goog.require('goog.dom.TagName');
 goog.require('pagespeedutils');
 
@@ -274,7 +275,7 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
   // TODO(poojatandon): Get elements for 'input' tag with type="image". This
   // currently doesn't work because input tags don't support naturalWidth and
   // naturalHeight.
-  var images = document.getElementsByTagName(goog.dom.TagName.IMG);
+  var images = goog.dom.getElementsByTagName(goog.dom.TagName.IMG);
   if (images.length == 0) { return {}; }
 
   // naturalWidth and naturalHeight is defined for all browsers except in IE
@@ -299,6 +300,10 @@ pagespeed.CriticalImages.Beacon_.prototype.getImageRenderedMap = function() {
       };
     }
   }
+  // TODO(poojatandon): Some background images are larger than the view port,
+  // especially on mobile devices. In such cases it would be better to resize
+  // (or crop) the background image to the viewport size, because this would cut
+  // down the image size significantly.  But we don't do this yet.
   return renderedImageDimensions;
 };
 

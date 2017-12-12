@@ -24,11 +24,12 @@
 #include <utility>                      // for pair
 #include <vector>
 
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/escaping.h"
-#include "pagespeed/kernel/base/file_writer.h"
 #include "pagespeed/kernel/base/file_system.h"
+#include "pagespeed/kernel/base/file_writer.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string.h"
@@ -123,6 +124,11 @@ const char* const kGraphsVars[] = {
   "memcached_blocking_inserts", "memcached_blocking_misses", "cache_time_us",
   "cache_hits", "cache_backend_hits", "cache_backend_misses",
   "cache_extensions", "cache_batcher_dropped_gets", "cache_flush_count",
+  // Redis
+  "redis_async_hits", "redis_async_inserts", "redis_async_misses",
+  "redis_async_deletes",
+  "redis_blocking_hits", "redis_blocking_inserts", "redis_blocking_misses",
+  "redis_blocking_deletes",
 };
 
 }  // namespace
@@ -426,7 +432,8 @@ bool StatisticsLogfileReader::ReadNextDataBlock(int64* timestamp,
   size_t offset = 0;
   // The first line should always be "timestamp: xxx".
   // If it's not, we're done; otherwise, we grab the timestamp value.
-  while (StringPiece(buffer_).substr(offset).starts_with("timestamp: ")) {
+  while (
+      strings::StartsWith(StringPiece(buffer_).substr(offset), "timestamp: ")) {
     int64 old_timestamp = *timestamp;
     // If the timestamp was cut off in the middle of the buffer, we need to
     // read more into the buffer.

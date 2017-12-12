@@ -22,14 +22,13 @@
 #include "pagespeed/kernel/base/atomic_bool.h"
 #include "pagespeed/kernel/base/atomic_int32.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 
 namespace net_instaweb {
-
-class SharedString;
 
 // Employs a QueuedWorkerPool to turn a synchronous cache implementation
 // into an asynchronous one.  This makes sense to do only if the cache
@@ -64,7 +63,7 @@ class AsyncCache : public CacheInterface {
   virtual ~AsyncCache();
 
   virtual void Get(const GoogleString& key, Callback* callback);
-  virtual void Put(const GoogleString& key, SharedString* value);
+  virtual void Put(const GoogleString& key, const SharedString& value);
   virtual void Delete(const GoogleString& key);
   virtual void MultiGet(MultiGetRequest* request);
   static GoogleString FormatName(StringPiece cache);
@@ -104,8 +103,8 @@ class AsyncCache : public CacheInterface {
 
   // Functions to execute Put/Delete in sequence_.  Canceling
   // a Put/Delete just drops the request.
-  void DoPut(GoogleString* key, SharedString* value);
-  void CancelPut(GoogleString* key, SharedString* value);
+  void DoPut(GoogleString* key, const SharedString value);
+  void CancelPut(GoogleString* key, const SharedString value);
   void DoDelete(GoogleString* key);
   void CancelDelete(GoogleString* key);
 

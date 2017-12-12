@@ -70,7 +70,6 @@ void DedupInlinedImagesFilter::DetermineEnabled(GoogleString* disabled_reason) {
   // they both replace an image with JavaScript, and in both cases we need
   // to disable the filter for certain classes of UA.
   if (!driver()->request_properties()->SupportsLazyloadImages() ||
-      driver()->flushing_early() ||
       (driver()->request_headers() != NULL &&
        driver()->request_headers()->IsXmlHttpRequest())) {
     set_is_enabled(false);
@@ -147,7 +146,8 @@ void DedupInlinedImagesFilter::EndElementImpl(HtmlElement* element) {
       driver()->InsertElementAfterElement(element, script);
       AddJsToElement(snippet, script);
       driver()->AddAttribute(script, HtmlName::kId, script_id);
-      driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer, NULL);
+      driver()->AddAttribute(script, HtmlName::kDataPagespeedNoDefer,
+                             StringPiece());
       element->DeleteAttribute(HtmlName::kSrc);
     }
   }
@@ -182,7 +182,8 @@ void DedupInlinedImagesFilter::InsertOurScriptElement(HtmlElement* before) {
                                                      HtmlName::kScript);
   driver()->InsertElementBeforeElement(before, script_element);
   AddJsToElement(initialized_js, script_element);
-  driver()->AddAttribute(script_element, HtmlName::kDataPagespeedNoDefer, NULL);
+  driver()->AddAttribute(script_element, HtmlName::kDataPagespeedNoDefer,
+                         StringPiece());
   script_inserted_ = true;
 }
 

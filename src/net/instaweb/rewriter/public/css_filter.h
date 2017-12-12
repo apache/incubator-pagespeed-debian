@@ -94,11 +94,6 @@ class CssFilter : public RewriteFilter {
   // Add this filters related options to the given vector.
   static void AddRelatedOptions(StringPieceVector* target);
 
-  // Note: AtExitManager needs to be initialized or you get a nasty error:
-  // Check failed: false. Tried to RegisterCallback without an AtExitManager.
-  // This is called by Initialize.
-  static void InitializeAtExitManager();
-
   virtual void StartDocumentImpl();
   virtual void StartElementImpl(HtmlElement* element);
   virtual void Characters(HtmlCharactersNode* characters);
@@ -158,7 +153,8 @@ class CssFilter : public RewriteFilter {
                        RewriteContext* parent);
 
   // Starts the asynchronous rewrite process for inline CSS 'text'.
-  void StartInlineRewrite(HtmlCharactersNode* text);
+  void StartInlineRewrite(HtmlCharactersNode* text,
+                          HtmlElement* parent_element);
 
   // Starts the asynchronous rewrite process for inline CSS inside the given
   // element's given style attribute.
@@ -287,7 +283,8 @@ class CssFilter::Context : public SingleRewriteContext {
   CssHierarchy* mutable_hierarchy() { return &hierarchy_; }
 
  protected:
-  virtual void Render();
+  bool PolicyPermitsRendering() const override;
+  void Render() override;
   virtual void Harvest();
   virtual bool Partition(OutputPartitions* partitions,
                          OutputResourceVector* outputs);
@@ -359,6 +356,8 @@ class CssFilter::Context : public SingleRewriteContext {
   // in an html file (<style> tag or style= attribute) or in an external css
   // file.
   int64 ImageInlineMaxBytes() const;
+
+  virtual bool ScheduleViaCentralController() { return true; }
 
   CssFilter* filter_;
   scoped_ptr<CssImageRewriter> css_image_rewriter_;

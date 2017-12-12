@@ -19,8 +19,8 @@
 
 #include <unistd.h>
 
+#include "pagespeed/apache/apache_httpd_includes.h"
 #include "apr_pools.h"
-#include "httpd.h"
 #include "ap_mpm.h"
 
 #include "base/logging.h"
@@ -29,17 +29,20 @@
 #include "pagespeed/apache/apache_server_context.h"
 #include "pagespeed/apache/apache_thread_system.h"
 #include "pagespeed/apache/apr_timer.h"
-#include "pagespeed/apache/mod_spdy_fetch_controller.h"
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/null_shared_mem.h"
 #include "pagespeed/kernel/base/stl_util.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/sharedmem/shared_circular_buffer.h"
 #include "pagespeed/kernel/thread/pthread_shared_mem.h"
+#include "pagespeed/kernel/thread/scheduler_thread.h"
 #include "pagespeed/kernel/thread/slow_worker.h"
+#include "pagespeed/system/controller_manager.h"
 
 namespace net_instaweb {
 
@@ -55,12 +58,12 @@ ApacheRewriteDriverFactory::ApacheRewriteDriverFactory(
           server->server_hostname,
           server->port),
       server_rec_(server),
+      scheduler_thread_(nullptr),
       version_(version.data(), version.size()),
       apache_message_handler_(new ApacheMessageHandler(
           server_rec_, version_, timer(), thread_system()->NewMutex())),
       apache_html_parse_message_handler_(new ApacheMessageHandler(
-          server_rec_, version_, timer(), thread_system()->NewMutex())),
-      inherit_vhost_config_(false) {
+          server_rec_, version_, timer(), thread_system()->NewMutex())) {
   apr_pool_create(&pool_, NULL);
 
   // Apache defaults UsePerVhostStatistics to false for historical reasons, but
@@ -85,6 +88,27 @@ ApacheRewriteDriverFactory::~ApacheRewriteDriverFactory() {
 
   // We still have registered a pool deleter here, right?  This seems risky...
   STLDeleteElements(&uninitialized_server_contexts_);
+
+  // Apache startup is pretty weird, in that it initializes twice:
+  // first to check configuration, then for real. In between the two runs,
+  // it cleans us up very thoroughly, including unloading our module, so if we
+  // are here at the end of run 1, we are about to forget all about the
+  // controller process hanging around, while the FD to it will be kept around
+  // (including accross daemonization), keeping it alive.
+  //
+  // So here we drop the FD, to get the controller to exit, letting us start
+  // it again (and we want it to exit on regular exit, too).
+  //
+  // This call is a no-op if nothing was started.
+  //
+  // This is done in Apache-specific code rather than System* because
+  // nginx has other challenges: it can create multiple
+  // SystemRewriteDriverFactory's at once when reloading config, and
+  // ~SystemRewriteDriverFactory for the old one happens too late to be useful,
+  // so there we are better off just using global state to keep track of
+  // the controller (as there are no pesky dlunload's making us forget all of
+  // it!).
+  ControllerManager::DetachFromControllerProcess();
 }
 
 Timer* ApacheRewriteDriverFactory::DefaultTimer() {
@@ -113,6 +137,14 @@ void ApacheRewriteDriverFactory::SetupCaches(ServerContext* server_context) {
   apache_server_context->InitProxyFetchFactory();
 }
 
+void ApacheRewriteDriverFactory::SetNeedSchedulerThread() {
+  if (scheduler_thread_ == nullptr) {
+    scheduler_thread_ = new SchedulerThread(thread_system(), scheduler());
+    defer_cleanup(scheduler_thread_->MakeDeleter());
+    scheduler_thread_->Start();
+  }
+}
+
 bool ApacheRewriteDriverFactory::IsServerThreaded() {
   // Detect whether we're using a threaded MPM.
   apr_status_t status;
@@ -137,36 +169,12 @@ int ApacheRewriteDriverFactory::LookupThreadLimit() {
   return thread_limit;
 }
 
-void ApacheRewriteDriverFactory::AutoDetectThreadCounts() {
-  if (thread_counts_finalized()) {
-    return;
-  }
-
-  // If using mod_spdy_fetcher we roughly want one thread for non-background
-  // fetches, one for background ones.
-  if (IsServerThreaded()) {
-    max_mod_spdy_fetch_threads_ = 8;  // TODO(morlovich): Base on MPM's count?
-  } else {
-    max_mod_spdy_fetch_threads_ = 2;
-  }
-
-  SystemRewriteDriverFactory::AutoDetectThreadCounts();
-}
-
 void ApacheRewriteDriverFactory::ParentOrChildInit() {
   if (install_crash_handler()) {
     ApacheMessageHandler::InstallCrashHandler(server_rec_);
   }
   SystemRewriteDriverFactory::ParentOrChildInit();
 }
-
-void ApacheRewriteDriverFactory::ChildInit() {
-  SystemRewriteDriverFactory::ChildInit();
-  mod_spdy_fetch_controller_.reset(
-      new ModSpdyFetchController(max_mod_spdy_fetch_threads_, thread_system(),
-                                 timer(), statistics()));
-}
-
 
 void ApacheRewriteDriverFactory::ShutDownMessageHandlers() {
   // Reset SharedCircularBuffer to NULL, so that any shutdown warnings
@@ -185,12 +193,6 @@ void ApacheRewriteDriverFactory::SetupMessageHandlers() {
   apache_message_handler_->SetPidString(static_cast<int64>(getpid()));
   apache_html_parse_message_handler_->SetPidString(
             static_cast<int64>(getpid()));
-}
-
-void ApacheRewriteDriverFactory::ShutDownFetchers() {
-  if (mod_spdy_fetch_controller_.get() != NULL) {
-    mod_spdy_fetch_controller_->ShutDown();
-  }
 }
 
 void ApacheRewriteDriverFactory::SetCircularBuffer(

@@ -18,10 +18,9 @@
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/http/user_agent_matcher.h"
 
 namespace net_instaweb {
-
-class UserAgentMatcher;
 
 class UserAgentMatcherTestBase : public testing::Test {
  public:
@@ -116,6 +115,8 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char kOperaMobi9[];
   static const char kOperaMobilMobileUserAgent[];
   static const char kOperaWithFirefoxUserAgent[];
+  static const char kPagespeedInsightsDesktopUserAgent[];
+  static const char kPagespeedInsightsMobileUserAgent[];
   static const char kPanasonicMobileUserAgent[];
   static const char kPGUserAgent[];
   static const char kPHILIPSUserAgent[];
@@ -158,16 +159,12 @@ class UserAgentMatcherTestBase : public testing::Test {
   static const char* const kDesktopUserAgents[];
   static const char* const kTabletUserAgents[];
   static const char* const kImageInliningSupportedUserAgents[];
-  static const char* const kSplitHtmlSupportedUserAgents[];
-  static const char* const kSplitHtmlUnSupportedUserAgents[];
 
   static const int kIe11UserAgentsArraySize;
   static const int kMobileUserAgentsArraySize;
   static const int kDesktopUserAgentsArraySize;
   static const int kTabletUserAgentsArraySize;
   static const int kImageInliningSupportedUserAgentsArraySize;
-  static const int kSplitHtmlSupportedUserAgentsArraySize;
-  static const int kSplitHtmlUnSupportedUserAgentsArraySize;
 
   UserAgentMatcherTestBase();
   virtual ~UserAgentMatcherTestBase() { }
@@ -176,7 +173,6 @@ class UserAgentMatcherTestBase : public testing::Test {
   bool IsTabletUserAgent(const StringPiece& user_agent);
   void VerifyGetDeviceTypeForUA();
   void VerifyImageInliningSupport();
-  void VerifySplitHtmlSupport();
   void VerifyMobilizationSupport();
 
  protected:

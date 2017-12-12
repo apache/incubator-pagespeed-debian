@@ -20,6 +20,7 @@
 
 #include "pagespeed/kernel/http/google_url.h"
 
+#include "pagespeed/kernel/base/gmock.h"
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/null_mutex.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -661,6 +662,20 @@ TEST_F(GoogleUrlTest, Sanitize) {
   GoogleString random = random_generator.GenerateHighEntropyString(1000);
   GoogleString escaped_random = GoogleUrl::Sanitize(random);
   EXPECT_STREQ(escaped_random, GoogleUrl::Sanitize(escaped_random));
+}
+
+TEST_F(GoogleUrlTest, DefaultPortForScheme) {
+  EXPECT_EQ(url::PORT_UNSPECIFIED, GoogleUrl::DefaultPortForScheme("chipmunk"));
+  EXPECT_EQ(80, GoogleUrl::DefaultPortForScheme("http"));
+  EXPECT_EQ(443, GoogleUrl::DefaultPortForScheme("https"));
+  EXPECT_EQ(80, GoogleUrl::DefaultPortForScheme("ws"));
+  EXPECT_EQ(443, GoogleUrl::DefaultPortForScheme("wss"));
+}
+
+TEST_F(GoogleUrlTest, CanonicalizePath) {
+  // Some cleverness around / vs. %2f, etc.
+  EXPECT_EQ("/foo%2fbar", GoogleUrl::CanonicalizePath("/foo%2fbar"));
+  EXPECT_EQ("/bar", GoogleUrl::CanonicalizePath("/b%61r"));
 }
 
 }  // namespace net_instaweb

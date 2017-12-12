@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -37,10 +38,10 @@
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
+#include "pagespeed/kernel/thread/sequence.h"
 
 namespace net_instaweb {
 
-class AbstractMutex;
 class QueuedWorker;
 class Waveform;
 
@@ -58,7 +59,10 @@ class QueuedWorkerPool {
   // necessarily always from the same worker thread.  The scheduler will
   // continue to schedule new work added to the sequence until
   // FreeSequence is called.
-  class Sequence {
+  //
+  // TODO(jmarantz): Make this subclass private (or just move it to the .cc
+  // file) and change NewSequence to return a net_instaweb::Sequence*.
+  class Sequence : public net_instaweb::Sequence {
    public:
     // AddFunction is a callback that when invoked queues another callback on
     // the given sequence, and when canceled queues a cancel call to the
@@ -66,7 +70,7 @@ class QueuedWorkerPool {
     // from a simple call to MakeFunction(sequence, &Sequence::Add, callback).
     class AddFunction : public Function {
      public:
-      AddFunction(Sequence* sequence, Function* callback)
+      AddFunction(net_instaweb::Sequence* sequence, Function* callback)
           : sequence_(sequence), callback_(callback) { }
       virtual ~AddFunction();
 
@@ -79,7 +83,7 @@ class QueuedWorkerPool {
       }
 
      private:
-      Sequence* sequence_;
+      net_instaweb::Sequence* sequence_;
       Function* callback_;
       DISALLOW_COPY_AND_ASSIGN(AddFunction);
     };
@@ -144,12 +148,13 @@ class QueuedWorkerPool {
     void Cancel() LOCKS_EXCLUDED(sequence_mutex_);
 
     friend class QueuedWorkerPool;
-    std::deque<Function*> work_queue_;
+    std::deque<Function*> work_queue_ GUARDED_BY(sequence_mutex_);
     scoped_ptr<ThreadSystem::CondvarCapableMutex> sequence_mutex_;
     QueuedWorkerPool* pool_;
-    bool shutdown_;
-    bool active_;
-    scoped_ptr<ThreadSystem::Condvar> termination_condvar_;
+    bool shutdown_ GUARDED_BY(sequence_mutex_);
+    bool active_ GUARDED_BY(sequence_mutex_);
+    scoped_ptr<ThreadSystem::Condvar> termination_condvar_
+        GUARDED_BY(sequence_mutex_);
     Waveform* queue_size_;
     size_t max_queue_size_;
 

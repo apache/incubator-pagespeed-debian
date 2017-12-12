@@ -16,9 +16,12 @@
 
 #include "pagespeed/system/system_rewrite_driver_factory.h"
 
+#include <sys/prctl.h>
 #include <algorithm>  // for min
+#include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>  // for pair
 
@@ -33,6 +36,12 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
+#include "pagespeed/controller/central_controller_rpc_client.h"
+#include "pagespeed/controller/central_controller_rpc_server.h"
+#include "pagespeed/controller/popularity_contest_schedule_rewrite_controller.h"
+#include "pagespeed/controller/queued_expensive_operation_controller.h"
+#include "pagespeed/system/controller_manager.h"
+#include "pagespeed/system/controller_process.h"
 #include "pagespeed/system/in_place_resource_recorder.h"
 #include "pagespeed/system/serf_url_async_fetcher.h"
 #include "pagespeed/system/system_caches.h"
@@ -192,8 +201,11 @@ void SystemRewriteDriverFactory::InitStats(Statistics* statistics) {
   SystemCaches::InitStats(statistics);
   PropertyCache::InitCohortStats(RewriteDriver::kBeaconCohort, statistics);
   PropertyCache::InitCohortStats(RewriteDriver::kDomCohort, statistics);
+  PropertyCache::InitCohortStats(RewriteDriver::kDependenciesCohort,
+                                 statistics);
   InPlaceResourceRecorder::InitStats(statistics);
   RateController::InitStats(statistics);
+  CentralControllerRpcClient::InitStats(statistics);
 
   statistics->AddVariable(kShutdownCount);
 }
@@ -239,11 +251,55 @@ void SystemRewriteDriverFactory::ParentOrChildInit() {
   SharedCircularBufferInit(is_root_process_);
 }
 
+void SystemRewriteDriverFactory::NameProcess(const char* name) {
+  // Set the process status.  This is what /proc/PID/status shows and what
+  // "ps -a" gives you.  With PR_SET_NAME there's a max of 16 characters, so
+  // abbreviate pagespeed as ps to be terse.
+  char name_for_prctl[16];
+  snprintf(name_for_prctl, sizeof(name_for_prctl), "ps-%s", name);
+  prctl(PR_SET_NAME, name_for_prctl);
+
+  // It's also possible to change argv[0], but this is a pain so currently we
+  // only do this in nginx where they've written ngx_setproctitle to make it
+  // easy.
+}
+
+void SystemRewriteDriverFactory::PrepareForkedProcess(const char* name) {
+  is_root_process_ = false;
+  NameProcess(name);
+}
+
+void SystemRewriteDriverFactory::PrepareControllerProcess() {
+  system_thread_system_->PermitThreadStarting();
+  ParentOrChildInit();
+  SetupMessageHandlers();
+}
+
+void SystemRewriteDriverFactory::StartController(
+    const SystemRewriteOptions& options) {
+  if (!options.controller_port().empty()) {
+    std::unique_ptr<CentralControllerRpcServer> controller(
+        new CentralControllerRpcServer(
+            options.controller_port(), new QueuedExpensiveOperationController(
+                                           options.image_max_rewrites_at_once(),
+                                           thread_system(), statistics()),
+            new PopularityContestScheduleRewriteController(
+                thread_system(), statistics(), timer(),
+                options.popularity_contest_max_inflight_requests(),
+                options.popularity_contest_max_queue_size()),
+            message_handler()));
+    // In the forked process, this call starts a new event loop and never
+    // returns.
+    ControllerManager::ForkControllerProcess(
+        std::move(controller), this, system_thread_system_, message_handler());
+  }
+}
+
 void SystemRewriteDriverFactory::RootInit() {
   ParentOrChildInit();
 
   // Let SystemCaches know about the various paths we have in configuration
-  // first, as well as the memcached instances.
+  // first, as well as external cache instances.
   for (SystemServerContextSet::iterator
            p = uninitialized_server_contexts_.begin(),
            e = uninitialized_server_contexts_.end(); p != e; ++p) {
@@ -252,6 +308,13 @@ void SystemRewriteDriverFactory::RootInit() {
   }
 
   caches_->RootInit();
+
+  // These options are for StartController, so we only need process scope conf.
+  SystemRewriteOptions* process_options =
+      SystemRewriteOptions::DynamicCast(default_options());
+  if (process_options != nullptr) {
+    StartController(*process_options);
+  }
 }
 
 void SystemRewriteDriverFactory::ChildInit() {
@@ -298,6 +361,25 @@ void SystemRewriteDriverFactory::ChildInit() {
     server_context->ChildInit(this);
   }
   uninitialized_server_contexts_.clear();
+}
+
+std::shared_ptr<CentralController>
+SystemRewriteDriverFactory::GetCentralController(
+    NamedLockManager* lock_manager) {
+  const SystemRewriteOptions* conf =
+      SystemRewriteOptions::DynamicCast(default_options());
+  if (conf->controller_port().empty()) {
+    return RewriteDriverFactory::GetCentralController(lock_manager);
+  }
+
+  if (central_controller_ == nullptr) {
+    central_controller_ = std::make_shared<CentralControllerRpcClient>(
+        conf->controller_port(),
+        conf->popularity_contest_max_queue_size() +
+            conf->popularity_contest_max_inflight_requests(),
+        thread_system(), timer(), statistics(), message_handler());
+  }
+  return central_controller_;
 }
 
 // TODO(jmarantz): make this per-vhost.
@@ -480,6 +562,7 @@ void SystemRewriteDriverFactory::ShutDown() {
     child_shutdown_count->Add(1);
     message_handler()->MessageS(kInfo, "Shutting down PageSpeed child");
   }
+
   StopCacheActivity();
 
   // Next, we shutdown the fetchers before killing the workers in
@@ -499,6 +582,10 @@ void SystemRewriteDriverFactory::ShutDown() {
   caches_->ShutDown(message_handler());
 
   ShutDownMessageHandlers();
+
+  // Must be freed before the thread_system, but we still want it around for
+  // RewriteDriverFactory::ShutDown.
+  central_controller_.reset();
 
   if (is_root_process_) {
     // Cleanup statistics.

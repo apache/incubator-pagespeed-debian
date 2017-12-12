@@ -17,19 +17,26 @@ goog.setTestOnly('goog.labs.testing.environmentTest');
 
 goog.require('goog.labs.testing.Environment');
 goog.require('goog.testing.MockControl');
+goog.require('goog.testing.PropertyReplacer');
 goog.require('goog.testing.TestCase');
 goog.require('goog.testing.jsunit');
+goog.require('goog.testing.testSuite');
 
 var testCase = null;
 var mockControl = null;
+var replacer = null;
 
 // Use this flag to control whether the global JsUnit lifecycle events are being
 // called as part of the test lifecycle or as part of the "mocked" environment.
 var testing = false;
 
 function setUp() {
+  // These methods end up being called by the test framework for these tests
+  // as well as the part of the environment that is being tested as part
+  // of the test.  Bail if the test is already running.
   if (testing) {
-    return;
+    // This value is used by the testSetupReturnsValue test below
+    return 'hello';
   }
 
   // Temporarily override the initializeTestRunner method to avoid installing
@@ -43,12 +50,16 @@ function setUp() {
   goog.testing.TestCase.initializeTestRunner = initFn;
 
   mockControl = new goog.testing.MockControl();
+
+  replacer = new goog.testing.PropertyReplacer();
 }
 
 function tearDown() {
   if (testing) {
     return;
   }
+
+  replacer.reset();
 
   mockControl.$resetAll();
   mockControl.$tearDown();
@@ -100,8 +111,8 @@ function testTearDownWithMockControl() {
   var envWithout = new goog.labs.testing.Environment();
 
   var mockControlMock = mockControl.createStrictMock(goog.testing.MockControl);
-  var mockControlCtorMock = mockControl.createMethodMock(goog.testing,
-      'MockControl');
+  var mockControlCtorMock =
+      mockControl.createMethodMock(goog.testing, 'MockControl');
   mockControlCtorMock().$times(1).$returns(mockControlMock);
   // Expecting verify / reset calls twice since two environments use the same
   // mockControl, but only one created it and is allowed to tear it down.
@@ -143,8 +154,60 @@ function testAutoDiscoverTests() {
 
   // Note that this number changes when more tests are added to this file as
   // the environment reflects on the window global scope for JsUnit.
-  assertEquals(6, testCase.tests_.length);
+  assertEquals(8, testCase.tests_.length);
 
+  testing = false;
+}
+
+
+// Verify "goog.testing.testSuite" integration
+function testTestSuiteTests() {
+  testing = true;
+
+  // don't try to reinitialize the test runner, while a test is running.
+  replacer.set(goog.testing.TestCase, 'initializeTestRunner', function() {});
+
+  // with an active environment.
+  var envOne = new goog.labs.testing.Environment();
+
+  var setUpPageFn = testCase.setUpPage;
+  var setUpFn = testCase.setUp;
+  var tearDownFn = testCase.tearDownFn;
+  var tearDownPageFn = testCase.tearDownPageFn;
+
+  goog.testing.testSuite({
+    // These lifecycle methods should not override the environment testcase
+    // methods but they should be called, when the test runs.
+    setUp: function() {},
+    tearDown: function() {},
+    setUpPage: function() {},
+    tearDownPage: function() {},
+    // This test method should be added.
+    testMe: function() {}
+  });
+
+  assertEquals(setUpPageFn, testCase.setUpPage);
+  assertEquals(setUpFn, testCase.setUp);
+  assertEquals(tearDownFn, testCase.tearDownFn);
+  assertEquals(tearDownPageFn, testCase.tearDownPageFn);
+
+  // Note that this number changes when more tests are added to this file as
+  // the environment reflects on the window global scope for JsUnit.
+  assertEquals(1, testCase.tests_.length);
+
+  testing = false;
+}
+
+function testSetupReturnsValue() {
+  testing = true;
+
+  var env = new goog.labs.testing.Environment();
+
+  // Expect the environment to pass on any value returned by the user defined
+  // setUp method.
+  assertEquals('hello', testCase.setUp());
+
+  testCase.tearDown();
   testing = false;
 }
 
@@ -154,9 +217,7 @@ function testMockClock() {
   var env = new goog.labs.testing.Environment().withMockClock();
 
   testCase.addNewTest('testThatThrowsEventually', function() {
-    setTimeout(function() {
-      throw new Error('LateErrorMessage');
-    }, 200);
+    setTimeout(function() { throw new Error('LateErrorMessage'); }, 200);
   });
 
   testCase.runTests();
@@ -187,9 +248,7 @@ function testMock() {
   testing = true;
 
   var env = new goog.labs.testing.Environment().withMockControl();
-  var mock = env.mock({
-    test: function() {}
-  });
+  var mock = env.mock({test: function() {}});
 
   testCase.addNewTest('testMockCalled', function() {
     mock.test().$times(2);

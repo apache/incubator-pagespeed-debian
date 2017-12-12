@@ -1,9 +1,11 @@
 # Port map:
+# (If you change this, also change enable_ports_and_file_access in Makefile)
 # 8080 -- master configuration.
 # 8081 -- LOADTEST / PROXY / SLURP
 # 8082 -- SLURP
 # @@APACHE_SECONDARY_PORT@@ -- secondary configuration (8083 debug, 8084 root)
-# 8085 --- loopback route testing
+# @@APACHE_TERTIARY_PORT@@ --- loopback route testing
+# @@CONTROLLER_PORT@@ --- Central controller port
 #
 # Note that when system-testing on CentOS installs we need to authorize these
 # ports via semanage.  Any new ports should thus be added to the Makefile in
@@ -15,14 +17,18 @@
 # default then we can eliminate this line.
 AddOutputFilterByType MOD_PAGESPEED_OUTPUT_FILTER application/xhtml+xml
 
-# Do testing using memcached in lieu of the file cache.
+#EXTCACHE # When testing with an external cache in system tests, let's
+#EXTCACHE # make sure we are really hitting it and not servicing the
+#EXTCACHE # lookups in-memory.  Note that we will cover having a
+#EXTCACHE # non-zero lru-cache with an external cache in load tests.
+#EXTCACHE ModPagespeedLRUCacheKbPerProcess 0
+#MEMCACHED
+#MEMCACHED # Do testing using memcached in lieu of the file cache.
 #MEMCACHED ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
-
-# When testing memcached in system tests, let's make sure we are really
-# hitting it and not servicing the lookups in-memory.  Note that we will
-# cover having a non-zero lru-cache with  memcached in load tests.
-#MEMCACHED ModPagespeedLRUCacheKbPerProcess 0
-
+#REDIS
+#REDIS # Do testing using redis instead of file cache
+#REDIS ModPagespeedRedisServer localhost:@@REDIS_PORT@@
+#EXTCACHE
 # If X-PSA-Blocking-Rewrite request header is present and its value matches the
 # value of ModPagespeedBlockingRewriteKey below, the response will be fully
 # rewritten before being flushed to the client.
@@ -31,6 +37,11 @@ ModPagespeedBlockingRewriteKey psatest
 # By default we test without image beaconing, and use a separate vhost to
 # enable image beaconing explicitly.
 ModPagespeedCriticalImagesBeaconEnabled false
+
+<Location ~ "\.pagespeed\.([a-z]\.)?[a-z]{2}\.[^.]{10}\.[^.]+">
+  # For testing that AddResourceHeader gets passed through
+  ModPagespeedAddResourceHeader "X-Foo" "Bar"
+</Location>
 
 # By default, resources will not be used for inlining without explicit
 # authorization. Supported values are off or a comma-separated list of strings
@@ -45,8 +56,14 @@ ModPagespeedInlineResourcesWithoutExplicitAuthorization off
 # built with ssl, but otherwise will cause no trouble.
 ModPagespeedFetchHttps enable
 
+#VALGRIND # Under valgrind, the default 5 second serf fetch timeout may
+#VALGRIND # not be enough.  Make it 20 seconds.
+#VALGRIND ModPagespeedFetcherTimeOutMs 20000
+
 ModPagespeedLibrary 43 1o978_K0_LNE5_ystNklf http://www.modpagespeed.com/rewrite_javascript.js
 ModPagespeedRetainComment " google_ad_section*"
+ModPagespeedPermitIdsForCssCombining "allowed-to-combine-1-*"
+ModPagespeedPermitIdsForCssCombining "allowed-to-combine-2-*"
 
 # Test proxying of non-.pagespeed. resources.
 ModPagespeedMapProxyDomain http://@@APACHE_DOMAIN@@/modpagespeed_http \
@@ -55,6 +72,8 @@ ModPagespeedMapProxyDomain http://@@APACHE_DOMAIN@@/content_type_present \
                            http://@@PAGESPEED-TEST-HOST@@:8091
 ModPagespeedMapProxyDomain http://@@APACHE_DOMAIN@@/content_type_absent \
                            http://@@PAGESPEED-TEST-HOST@@:8092
+
+#CONTROLLER ModPagespeedExperimentalCentralControllerPort @@CONTROLLER_PORT@@
 
 # Turn on "KeepAlive" so we can test it in system_test.sh.
 KeepAlive On
@@ -128,6 +147,14 @@ ModPagespeedEnableFilters add_instrumentation
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_example/" >
     AllowOverride All
 </Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/htaccess" >
+    AllowOverride All
+    ModPagespeedInPlaceWaitForOptimized on
+    ModPagespeedInPlaceRewriteDeadlineMs 10000
+</Directory>
+ModPagespeedLoadFromFile \
+    "http://@@APACHE_DOMAIN@@/mod_pagespeed_test/htaccess/" \
+    "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/htaccess/"
 
 # Enable resize_rendered_image_dimensions
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_example/resize_rendered_dimensions" >
@@ -163,25 +190,83 @@ ModPagespeedEnableFilters add_instrumentation
     Header always set X-TestHeader "hello"
 </Directory>
 
+# The following directories are used by automatic/system_tests/smaxage.sh to
+# test that we properly add s-maxage to cache-control headers for unoptimized
+# ipro responses.
+#
+# Directory naming is based on:
+#   cc:   cache-control
+#   sma:  s-max-age
+#   p:    private
+#   nc:   no-cache
+#   ns:   no-store
+#   nt:   no-transform
+#   nsp:  no spaces
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200/" >
+    Header set Cache-control "max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/nocc/" >
+    header unset Cache-Control
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200p/" >
+    Header set Cache-control "private, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200nc/" >
+    Header set Cache-control "no-cache, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200ns/" >
+    Header set Cache-control "no-store, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200nt/" >
+    Header set Cache-control "no-transform, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma5/" >
+    Header set Cache-control "s-maxage=5, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50/" >
+    Header set Cache-control "s-maxage=50, max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50nsp/" >
+    Header set Cache-control "s-maxage=50,max-age=200"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc9/" >
+    Header set Cache-control "max-age=9"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200cc9/" >
+    Header set Cache-control "max-age=200, max-age=9"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50sma5/" >
+    Header set Cache-control "max-age=200, s-maxage=50, s-maxage=5"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50cc9/" >
+    Header set Cache-control "max-age=200, s-maxage=50, max-age=9"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50cc9nsp/" >
+    Header set Cache-control "max-age=200,s-maxage=50,max-age=9"
+</Directory>
+<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cc200sma50sma51/" >
+    Header set Cache-control "max-age=200, s-maxage=50, s-maxage=51"
+</Directory>
+
 ModPagespeedLoadFromFile "http://@@APACHE_DOMAIN@@/mod_pagespeed_test/ipro/instant/" \
                          "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/instant/"
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cookie/" >
-    # Add Vary:Cookie.  This should prevent us from optimizing the
-    # vary_cookie.css even though ModPagespeedRespectVary is off.
-    # apache/system_test.sh does the fetches test with and without cookies.
-    Header append Vary Cookie
-    ModPagespeedRespectVary off
-    ModPagespeedInPlaceWaitForOptimized on
+  # Add Vary:Cookie.  This should prevent us from optimizing the
+  # vary_cookie.css even though ModPagespeedRespectVary is off.
+  # apache/system_test.sh does the fetches test with and without cookies.
+  Header append Vary Cookie
+  ModPagespeedRespectVary off
+  ModPagespeedInPlaceWaitForOptimized on
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/cookie2/" >
-    # Add Vary:Cookie2.  This should prevent us from optimizing the
-    # vary_cookie2.css even though ModPagespeedRespectVary is off.
-    # apache/system_test.sh does the fetches test with and without cookie2.
-    Header append Vary Cookie2
-    ModPagespeedRespectVary off
-    ModPagespeedInPlaceWaitForOptimized on
+  # Add Vary:Cookie2.  This should prevent us from optimizing the
+  # vary_cookie2.css even though ModPagespeedRespectVary is off.
+  # apache/system_test.sh does the fetches test with and without cookie2.
+  Header append Vary Cookie2
+  ModPagespeedRespectVary off
+  ModPagespeedInPlaceWaitForOptimized on
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/mod_deflate/" >
@@ -194,18 +279,18 @@ ModPagespeedLoadFromFile "http://@@APACHE_DOMAIN@@/mod_pagespeed_test/ipro/insta
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/no_cache/" >
-    # Files in this directory should be served uncacheable.
-    Header set Cache-control "no-cache"
+  # Files in this directory should be served uncacheable.
+  Header set Cache-control "no-cache"
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/remote_config/" >
-    # Files in this directory should be served uncacheable.
-    Header set Cache-control "max-age=7200, must-revalidate"
+  # Files in this directory should be served uncacheable.
+  Header set Cache-control "max-age=7200, must-revalidate"
 </Directory>
 
 # Set jpeg Quality
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/jpeg_rewriting/" >
-    ModPagespeedJpegRecompressionQuality 70
+  ModPagespeedJpegRecompressionQuality 70
 </Directory>
 
 # Set Generic Image Quality
@@ -216,13 +301,6 @@ ModPagespeedLoadFromFile "http://@@APACHE_DOMAIN@@/mod_pagespeed_test/ipro/insta
 # Set Webp Quality
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/image_rewriting" >
     ModPagespeedWebpRecompressionQuality 65
-</Directory>
-
-# Enable split_html
-<Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/split_html/" >
-    ModPagespeedEnableFilters split_html,split_html_helper,lazyload_images
-    ModPagespeedServeSplitHtmlInTwoChunks on
-    ModPagespeedCriticalLineConfig div[@id="container"]/div[4]
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/disable_no_transform" >
@@ -295,9 +373,9 @@ ModPagespeedLoadFromFile "http://@@APACHE_DOMAIN@@/mod_pagespeed_test/ipro/insta
   ModPagespeedRewriteLevel PassThrough
 </Directory>
 
-# Establish a proxy mapping where the current server proxies an image
-# stored on ref.pssdemos.com.  We use ref.pssdemos.com rather than
-# modpagespeed.com so that we use a single html file both for:
+# Establish a proxy mapping where the current server proxies an image stored on
+# gstatic.com.  We use gstatic.com rather than modpagespeed.com so that we use a
+# single html file both for:
 #   1. a demo of the feature on modpagespeed.com.  It would
 #      be confusing to demo a Proxying when the origin was the
 #      same as the proxy.
@@ -324,6 +402,12 @@ ModPagespeedMapProxyDomain @@APACHE_DOMAIN@@/gstatic_images \
 AddType text/html .shtml
 AddOutputFilter INCLUDES .shtml
 
+# Some of our tests have php flush output to test our behavior. This is needed
+# for mod_fcgid to actually propagate those flushes.
+<IfModule fcgid_module>
+FcgidOutputBufferSize 0
+</IfModule>
+
 # For the mod_rewrite test in apache/system_test.sh
 <IfModule !rewrite_module>
   LoadModule rewrite_module  @@APACHE_MODULES@@/mod_rewrite.so
@@ -337,7 +421,7 @@ AddOutputFilter INCLUDES .shtml
 # Helps tests that extra headers supplied by the apache conf
 # survive single-resource rewrites
 #
-# http://code.google.com/p/modpagespeed/issues/detail?id=324
+# http://github.com/pagespeed/mod_pagespeed/issues/324
 Header append 'X-Extra-Header' '1'
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/nostore" >
@@ -348,14 +432,7 @@ Header append 'X-Extra-Header' '1'
 # filters, several of which do not preserve URLs, and in a subdirectory we have
 # turned on preserve URLs.
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/preserveurls" >
-#ModPagespeedEnableFilters inline_preview_images,lazyload_images
-#ModPagespeedEnableFilters resize_mobile_images,rewrite_images,sprite_images
-#ModPagespeedEnableFilters fallback_rewrite_css_urls,flatten_css_imports
-#ModPagespeedEnableFilters inline_css,move_css_above_scripts,move_css_to_head
-#ModPagespeedEnableFilters outline_css,rewrite_css,combine_css
-#ModPagespeedEnableFilters combine_javascript,defer_javascript,inline_javascript
-#ModPagespeedEnableFilters outline_javascript,rewrite_javascript
-ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedRewriteLevel CoreFilters
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/preserveurls/on" >
@@ -398,13 +475,9 @@ ModPagespeedAvoidRenamingIntrospectiveJavascript off
 
 # Test coverage for <ModPagespeedIf>
 <ModPagespeedIf spdy>
-  # A setting one might want...
+  # This is no longer applied, but is parsed, so we keep this in our test config
+  # to verify that.
   ModPagespeedDisableFilters combine_css
-
-  # Settings that doesn't make much sense, but which we want for tests.
-  ModPagespeedDisableFilters rewrite_css
-  ModPagespeedDisableFilters extend_cache
-  ModPagespeedDisableFilters rewrite_images
 </ModPagespeedIf>
 
 <ModPagespeedIf !spdy>
@@ -453,7 +526,7 @@ ModPagespeedCompressMetadataCache true
 # different depending on whether we are running system tests as root
 # or as a normal user.  Note that fetches must be done with
 #    http_proxy=SECONDARY_HOST:SECONDARY_PORT.
-Listen localhost:@@APACHE_SECONDARY_PORT@@
+Listen *:@@APACHE_SECONDARY_PORT@@
 NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
 <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
   ServerName secondary.example.com
@@ -465,9 +538,10 @@ NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
   ModPagespeedMapProxyDomain secondary.example.com/gstatic_images \
                              http://www.gstatic.com/psa/static
 
-  # This is the same memcached instance as the root configuration,
+  # This is the same external cache instance as the root configuration,
   # but with a different file-cache path.
 #MEMCACHED  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS  ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 
   ModPagespeedCacheFlushFilename cache.flush
   # If you uncomment this, the test will fail, proving we can disable
@@ -568,6 +642,62 @@ NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
   ModPagespeedRewriteLevel PassThrough
   ModPagespeedEnableFilters rewrite_javascript
   ModPagespeedMaxCacheableContentLength 85
+</VirtualHost>
+
+# Test how load from file handles maximum sizes.
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName lff-large-files.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedMaxCacheableContentLength 4096
+  ModPagespeedLoadFromFile "http://lff-large-files.example.com/" \
+                           "@@APACHE_DOC_ROOT@@/"
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName lff-large-files-no-fallback.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedMaxCacheableContentLength 4096
+  # http://lff-large-files-no-fallback.example.com/foo.css won't load, because
+  # we've configured a LoadFromFile pattern that doesn't match the path the
+  # webserver would take.
+  ModPagespeedLoadFromFile "http://lff-large-files-no-fallback.example.com/" \
+                           "@@APACHE_DOC_ROOT@@/mod_pagespeed_example/styles/"
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName pagespeed-off.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeed off
+  ModPagespeedEnableFilters collapse_whitespace
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName pagespeed-on.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeed on
+  ModPagespeedEnableFilters collapse_whitespace
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName pagespeed-unplugged.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeed unplugged
+  ModPagespeedEnableFilters collapse_whitespace
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName pagespeed-standby.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeed standby
+  ModPagespeedEnableFilters collapse_whitespace
 </VirtualHost>
 
 # Set the value of the X-Mod-Pagespeed header
@@ -773,68 +903,102 @@ NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
   ModPagespeedDisableFilters remove_comments,add_instrumentation
 </VirtualHost>
 
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT1@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/standard"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-partially-invalid.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/partly-invalid"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-invalid.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/invalid"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-out-of-scope.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/out-of-scope"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-failed-fetch.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/fail-future"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-slow-fetch.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/timeout"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-with-htaccess.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-experiment.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/experiment"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-slightly-slow-fetch.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/slightly-slow"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-slightly-slow-expired-fetch.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/slow-expired"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-forbidden.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/forbidden"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
+#REMOTE_CONFIG <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#REMOTE_CONFIG   ServerName remote-config-initially-forbidden.example.com
+#REMOTE_CONFIG   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#REMOTE_CONFIG   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT@@/forbidden-once"
+#REMOTE_CONFIG   ModPagespeedRemoteConfigurationTimeoutMs 1500
+#REMOTE_CONFIG </VirtualHost>
+#REMOTE_CONFIG
 
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-partially-invalid.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT2@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-invalid.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT3@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-out-of-scope.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT4@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-failed-fetch.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT5@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-slow-fetch.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT6@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-with-htaccess.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
-
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName remote-config-experiment.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
-  ModPagespeedRemoteConfigurationUrl "http://127.0.0.1:@@RCPORT7@@/remote.cfg"
-  ModPagespeedRemoteConfigurationTimeoutMs 1500
-</VirtualHost>
 
 <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
   ServerName uses-sendfile.example.com
@@ -860,6 +1024,18 @@ NameVirtualHost localhost:@@APACHE_SECONDARY_PORT@@
   DocumentRoot "@@APACHE_DOC_ROOT@@"
   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
   ModPagespeedEnableFilters rewrite_javascript
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName map-static-domain.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+
+  ModPagespeedMapRewriteDomain http://static-cdn.example.com \
+                               http://map-static-domain.example.com
+
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters defer_javascript,rewrite_domains
 </VirtualHost>
 
 # For testing ipro + load from file + unknown extensions.
@@ -958,11 +1134,11 @@ NameVirtualHost 127.0.0.1:@@APACHE_TERTIARY_PORT@@
 </VirtualHost>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/instant/wait/" >
-    ModPagespeedInPlaceWaitForOptimized on
+  ModPagespeedInPlaceWaitForOptimized on
+  ModPagespeedInPlaceRewriteDeadlineMs 5000
 
-    # Make the deadline long here for valgrind tests.  We could
-    # conditionalize this.
-    ModPagespeedInPlaceRewriteDeadlineMs 20000
+#VALGRIND  # Make the deadline long here for valgrind tests.
+#VALGRIND  ModPagespeedInPlaceRewriteDeadlineMs 20000
 </Directory>
 
 <Directory "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/ipro/wait/" >
@@ -1182,8 +1358,8 @@ ModPagespeedCreateSharedMemoryMetadataCache "@@MOD_PAGESPEED_CACHE@@_with_shm" 8
 
 
 # Test hosts to cover all possible cache configurations.  L1 will be filecache
-# or memcache depending on the setting of MEMCACHED_TEST.  These four hosts are
-# for the four settings for the L2 cache.
+# or an external cache depending on the setting of MEMCACHED_TEST.  These four
+# hosts are for the four settings for the L2 cache.
 
 # 1. L2_d=LRU, L2_m=LRU
 <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
@@ -1191,6 +1367,7 @@ ModPagespeedCreateSharedMemoryMetadataCache "@@MOD_PAGESPEED_CACHE@@_with_shm" 8
   DocumentRoot "@@APACHE_DOC_ROOT@@"
   ModPagespeedFileCachePath            "@@MOD_PAGESPEED_CACHE@@_lrud_lrum"
 #MEMCACHED  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS  ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 
   ModPagespeedLRUCacheKbPerProcess 1024
   ModPagespeedLRUCacheByteLimit 2000
@@ -1205,6 +1382,7 @@ ModPagespeedCreateSharedMemoryMetadataCache "@@MOD_PAGESPEED_CACHE@@_lrud_shmm" 
   DocumentRoot "@@APACHE_DOC_ROOT@@"
   ModPagespeedFileCachePath            "@@MOD_PAGESPEED_CACHE@@_lrud_shmm"
 #MEMCACHED  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS  ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 
   ModPagespeedLRUCacheKbPerProcess 1024
   ModPagespeedLRUCacheByteLimit 2000
@@ -1219,6 +1397,7 @@ ModPagespeedCreateSharedMemoryMetadataCache "@@MOD_PAGESPEED_CACHE@@_noned_shmm"
   DocumentRoot "@@APACHE_DOC_ROOT@@"
   ModPagespeedFileCachePath            "@@MOD_PAGESPEED_CACHE@@_noned_shmm"
 #MEMCACHED  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS  ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 
   ModPagespeedEnableFilters rewrite_images
   ModPagespeedCriticalImagesBeaconEnabled false
@@ -1230,6 +1409,7 @@ ModPagespeedCreateSharedMemoryMetadataCache "@@MOD_PAGESPEED_CACHE@@_noned_shmm"
   DocumentRoot "@@APACHE_DOC_ROOT@@"
   ModPagespeedFileCachePath            "@@MOD_PAGESPEED_CACHE@@_noned_nonem"
 #MEMCACHED  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS  ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 
   ModPagespeedEnableFilters rewrite_images
   ModPagespeedCriticalImagesBeaconEnabled false
@@ -1436,6 +1616,16 @@ ModPagespeedMessagesDomains Allow localhost
   ModPagespeedEnableFilters debug
 </VirtualHost>
 
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName content-encoding.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters debug
+  ModPagespeedSlurpDirectory @@APACHE_DOC_ROOT@@/mod_pagespeed_test/bogus_content_encoding/
+  ModPagespeedSlurpReadOnly on
+</VirtualHost>
+
 #STATS_LOGGING ModPagespeedStatistics on
 #STATS_LOGGING ModPagespeedStatisticsLogging on
 #STATS_LOGGING ModPagespeedLogDir "@@MOD_PAGESPEED_LOG@@"
@@ -1465,8 +1655,6 @@ ModPagespeedMessagesDomains Allow localhost
 #
 # TODO(jmarantz): add a test-path where we set this in a VirtualHost and
 # make sure the right error message comes out.
-#LOADTEST # Don't want global slurp inheriting into :8080
-#LOADTEST ModPagespeedInheritVHostConfig off
 #LOADTEST ModPagespeedMessageBufferSize 100000
 #LOADTEST
 #LOADTEST # We want backtraces to be dumped during the load test, as
@@ -1488,7 +1676,8 @@ ModPagespeedMessagesDomains Allow localhost
 #IPRO_PRESERVE_LOADTEST ModPagespeedImagePreserveURLs on
 #IPRO_PRESERVE_LOADTEST ModPagespeedJsPreserveURLS on
 #LOADTEST
-#MEMCACHE_LOADTEST   ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#MEMCACHED_LOADTEST  ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#REDIS_LOADTEST      ModPagespeedRedisServer localhost:@@REDIS_PORT@@
 #PURGING_LOADTEST    ModPagespeedEnableCachePurge on
 #PURGING_LOADTEST    ModPagespeedCompressMetadataCache on
 #LOADTEST   ModPagespeedFileCachePath       "@@MOD_PAGESPEED_CACHE@@_load_test"
@@ -1580,7 +1769,7 @@ ModPagespeedMessagesDomains Allow localhost
 
 
 #PROXY # This is used for ProxyPass testing.
-#PROXY #   See: http://code.google.com/p/modpagespeed/issues/detail?id=74
+#PROXY #   See: http://github.com/pagespeed/mod_pagespeed/issues/74
 #PROXY # We use 2 servers for it, one doing rewriting and fetching
 #PROXY # from the other one which does not have mod_pagespeed enabled.
 #PROXY Listen 8081
@@ -1702,6 +1891,27 @@ ModPagespeedMessagesDomains Allow localhost
   ModPagespeedExperimentSpec "id=1;percent=100;matches_device_type=mobile;enable=recompress_images"
 </VirtualHost>
 
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName experiment.ajax.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@/"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedDisableFilters add_instrumentation
+  ModPagespeedRunExperiment on
+  ModPagespeedUseAnalyticsJs false
+  ModPagespeedJsInlineMaxBytes 1
+  ModPagespeedExperimentSpec "id=1;percent=100;level=CoreFilters;enable=collapse_whitespace;options=JsInlineMaxBytes=1"
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName ajax.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@/"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedJsInlineMaxBytes 1
+  ModPagespeedRewriteLevel CoreFilters
+  ModPagespeedDisableFilters add_instrumentation
+</VirtualHost>
+
 # Support for embedded configurations, where image flags in the
 # VirtualHost serving HTML is not the same as the one serving resources,
 # and thus we must embed the image flags in the rewritten image URLs.
@@ -1720,7 +1930,7 @@ ModPagespeedMessagesDomains Allow localhost
 
   # Share a cache keyspace with embed-config-resources.example.com.
   ModPagespeedCacheFragment "embed-config"
-
+  ModPagespeedRewriteDeadlinePerFlushMs 5000
   ModPagespeedLoadFromFile "http://embed-config-resources.example.com/" \
       "@@APACHE_DOC_ROOT@@/mod_pagespeed_example/"
 </VirtualHost>
@@ -1801,23 +2011,43 @@ ModPagespeedMessagesDomains Allow localhost
   ModPagespeed off
 </VirtualHost>
 
-# For testing how we handle process-scope options.
-ModPagespeedIproMaxResponseBytes 1048576001
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName ps1.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mpr"
-  ModPagespeedIproMaxResponseBytes 1048576002
-  ModPagespeedEnableFilters debug
-</VirtualHost>
+#GZIP # For testing measurement proxy things.
+#GZIP <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#GZIP   ServerName mpr.example.com
+#GZIP   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#GZIP   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mpr"
+#GZIP   ModPagespeedExperimentalProxyAllRequests on
+#GZIP   ModPagespeedExperimentalMeasurementProxy "http://mpr.example.com" secret
+#GZIP </VirtualHost>
+#GZIP
+#GZIP # For testing measurement proxy things, passthrough.
+#GZIP <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#GZIP   ServerName mprpass.example.com
+#GZIP   DocumentRoot "@@APACHE_DOC_ROOT@@"
+#GZIP   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mprpass"
+#GZIP   ModPagespeedExperimentalProxyAllRequests on
+#GZIP   ModPagespeedExperimentalMeasurementProxy "http://mprpass.example.com" secret
+#GZIP   ModPagespeedRewriteLevel PassThrough
+#GZIP   ModPagespeedInPlaceResourceOptimization off
+#GZIP </VirtualHost>
 
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName ps2.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mpr"
-  ModPagespeedIproMaxResponseBytes 1048576003
-  ModPagespeedEnableFilters debug
-</VirtualHost>
+#PROCESS_SCOPE # For testing how we handle process-scope options.
+#PROCESS_SCOPE ModPagespeedIproMaxResponseBytes 1048576001
+#PROCESS_SCOPE <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#PROCESS_SCOPE   ServerName ps1.example.com
+#PROCESS_SCOPE   DocumentRoot "@@APACHE_DOC_ROOT@@/mod_pagespeed_example"
+#PROCESS_SCOPE   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mpr"
+#PROCESS_SCOPE   ModPagespeedIproMaxResponseBytes 1048576002
+#PROCESS_SCOPE   ModPagespeedEnableFilters debug
+#PROCESS_SCOPE </VirtualHost>
+#PROCESS_SCOPE
+#PROCESS_SCOPE <VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+#PROCESS_SCOPE   ServerName ps2.example.com
+#PROCESS_SCOPE   DocumentRoot "@@APACHE_DOC_ROOT@@/mod_pagespeed_example"
+#PROCESS_SCOPE   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_mpr"
+#PROCESS_SCOPE   ModPagespeedIproMaxResponseBytes 1048576003
+#PROCESS_SCOPE   ModPagespeedEnableFilters debug
+#PROCESS_SCOPE </VirtualHost>
 
 # For testing with a custom origin header.  In this VirtualHost,
 # /mod_pagespeed_test is included in our DocumentRoot and thus does
@@ -1843,37 +2073,6 @@ ModPagespeedIproMaxResponseBytes 1048576001
   ModPagespeedCriticalImagesBeaconEnabled false
 </VirtualHost>
 
-# Help tests detect whether mod_spdy is loaded. Only sees it if it's loaded
-# before us, unfortunately, but we can at least make it so during our own
-# testing.
-<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
-  ServerName spdy.example.com
-  <IfModule !spdy_module>
-    DocumentRoot "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/nonspdy"
-  </IfModule>
-  <IfModule spdy_module>
-    DocumentRoot "@@APACHE_DOC_ROOT@@/mod_pagespeed_test/spdy"
-  </IfModule>
-</VirtualHost>
-
-# For testing fetching via mod_spdy.
-NameVirtualHost @@APACHE_HTTPS_DOMAIN@@
-<VirtualHost @@APACHE_HTTPS_DOMAIN@@>
-  ServerName spdyfetch.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_spdyfetch"
-  ModPagespeed on
-  ModPagespeedFetchFromModSpdy on
-</VirtualHost>
-
-<VirtualHost @@APACHE_HTTPS_DOMAIN@@>
-  ServerName nospdyfetch.example.com
-  DocumentRoot "@@APACHE_DOC_ROOT@@"
-  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_nospdyfetch"
-  ModPagespeed on
-  ModPagespeedFetchFromModSpdy off
-</VirtualHost>
-
 # For testing where we do our loopback routing. Note that this is listening
 # on an unusual loopback IP.
 Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
@@ -1892,9 +2091,6 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
   ModPagespeedFetchProxy localhost:@@APACHE_SECONDARY_PORT@@
   ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_proxysuffix"
   ModPagespeedRewriteLevel PassThrough
-  ModPagespeedMobLayout on
-  ModPagespeedMobNav on
-  ModPagespeedAlwaysMobilize on
   ModPagespeedProxySuffix .suffix.net
   ModPagespeedEnableFilters rewrite_domains,collapse_whitespace,mobilize
   ModPagespeedEnableFilters rewrite_images,experiment_collect_mob_image_info,rewrite_css
@@ -1906,8 +2102,61 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
   ModPagespeedRewriteDeadlinePerFlushMs 5000
 </VirtualHost>
 
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName flush.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@_test"
+  ModPagespeed on
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedRewriteDeadlinePerFlushMs 1
+  ModPagespeedDisableFilters add_instrumentation
+</VirtualHost>
+
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName broken-fetch.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@/broken-fetch"
+
+  # Set up a fetch proxy that will 404 every request.
+  ModPagespeedFetchProxy "brokenfetch.example.com:1111"
+
+  # Prevent loopback fetch by explicitly authorizing the domain.  Loopback
+  # fetches would work, and for this test, we're trying to have fetches fail,
+  # so they are instead picked up by the ipro recorder.
+  ModPagespeedDomain http://broken-fetch.example.com
+  ModPagespeedInPlaceResourceOptimization on
+
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedEnableFilters rewrite_javascript
+  ModPagespeedDisableFilters add_instrumentation
+  ModPagespeedCriticalImagesBeaconEnabled false
+</VirtualHost>
+
+# Test image rewrites for parent,child nodes and flush.
+<VirtualHost localhost:@@APACHE_SECONDARY_PORT@@>
+  ServerName image-rewrite-with-flush.example.com
+  DocumentRoot "@@APACHE_DOC_ROOT@@"
+  ModPagespeedFileCachePath "@@MOD_PAGESPEED_CACHE@@"
+  ModPagespeedRewriteLevel PassThrough
+  ModPagespeedUrlValuedAttribute li data-thumb image
+  ModPagespeedEnableFilters core
+</VirtualHost>
+
+# In case the system has not added webp as an installed mimetype, this
+# is needed to allow automatic/system_tests/resource_content_type_html.sh
+# to work, as that is needed for
+# automatic/system_tests/resource_content_type_html.sh to work.
+AddType image/webp .webp
+
+# As above, for verifying JSON content-type in system/system_test.sh
+AddType application/json .json
+
+# Override CentOS which uses ancient default of text/javascript.
+AddType application/javascript .js
+
 #ALL_DIRECTIVES # Invoke all ModPagespeed* directives to make sure they work:
 #ALL_DIRECTIVES ModPagespeedAllow foo
+#ALL_DIRECTIVES ModPagespeedAddResourceHeader foo bar
 #ALL_DIRECTIVES ModPagespeedAnalyticsID 1234
 #ALL_DIRECTIVES ModPagespeedAvoidRenamingIntrospectiveJavascript true
 #ALL_DIRECTIVES ModPagespeedAllowOptionsToBeSetByCookies true
@@ -1917,7 +2166,6 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedCacheFlushPollIntervalSec 10
 #ALL_DIRECTIVES ModPagespeedCacheFragment share-a-cache-please
 #ALL_DIRECTIVES ModPagespeedClientDomainRewrite false
-#ALL_DIRECTIVES ModPagespeedCollectRefererStatistics false
 #ALL_DIRECTIVES ModPagespeedCombineAcrossPaths true
 #ALL_DIRECTIVES ModPagespeedCompressMetadataCache true
 #ALL_DIRECTIVES ModPagespeedCriticalImagesBeaconEnabled true
@@ -1927,6 +2175,7 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedCssInlineMaxBytes 2000
 #ALL_DIRECTIVES ModPagespeedCssOutlineMinBytes 2000
 #ALL_DIRECTIVES ModPagespeedCssPreserveURLs off
+#ALL_DIRECTIVES ModPagespeedCustomFetchHeader foo bar
 #ALL_DIRECTIVES ModPagespeedDefaultSharedMemoryCacheKB 1000
 #ALL_DIRECTIVES ModPagespeedDisableFilters strip_scripts
 #ALL_DIRECTIVES ModPagespeedDisallow bar
@@ -1948,7 +2197,6 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedForbidFilters rewrite_images
 #ALL_DIRECTIVES ModPagespeedForceCaching off
 #ALL_DIRECTIVES ModPagespeedEnrollExperiment 3
-#ALL_DIRECTIVES ModPagespeedHashRefererStatistics false
 #ALL_DIRECTIVES ModPagespeedImageInlineMaxBytes 2000
 #ALL_DIRECTIVES ModPagespeedImageLimitOptimizedPercent 80
 #ALL_DIRECTIVES ModPagespeedImageLimitResizeAreaPercent 80
@@ -1961,6 +2209,7 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedImplicitCacheTtlMs 60000
 #ALL_DIRECTIVES ModPagespeedLoadFromFileCacheTtlMs 60000
 #ALL_DIRECTIVES ModPagespeedInPlaceResourceOptimization on
+#ALL_DIRECTIVES ModPagespeedInPlaceSMaxAgeSec 20
 #ALL_DIRECTIVES ModPagespeedIncreaseSpeedTracking true
 #ALL_DIRECTIVES ModPagespeedInstallCrashHandler off
 #ALL_DIRECTIVES ModPagespeedJpegRecompressionQuality 80
@@ -1986,7 +2235,7 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedMaxImageSizeLowResolutionBytes 1000
 #ALL_DIRECTIVES ModPagespeedMaxInlinedPreviewImagesIndex 80
 #ALL_DIRECTIVES ModPagespeedMaxSegmentLength 100
-#ALL_DIRECTIVES ModPagespeedMemcachedServers localhost:@@MEMCACHED_PORT@@
+#ALL_DIRECTIVES ModPagespeedMemcachedServers localhost:12345
 #ALL_DIRECTIVES ModPagespeedMemcachedThreads 1
 #ALL_DIRECTIVES ModPagespeedMessageBufferSize 100
 #ALL_DIRECTIVES ModPagespeedMinImageSizeLowResolutionBytes 2000
@@ -1994,11 +2243,15 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedNumExpensiveRewriteThreads 2
 #ALL_DIRECTIVES ModPagespeedNumRewriteThreads 4
 #ALL_DIRECTIVES ModPagespeedOptionCookiesDurationMs 12345
+#ALL_DIRECTIVES ModPagespeedPermitIdsForCssCombining *foo*
 #ALL_DIRECTIVES ModPagespeedPreserveSubresourceHints on
 #ALL_DIRECTIVES ModPagespeedPreserveUrlRelativity on
 #ALL_DIRECTIVES ModPagespeedProgressiveJpegMinBytes 1000
 #ALL_DIRECTIVES ModPagespeedRateLimitBackgroundFetches true
-#ALL_DIRECTIVES ModPagespeedRefererStatisticsOutputLevel simple
+#ALL_DIRECTIVES ModPagespeedRedisServer localhost:55555
+#ALL_DIRECTIVES ModPagespeedRedisReconnectionDelayMs 1000
+#ALL_DIRECTIVES ModPagespeedRedisTimeoutUs 50000
+#ALL_DIRECTIVES ModPagespeedRedisDatabaseIndex 0
 #ALL_DIRECTIVES ModPagespeedReportUnloadTime true
 #ALL_DIRECTIVES ModPagespeedRespectVary true
 #ALL_DIRECTIVES ModPagespeedRespectXForwardedProto off
@@ -2010,6 +2263,7 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedRunExperiment true
 #ALL_DIRECTIVES ModPagespeedShardDomain example.com 1.example.com,2.example.com
 #ALL_DIRECTIVES ModPagespeedSharedMemoryLocks true
+#ALL_DIRECTIVES ModPagespeedShmMetadataCacheCheckpointIntervalSec 300
 #ALL_DIRECTIVES ModPagespeedSlowFileLatencyUs 80000
 #ALL_DIRECTIVES ModPagespeedSlurpDirectory /tmp/slurp/
 #ALL_DIRECTIVES ModPagespeedSlurpFlushLimit 5
@@ -2018,7 +2272,6 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedStatisticsLogging true
 #ALL_DIRECTIVES ModPagespeedStatisticsLoggingChartsCSS "example.com/css.css"
 #ALL_DIRECTIVES ModPagespeedStatisticsLoggingChartsJS "example.com/js.js"
-#ALL_DIRECTIVES ModPagespeedStatisticsLoggingFile /tmp/log/stats.log
 #ALL_DIRECTIVES ModPagespeedStatisticsLoggingIntervalMs 3000
 #ALL_DIRECTIVES ModPagespeedStatisticsLoggingMaxFileSizeKb 1024
 #ALL_DIRECTIVES ModPagespeedStickyQueryParameters something-private
@@ -2033,3 +2286,19 @@ Listen 127.0.0.2:@@APACHE_TERTIARY_PORT@@
 #ALL_DIRECTIVES ModPagespeedWebpRecompressionQualityForSmallScreens 85
 #ALL_DIRECTIVES ModPagespeedImageJpegNumProgressiveScans 3
 #ALL_DIRECTIVES ModPagespeedImageJpegNumProgressiveScansForSmallScreens 2
+# Deprecated directives. We should still accept them, even if they do nothing
+#ALL_DIRECTIVES ModPagespeedCollectRefererStatistics false
+#ALL_DIRECTIVES ModPagespeedHashRefererStatistics false
+#ALL_DIRECTIVES ModPagespeedRefererStatisticsOutputLevel simple
+#ALL_DIRECTIVES ModPagespeedStatisticsLoggingFile /tmp/log/stats.log
+#ALL_DIRECTIVES ModPagespeedDisableForBots 1
+#ALL_DIRECTIVES ModPagespeedGeneratedFilePrefix 1
+#ALL_DIRECTIVES ModPagespeedInheritVHostConfig 1
+#ALL_DIRECTIVES ModPagespeedFetchFromModSpdy 1
+#ALL_DIRECTIVES ModPagespeedNumShards 1
+#ALL_DIRECTIVES ModPagespeedUrlPrefix 1
+#ALL_DIRECTIVES ModPagespeedMaxPrefetchJsElements 1
+#ALL_DIRECTIVES ModPagespeedDistributeFetches 1
+#ALL_DIRECTIVES ModPagespeedDistributedRewriteKey 1
+#ALL_DIRECTIVES ModPagespeedDistributedRewriteServers 1
+#ALL_DIRECTIVES ModPagespeedDistributedRewriteTimeoutMs 1

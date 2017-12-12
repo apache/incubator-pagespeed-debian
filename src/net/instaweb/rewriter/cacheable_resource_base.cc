@@ -230,7 +230,7 @@ class CacheableResourceBase::FetchCallbackBase : public AsyncFetchWithLock {
     bool cacheable = resource_->IsValidAndCacheableImpl(*headers);
     StringPiece contents;
     if (!value->ExtractContents(&contents)) {
-      contents.clear();
+      contents = StringPiece();
     }
     FetchResponseStatus fetch_status = HttpCacheFailure::ClassifyFailure(
         *headers, contents, success, cacheable);
@@ -316,8 +316,6 @@ class CacheableResourceBase::FreshenFetchCallback : public FetchCallbackBase {
     // TODO(morlovich): This is duplicated a few times, clean this up.
     response_headers()->set_implicit_cache_ttl_ms(
         rewrite_options->implicit_cache_ttl_ms());
-    response_headers()->set_min_cache_ttl_ms(
-        rewrite_options->min_cache_ttl_ms());
   }
 
   virtual void Finalize(bool lock_failure, bool resource_ok) {
@@ -375,8 +373,6 @@ class CacheableResourceBase::LoadFetchCallback
     set_response_headers(&resource_->response_headers_);
     response_headers()->set_implicit_cache_ttl_ms(
         resource->rewrite_options()->implicit_cache_ttl_ms());
-    response_headers()->set_min_cache_ttl_ms(
-        resource->rewrite_options()->min_cache_ttl_ms());
   }
 
   virtual void Finalize(bool lock_failure, bool resource_ok) {

@@ -1004,8 +1004,8 @@ TEST_F(DomainLawyerTest, ProxyExternalResourceToCDN) {
 TEST_F(DomainLawyerTest, ProxyExternalResourceFromHttps) {
   GoogleUrl context_gurl("http://origin.com/index.html");
   ASSERT_TRUE(domain_lawyer_.AddProxyDomainMapping(
-      "http://origin.com/external", "https://external.com/static", NULL,
-      &message_handler_));
+      "http://origin.com/external", "https://external.com/static",
+      StringPiece(), &message_handler_));
 
   // Map proxy_this.png to a subdirectory in origin.com.
   GoogleUrl resolved_request;
@@ -1740,4 +1740,47 @@ TEST_F(DomainLawyerTest, AddProxySuffix) {
   EXPECT_STREQ("https://www.example.com.suffix/absolute.html", url);
 }
 
+TEST_F(DomainLawyerTest, MapNewUrlDomain) {
+  StringPiece from_host("www.foo.com/123/www.xyz.com/");
+  StringPiece origin_host("www.xyz.com");
+  ASSERT_TRUE(domain_lawyer_.AddTwoProtocolOriginDomainMapping(
+      origin_host, from_host, "", &message_handler_));
+  GoogleString origin_url;
+
+  ASSERT_TRUE(MapOrigin("http://www.foo.com/123/www.xyz.com/", &origin_url));
+  EXPECT_STREQ("http://www.xyz.com/", origin_url);
+
+  ASSERT_TRUE(MapOrigin("http://www.foo.com/123/www.xyz.com/a/b", &origin_url));
+  EXPECT_STREQ("http://www.xyz.com/a/b", origin_url);
+
+  ASSERT_TRUE(
+      MapOrigin("https://www.foo.com/123/www.xyz.com/a/b", &origin_url));
+  EXPECT_STREQ("https://www.xyz.com/a/b", origin_url);
+
+  ASSERT_TRUE(
+      MapOrigin("http://www.foo.com/123/www.xyz.com/#fragment", &origin_url));
+  EXPECT_STREQ("http://www.xyz.com/#fragment", origin_url);
+}
+
+TEST_F(DomainLawyerTest, MapNewUrlDomainWithoutDomainSuffix) {
+  StringPiece from_host("www.foo.com/www.baz.com/");
+  StringPiece origin_host("www.baz.com");
+  ASSERT_TRUE(domain_lawyer_.AddTwoProtocolOriginDomainMapping(
+      origin_host, from_host, "", &message_handler_));
+  GoogleString origin_url;
+
+  ASSERT_TRUE(MapOrigin("http://www.foo.com/www.baz.com/bar", &origin_url));
+  EXPECT_STREQ("http://www.baz.com/bar", origin_url);
+}
+
+TEST_F(DomainLawyerTest, MapUrlDomainWithLeaf) {
+  StringPiece from_host("www.foo.com");
+  StringPiece origin_host("www.baz.com");
+  ASSERT_TRUE(domain_lawyer_.AddTwoProtocolOriginDomainMapping(
+      origin_host, from_host, "", &message_handler_));
+  GoogleString origin_url;
+
+  ASSERT_TRUE(MapOrigin("http://www.foo.com/bar", &origin_url));
+  EXPECT_STREQ("http://www.baz.com/bar", origin_url);
+}
 }  // namespace net_instaweb

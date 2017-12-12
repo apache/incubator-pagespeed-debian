@@ -16,26 +16,43 @@
 
 #include "pagespeed/system/system_rewrite_options.h"
 
+#include <cstddef>
+#include <memory>
+
 #include "base/logging.h"
-#include "pagespeed/system/serf_url_async_fetcher.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/system/serf_url_async_fetcher.h"
 
 namespace net_instaweb {
-
-class ThreadSystem;
 
 namespace {
 
 const int64 kDefaultCacheFlushIntervalSec = 5;
+const int64 kDefaultRedisDatabaseIndex = 0;
 
 const char kFetchHttps[] = "FetchHttps";
 
 }  // namespace
 
+const char SystemRewriteOptions::kCentralControllerPort[] =
+    "ExperimentalCentralControllerPort";
+const char SystemRewriteOptions::kPopularityContestMaxInFlight[] =
+    "ExperimentalPopularityContestMaxInFlight";
+const char SystemRewriteOptions::kPopularityContestMaxQueueSize[] =
+    "ExperimentalPopularityContestMaxQueueSize";
 const char SystemRewriteOptions::kStaticAssetCDN[] = "StaticAssetCDN";
+const char SystemRewriteOptions::kRedisServer[] = "RedisServer";
+const char SystemRewriteOptions::kRedisReconnectionDelayMs[] =
+    "RedisReconnectionDelayMs";
+const char SystemRewriteOptions::kRedisTimeoutUs[] = "RedisTimeoutUs";
+const char SystemRewriteOptions::kRedisDatabaseIndex[] =
+    "RedisDatabaseIndex";
 
-RewriteOptions::Properties* SystemRewriteOptions::system_properties_ = NULL;
+RewriteOptions::Properties* SystemRewriteOptions::system_properties_ = nullptr;
 
 void SystemRewriteOptions::Initialize() {
   if (Properties::Initialize(&system_properties_)) {
@@ -79,10 +96,12 @@ void SystemRewriteOptions::AddProperties() {
   AddSystemProperty("", &SystemRewriteOptions::log_dir_, "ald",
                     RewriteOptions::kLogDir,
                     "Directory to store logs in.", false);
-  AddSystemProperty("", &SystemRewriteOptions::memcached_servers_, "ams",
+  AddSystemProperty(ExternalClusterSpec(),
+                    &SystemRewriteOptions::memcached_servers_, "ams",
                     RewriteOptions::kMemcachedServers,
                     "Comma-separated list of servers e.g. "
-                        "host1:port1,host2:port2", false);
+                    "host1:port1,host2:port2",
+                    false);
   AddSystemProperty(1, &SystemRewriteOptions::memcached_threads_, "amt",
                     RewriteOptions::kMemcachedThreads,
                     "Number of background threads to use to run "
@@ -92,6 +111,26 @@ void SystemRewriteOptions::AddProperties() {
                     RewriteOptions::kMemcachedTimeoutUs,
                     "Maximum time in microseconds to allow for memcached "
                         "transactions", true);
+  AddSystemProperty(ExternalServerSpec(),
+                    &SystemRewriteOptions::redis_server_, "rds",
+                    SystemRewriteOptions::kRedisServer,
+                    "Redis server to use in format: <host>[:<port>]", false);
+  AddSystemProperty(Timer::kSecondMs,
+                    &SystemRewriteOptions::redis_reconnection_delay_ms_, "rdr",
+                    SystemRewriteOptions::kRedisReconnectionDelayMs,
+                    "Time to wait after unsuccessful reconnection before "
+                    "another attempt (ms)",
+                    true);
+  AddSystemProperty(50 * Timer::kMsUs,  // 50 ms
+                    &SystemRewriteOptions::redis_timeout_us_, "rdt",
+                    SystemRewriteOptions::kRedisTimeoutUs,
+                    "Timeout for all Redis operations and connection (us)",
+                    true);
+  AddSystemProperty(kDefaultRedisDatabaseIndex,
+                    &SystemRewriteOptions::redis_database_index_, "rdi",
+                    SystemRewriteOptions::kRedisDatabaseIndex,
+                    "Redis server database index selection",
+                    true);
   AddSystemProperty(50 * Timer::kMsUs,  // 50 ms
                     &SystemRewriteOptions::slow_file_latency_threshold_us_,
                     "asflt", "SlowFileLatencyUs",
@@ -203,6 +242,19 @@ void SystemRewriteOptions::AddProperties() {
                     RewriteOptions::kSlurpFlushLimit,
                     "Set the maximum byte size for the slurped content to hold "
                     "before a flush", false);
+  AddSystemProperty("", &SystemRewriteOptions::controller_port_, "ccp",
+                    SystemRewriteOptions::kCentralControllerPort,
+                    kProcessScopeStrict,
+                    "TCP port for central controller processes", false);
+  AddSystemProperty(
+      10, &SystemRewriteOptions::popularity_contest_max_inflight_requests_,
+      "pci", SystemRewriteOptions::kPopularityContestMaxInFlight,
+      kProcessScopeStrict, "Max simultaneous requests allowed to proceed "
+      "out of the popularity contest", false);
+  AddSystemProperty(
+      1000, &SystemRewriteOptions::popularity_contest_max_queue_size_, "pcq",
+      SystemRewriteOptions::kPopularityContestMaxQueueSize, kProcessScopeStrict,
+      "Max number of queued rewrites allowed in the popularity contest", false);
   AddSystemProperty(false, &SystemRewriteOptions::disable_loopback_routing_,
                     "adlr",
                     "DangerPermitFetchFromUnknownHosts",
@@ -210,26 +262,33 @@ void SystemRewriteOptions::AddProperties() {
                     "Disable security checks that prohibit fetching from "
                     "hostnames mod_pagespeed does not know about", false);
   AddSystemProperty(false, &SystemRewriteOptions::fetch_with_gzip_, "afg",
-                    "FetchWithGzip", kProcessScope,
+                    "FetchWithGzip", kLegacyProcessScope,
                     "Request http content from origin servers using gzip",
                     true);
   AddSystemProperty(1024 * 1024 * 10,  /* 10 Megabytes */
                     &SystemRewriteOptions::ipro_max_response_bytes_,
-                    "imrb", "IproMaxResponseBytes", kProcessScope,
+                    "imrb", "IproMaxResponseBytes", kLegacyProcessScope,
                     "Limit allowed size of IPRO responses. "
                     "Set to 0 for unlimited.", true);
   AddSystemProperty(10,
                     &SystemRewriteOptions::ipro_max_concurrent_recordings_,
-                    "imcr", "IproMaxConcurrentRecordings", kProcessScope,
+                    "imcr", "IproMaxConcurrentRecordings", kLegacyProcessScope,
                     "Limit allowed number of IPRO recordings", true);
   AddSystemProperty(1024 * 50, /* 50 Megabytes */
                     &SystemRewriteOptions::default_shared_memory_cache_kb_,
-                    "dsmc", "DefaultSharedMemoryCacheKB", kProcessScope,
+                    "dsmc", "DefaultSharedMemoryCacheKB", kLegacyProcessScope,
                     "Size of the default shared memory cache used by all "
                     "virtual hosts that don't use "
                     "CreateSharedMemoryMetadataCache. "
                     "Set to 0 to turn off the default shared memory cache.",
                     false);
+  AddSystemProperty(60 * 5, /* 5 minutes in seconds */
+                    &SystemRewriteOptions::
+                    shm_metadata_cache_checkpoint_interval_sec_,
+                    "smci", "ShmMetadataCacheCheckpointIntervalSec",
+                    kProcessScopeStrict,
+                    "How often to checkpoint the shared memory metadata cache "
+                    "to disk.  Set to 0 to turn off checkpointing.", true);
   AddSystemProperty("",
                     &SystemRewriteOptions::purge_method_,
                     "pm", "PurgeMethod", kServerScope,
@@ -283,6 +342,27 @@ SystemRewriteOptions* SystemRewriteOptions::DynamicCast(
   SystemRewriteOptions* config = dynamic_cast<SystemRewriteOptions*>(instance);
   DCHECK(config != NULL);
   return config;
+}
+
+bool SystemRewriteOptions::ControllerPortOption::SetFromString(
+    StringPiece value_string, GoogleString* error_detail) {
+  // Valid values are: unix:<path> or a tcp port number.
+  if (strings::StartsWith(value_string, "unix:") &&
+      value_string.size() > 5 /*strlen("unix:")*/) {
+    set(value_string.as_string());
+    return true;
+  }
+  int port;
+  if (!StringToInt(value_string, &port)) {
+    *error_detail =
+        StrCat(kCentralControllerPort,
+               " is not a valid number or 'unix:' path: '",
+               value_string, "'");
+    return false;
+  }
+  // Prepend the port with localhost: before saving it into the option.
+  set(StrCat("localhost:", value_string));
+  return true;
 }
 
 bool SystemRewriteOptions::HttpsOptions::SetFromString(
@@ -358,7 +438,7 @@ void SystemRewriteOptions::FillInStaticAssetCDNConf(
     asset_out->set_role(role);
     // For file base name, we just lowercase the enum and convert
     // the last _ into . Combined with prefixes set below, this mostly produces
-    // sensible filenames, like opt-blank.gif, dbg-mobilize_xhr.js, as the last
+    // sensible filenames, like opt-blank.gif, dbg-mobilize.js, as the last
     // word in the enum tends to be the extension. A few cases get a bit weird
     // (client_domain.rewriter, defer.iframe), but they don't seem worth
     // worrying about for a developer-targeted feature.

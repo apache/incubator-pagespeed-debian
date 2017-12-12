@@ -62,6 +62,7 @@ enum InlineResult {
 // TODO(jmaessen): Big open question: how best to link pulled-in resources to
 //     rewritten urls, when in general those urls will be in a different domain.
 class ImageRewriteFilter : public RewriteFilter {
+  class Context;
  public:
   typedef std::map<GoogleString, AssociatedImageInfo> AssociatedImageInfoMap;
 
@@ -117,8 +118,8 @@ class ImageRewriteFilter : public RewriteFilter {
   virtual void StartDocumentImpl();
   virtual void EndDocument();
   virtual void RenderDone();
-  virtual void StartElementImpl(HtmlElement* element) {}
-  virtual void EndElementImpl(HtmlElement* element);
+  virtual void StartElementImpl(HtmlElement* element);
+  virtual void EndElementImpl(HtmlElement* element) {}
   virtual const char* Name() const { return "ImageRewrite"; }
   virtual const char* id() const { return RewriteOptions::kImageCompressionId; }
   virtual void EncodeUserAgentIntoResourceContext(
@@ -195,7 +196,7 @@ class ImageRewriteFilter : public RewriteFilter {
   // Resize image if necessary, returning true if this resizing succeeds and
   // false if it's unnecessary or fails.
   bool ResizeImageIfNecessary(
-      const RewriteContext* rewrite_context, const GoogleString& url,
+      const Context* rewrite_context, const GoogleString& url,
       ResourceContext* context, Image* image, CachedResult* cached);
 
   // Allocate and initialize CompressionOptions object based on RewriteOptions
@@ -220,7 +221,6 @@ class ImageRewriteFilter : public RewriteFilter {
   virtual RewriteContext* MakeRewriteContext();
 
  private:
-  class Context;
   friend class Context;
 
   // Helper methods.
@@ -229,6 +229,9 @@ class ImageRewriteFilter : public RewriteFilter {
   const ContentType* ImageToContentType(const GoogleString& origin_url,
                                         Image* image);
   void BeginRewriteImageUrl(HtmlElement* element, HtmlElement::Attribute* src);
+  void BeginRewriteSrcSet(HtmlElement* element, HtmlElement::Attribute* srcset);
+
+  void ComputePreserveUrls(const RewriteOptions* options, ResourceSlot* slot);
 
   RewriteResult RewriteLoadedResourceImpl(Context* context,
                                           const ResourcePtr& input_resource,
@@ -281,8 +284,9 @@ class ImageRewriteFilter : public RewriteFilter {
   bool StoreUrlInPropertyCache(const StringPiece& url);
 
   void SaveDebugMessageToCache(const GoogleString& message,
-                               Context* rewrite_context,
                                CachedResult* cached_result);
+
+  GoogleString UrlForDebugMessages(const Context* context) const;
 
   // Statistics
 

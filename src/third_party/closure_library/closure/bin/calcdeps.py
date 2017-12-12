@@ -302,7 +302,7 @@ def ResolveDependencies(require, search_hash, result_list, seen_list):
     result_list: a list of filenames that have been calculated as dependencies.
       This variable is the output for this function.
     seen_list: a list of filenames that have been 'seen'.  This is required
-      for the dependency->dependant ordering.
+      for the dependency->dependent ordering.
   """
   if require not in search_hash:
     raise Exception('Missing provider for (%s)' % require)
@@ -392,7 +392,7 @@ def GetJavaVersion():
   proc = subprocess.Popen(['java', '-version'], stderr=subprocess.PIPE)
   proc.wait()
   version_line = proc.stderr.read().splitlines()[0]
-  return version_regex.search(version_line).group()
+  return version_regex.search(version_line.decode('utf-8')).group()
 
 
 def FilterByExcludes(options, files):
@@ -470,7 +470,7 @@ def Compile(compiler_jar_path, source_paths, out, flags=None):
     logging.error('JavaScript compilation failed.')
     sys.exit(1)
   else:
-    out.write(stdoutdata)
+    out.write(stdoutdata.decode('utf-8'))
 
 
 def main():
@@ -526,7 +526,7 @@ def main():
                     help='The location of the Closure compiler .jar file.')
   parser.add_option('-f',
                     '--compiler_flag',
-                    '--compiler_flags', # for backwards compatability
+                    '--compiler_flags', # for backwards compatibility
                     dest='compiler_flags',
                     action='append',
                     help='Additional flag to pass to the Closure compiler. '

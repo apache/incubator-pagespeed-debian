@@ -75,7 +75,7 @@ class CssMinify {
 
   // Sets a writer to receive a stream of error messages.  The default is
   // that all error messages are eaten.
-  void set_error_writer(Writer* writer) { error_writer_ = NULL; }
+  void set_error_writer(Writer* writer) { error_writer_ = writer; }
 
  private:
   void Write(const StringPiece& str);
@@ -123,12 +123,15 @@ class CssMinify {
   bool Equals(const Css::MediaExpression& a,
               const Css::MediaExpression& b) const;
 
+  bool UnitsRequiredForValueZero(const GoogleString& unit);
+
   Writer* writer_;
   Writer* error_writer_;
   MessageHandler* handler_;
   bool ok_;
 
   StringVector* url_collector_;
+  bool in_css_calc_function_;
 
   DISALLOW_COPY_AND_ASSIGN(CssMinify);
 };

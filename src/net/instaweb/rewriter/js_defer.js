@@ -44,7 +44,7 @@ goog.require('pagespeedutils');
  *
  * Exporting functions using quoted attributes to prevent js compiler from
  * renaming them.
- * See http://code.google.com/closure/compiler/docs/api-tutorial3.html#dangers
+ * See https://developers.google.com/closure/compiler/docs/api-tutorial3#dangers
  */
 window['pagespeed'] = window['pagespeed'] || {};
 var pagespeed = window['pagespeed'];
@@ -418,7 +418,7 @@ deferJsNs.DeferJs.PSA_ORIG_SRC = 'data-pagespeed-orig-src';
  * Name of orig_index attribute in deferred script node.
  * @const {string}
  */
-deferJsNs.DeferJs.PSA_ORIG_INDEX = 'orig_index';
+deferJsNs.DeferJs.PSA_ORIG_INDEX = 'data-pagespeed-orig-index';
 
 
 /**

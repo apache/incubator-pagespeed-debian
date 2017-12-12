@@ -79,12 +79,14 @@ RecordingFetch::RecordingFetch(bool proxy_mode,
                                AsyncFetch* async_fetch,
                                const ResourcePtr& resource,
                                InPlaceRewriteContext* context,
+                               int desired_s_maxage_sec,
                                MessageHandler* handler)
     : SharedAsyncFetch(async_fetch),
       proxy_mode_(proxy_mode),
       handler_(handler),
       resource_(resource),
       context_(context),
+      desired_s_maxage_sec_(desired_s_maxage_sec),
       can_in_place_rewrite_(false),
       streaming_(true),
       cache_value_writer_(
@@ -105,6 +107,11 @@ void RecordingFetch::HandleHeadersComplete() {
     // Save the headers, and wait to finalize them in HandleDone().
     saved_headers_.reset(new ResponseHeaders(*response_headers()));
     if (streaming_) {
+      if (response_headers()->status_code() == HttpStatus::kOK) {
+        if (desired_s_maxage_sec_ != -1) {
+          response_headers()->SetSMaxAge(desired_s_maxage_sec_);
+        }
+      }
       SharedAsyncFetch::HandleHeadersComplete();
     }
   } else {
@@ -132,6 +139,10 @@ void RecordingFetch::HandleHeadersComplete() {
       // kNotInCacheStatus instead to fall back to the server's native method of
       // serving the url and indicate we do want it recorded.
       if (!response_headers()->IsErrorStatus()) {
+        // Clear the response headers to ensure stray headers do not end up
+        // being put on the wire:
+        // https://github.com/pagespeed/mod_pagespeed/issues/1496
+        response_headers()->Clear();
         response_headers()->set_status_code(
             CacheUrlAsyncFetcher::kNotInCacheStatus);
       }
@@ -250,7 +261,7 @@ bool RecordingFetch::CanInPlaceRewrite() {
     return false;
   }
   if (type->type() == ContentType::kCss ||
-      type->IsJs() ||
+      type->IsJsLike() ||
       type->IsImage()) {
     RewriteDriver* driver = context_->Driver();
     HTTPCache* const cache = driver->server_context()->http_cache();
@@ -297,14 +308,20 @@ int64 InPlaceRewriteContext::GetRewriteDeadlineAlarmMs() const {
   return RewriteContext::GetRewriteDeadlineAlarmMs();
 }
 
+bool InPlaceRewriteContext::PolicyPermitsRendering() const {
+  // Doesn't realy render, so output check isn't relevant.
+  return true;
+}
+
 void InPlaceRewriteContext::Harvest() {
   if (num_nested() == 1) {
     RewriteContext* const nested_context = nested(0);
     if (nested_context->num_slots() == 1 && num_output_partitions() == 1 &&
         nested_context->slot(0)->was_optimized()) {
       ResourcePtr nested_resource = nested_context->slot(0)->resource();
-      CachedResult* partition = output_partition(0);
-      CachedResult* nested_partition = nested_context->output_partition(0);
+      CachedResult* partition = mutable_output_partition(0);
+      const CachedResult* nested_partition =
+          nested_context->output_partition(0);
       VLOG(1) << "In-place rewrite succeeded for " << url_
               << " and the rewritten resource is "
               << nested_resource->url();
@@ -390,9 +407,15 @@ void InPlaceRewriteContext::FixFetchFallbackHeaders(
       headers->Replace(HttpAttributes::kEtag, HTTPCache::FormatEtag(StrCat(
                                                   id(), "-", rewritten_hash_)));
     }
+
+    // Determine if we need to use the implicit cache ttl ms or the implicit
+    // load from file cache ttl ms.
+    int64 implicit_ttl_ms = IsLoadFromFileBased() ?
+        Options()->load_from_file_cache_ttl_ms() :
+        Options()->implicit_cache_ttl_ms();
+
     headers->RemoveAll(HttpAttributes::kLastModified);
-    headers->set_implicit_cache_ttl_ms(Options()->implicit_cache_ttl_ms());
-    headers->set_min_cache_ttl_ms(Options()->min_cache_ttl_ms());
+    headers->set_implicit_cache_ttl_ms(implicit_ttl_ms);
     headers->ComputeCaching();
     int64 expire_at_ms = kint64max;
     int64 date_ms = kint64max;
@@ -439,7 +462,18 @@ void InPlaceRewriteContext::FixFetchFallbackHeaders(
 
 void InPlaceRewriteContext::RemoveRedundantRelCanonicalHeader(
     const CachedResult& cached_result, ResponseHeaders* headers) {
-  headers->Remove(HttpAttributes::kLink, RelCanonicalHeaderValue(url_));
+  headers->Remove(HttpAttributes::kLink,
+                  ResponseHeaders::RelCanonicalHeaderValue(url_));
+}
+
+bool InPlaceRewriteContext::IsLoadFromFileBased() {
+  if (num_slots() == 1) {
+    ResourcePtr resource(slot(0)->resource());
+    if (!resource->UseHttpCache()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void InPlaceRewriteContext::UpdateDateAndExpiry(
@@ -449,8 +483,9 @@ void InPlaceRewriteContext::UpdateDateAndExpiry(
   for (int j = 0, m = inputs.size(); j < m; ++j) {
     const InputInfo& dependency = inputs.Get(j);
     if (dependency.has_expiration_time_ms() && dependency.has_date_ms()) {
-      *date_ms = std::min(*date_ms, dependency.date_ms());
-      *expire_at_ms = std::min(*expire_at_ms, dependency.expiration_time_ms());
+      *date_ms = std::min(*date_ms, static_cast<int64>(dependency.date_ms()));
+      *expire_at_ms = std::min(
+          *expire_at_ms, static_cast<int64>(dependency.expiration_time_ms()));
     }
   }
 }
@@ -474,7 +509,7 @@ RewriteFilter* InPlaceRewriteContext::GetRewriteFilter(
       options->Enabled(RewriteOptions::kRewriteCss)) {
     return Driver()->FindFilter(RewriteOptions::kCssFilterId);
   }
-  if (type.IsJs() &&
+  if (type.IsJsLike() &&
       options->Enabled(RewriteOptions::kRewriteJavascriptExternal)) {
     return Driver()->FindFilter(RewriteOptions::kJavascriptMinId);
   }
@@ -609,6 +644,7 @@ void InPlaceRewriteContext::StartFetchReconstruction() {
     is_rewritten_ = false;
     RecordingFetch* fetch =
         new RecordingFetch(proxy_mode_, async_fetch(), resource, this,
+                           Options()->EffectiveInPlaceSMaxAgeSec(),
                            fetch_message_handler());
     if (resource->UseHttpCache()) {
       if (proxy_mode_) {

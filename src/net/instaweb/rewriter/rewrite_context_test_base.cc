@@ -25,6 +25,7 @@
 #include "net/instaweb/http/public/http_cache.h"
 #include "net/instaweb/http/public/logging_proto_impl.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_result.h"
@@ -107,7 +108,8 @@ void NestedFilter::Context::RewriteSingle(
       GoogleUrl url(base, pieces[i]);
       if (url.IsWebValid()) {
         bool unused;
-        ResourcePtr resource(Driver()->CreateInputResource(url, &unused));
+        ResourcePtr resource(Driver()->CreateInputResource(
+            url, RewriteDriver::InputRole::kUnknown, &unused));
         if (resource.get() != NULL) {
           ResourceSlotPtr slot(new NestedSlot(resource));
           RewriteContext* nested_context =
@@ -167,8 +169,9 @@ void NestedFilter::StartElementImpl(HtmlElement* element) {
   HtmlElement::Attribute* attr = element->FindAttribute(HtmlName::kHref);
   if (attr != NULL) {
     bool unused;
-    ResourcePtr resource = CreateInputResource(attr->DecodedValueOrNull(),
-                                               &unused);
+    ResourcePtr resource = CreateInputResource(
+        attr->DecodedValueOrNull(), RewriteDriver::InputRole::kUnknown,
+        &unused);
     if (resource.get() != NULL) {
       ResourceSlotPtr slot(driver()->GetSlot(resource, element, attr));
 
@@ -301,7 +304,8 @@ void CombiningFilter::Context::Cancel() {
   ++filter_->num_cancel_;
 }
 
-void CombiningFilter::Context::DisableRemovedSlots(CachedResult* partition) {
+void CombiningFilter::Context::DisableRemovedSlots(
+    const CachedResult* partition) {
   if (filter_->disable_successors_) {
     slot(0)->set_disable_further_processing(true);
   }
@@ -316,8 +320,9 @@ void CombiningFilter::StartElementImpl(HtmlElement* element) {
     HtmlElement::Attribute* href = element->FindAttribute(HtmlName::kHref);
     if (href != NULL) {
       bool unused;
-      ResourcePtr resource(CreateInputResource(href->DecodedValueOrNull(),
-                                               &unused));
+      ResourcePtr resource(CreateInputResource(
+          href->DecodedValueOrNull(), RewriteDriver::InputRole::kUnknown,
+          &unused));
       if (resource.get() != NULL) {
         if (context_.get() == NULL) {
           context_.reset(new Context(driver(), this, scheduler_));

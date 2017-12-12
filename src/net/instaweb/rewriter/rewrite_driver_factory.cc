@@ -26,14 +26,9 @@
 #include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/http/public/url_async_fetcher.h"
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
-#include "net/instaweb/rewriter/public/beacon_critical_line_info_finder.h"
-#include "net/instaweb/rewriter/public/compatible_central_controller.h"
-#include "net/instaweb/rewriter/public/critical_css_finder.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
-#include "net/instaweb/rewriter/public/critical_line_info_finder.h"
 #include "net/instaweb/rewriter/public/critical_selector_finder.h"
 #include "net/instaweb/rewriter/public/experiment_matcher.h"
-#include "net/instaweb/rewriter/public/mobilize_cached_finder.h"
 #include "net/instaweb/rewriter/public/process_context.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -43,8 +38,12 @@
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "net/instaweb/rewriter/public/usage_data_reporter.h"
 #include "net/instaweb/util/public/property_store.h"
+#include "pagespeed/controller/central_controller.h"
+#include "pagespeed/controller/compatible_central_controller.h"
+#include "pagespeed/controller/in_process_central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/checking_thread_system.h"
+#include "pagespeed/kernel/base/dynamic_annotations.h"  // RunningOnValgrind
 #include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/hasher.h"
@@ -66,14 +65,12 @@
 #include "pagespeed/kernel/thread/scheduler.h"
 #include "pagespeed/kernel/util/file_system_lock_manager.h"
 #include "pagespeed/kernel/util/nonce_generator.h"
-#include "pagespeed/opt/http/property_cache.h"
 
 namespace net_instaweb {
 
 RewriteDriverFactory::RewriteDriverFactory(
     const ProcessContext& process_context, ThreadSystem* thread_system)
     : url_async_fetcher_(NULL),
-      distributed_async_fetcher_(NULL),
       js_tokenizer_patterns_(process_context.js_tokenizer_patterns()),
       force_caching_(false),
       slurp_read_only_(false),
@@ -137,12 +134,6 @@ RewriteDriverFactory::~RewriteDriverFactory() {
   }
   url_async_fetcher_ = NULL;
 
-  if ((distributed_async_fetcher_ != NULL) &&
-      (distributed_async_fetcher_ != base_distributed_async_fetcher_.get())) {
-    delete distributed_async_fetcher_;
-  }
-  distributed_async_fetcher_ = NULL;
-
   for (int i = 0, n = deferred_cleanups_.size(); i < n; ++i) {
     deferred_cleanups_[i]->CallRun();
   }
@@ -197,15 +188,6 @@ void RewriteDriverFactory::set_base_url_async_fetcher(
       << " after ComputeUrlAsyncFetcher has been called";
   base_url_async_fetcher_.reset(url_async_fetcher);
 }
-
-void RewriteDriverFactory::set_base_distributed_async_fetcher(
-    UrlAsyncFetcher* distributed_fetcher) {
-  CHECK(distributed_async_fetcher_ == NULL)
-      << "Cannot call set_base_distributed_async_fetcher "
-      << "after ComputeDistributedFetcher has been called";
-  base_distributed_async_fetcher_.reset(distributed_fetcher);
-}
-
 
 void RewriteDriverFactory::set_hasher(Hasher* hasher) {
   hasher_.reset(hasher);
@@ -368,10 +350,6 @@ StaticAssetManager* RewriteDriverFactory::DefaultStaticAssetManager() {
                                 message_handler());
 }
 
-CriticalCssFinder* RewriteDriverFactory::DefaultCriticalCssFinder() {
-  return NULL;
-}
-
 CriticalImagesFinder* RewriteDriverFactory::DefaultCriticalImagesFinder(
     ServerContext* server_context) {
   // TODO(pulkitg): Don't create BeaconCriticalImagesFinder if beacon cohort is
@@ -389,28 +367,8 @@ CriticalSelectorFinder* RewriteDriverFactory::DefaultCriticalSelectorFinder(
   return NULL;
 }
 
-MobilizeCachedFinder* RewriteDriverFactory::DefaultMobilizeCachedFinder(
-    ServerContext* server_context) {
-  return NULL;
-}
-
 SHA1Signature* RewriteDriverFactory::DefaultSignature() {
   return new SHA1Signature();
-}
-
-FlushEarlyInfoFinder* RewriteDriverFactory::DefaultFlushEarlyInfoFinder() {
-  return NULL;
-}
-
-CacheHtmlInfoFinder* RewriteDriverFactory::DefaultCacheHtmlInfoFinder(
-    PropertyCache* cache, ServerContext* server_context) {
-  return NULL;
-}
-
-CriticalLineInfoFinder* RewriteDriverFactory::DefaultCriticalLineInfoFinder(
-    ServerContext* server_context) {
-  return new BeaconCriticalLineInfoFinder(server_context->beacon_cohort(),
-                                          nonce_generator());
 }
 
 UsageDataReporter* RewriteDriverFactory::DefaultUsageDataReporter() {
@@ -499,10 +457,6 @@ ServerContext* RewriteDriverFactory::CreateServerContext() {
 void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   ScopedMutex lock(server_context_mutex_.get());
 
-  // Init CentralController. This is not strictly related to the ServerContext,
-  // but needs to happen before the ServerContext starts up.
-  set_central_controller_interface(CreateCentralController());
-
   server_context->ComputeSignature(server_context->global_options());
   server_context->set_scheduler(scheduler());
   server_context->set_timer(timer());
@@ -519,14 +473,15 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   if (!server_context->has_default_system_fetcher()) {
     server_context->set_default_system_fetcher(ComputeUrlAsyncFetcher());
   }
-  if (!server_context->has_default_distributed_fetcher()) {
-    UrlAsyncFetcher* fetcher = ComputeDistributedFetcher();
-    if (fetcher != NULL) {
-      server_context->set_default_distributed_fetcher(fetcher);
-    }
+
+  server_context->set_central_controller(
+      GetCentralController(server_context->lock_manager()));
+  if (server_context->url_namer() == nullptr) {
+    server_context->set_url_namer(url_namer());
   }
-  server_context->set_url_namer(url_namer());
-  server_context->SetRewriteOptionsManager(NewRewriteOptionsManager());
+  if (server_context->rewrite_options_manager() == nullptr) {
+    server_context->SetRewriteOptionsManager(NewRewriteOptionsManager());
+  }
   server_context->set_user_agent_matcher(user_agent_matcher());
   server_context->set_file_system(file_system());
   server_context->set_filename_prefix(filename_prefix_);
@@ -534,19 +489,10 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   server_context->set_signature(signature());
   server_context->set_message_handler(message_handler());
   server_context->set_static_asset_manager(static_asset_manager());
-  PropertyCache* pcache = server_context->page_property_cache();
-  server_context->set_critical_css_finder(DefaultCriticalCssFinder());
   server_context->set_critical_images_finder(
       DefaultCriticalImagesFinder(server_context));
   server_context->set_critical_selector_finder(
       DefaultCriticalSelectorFinder(server_context));
-  server_context->set_flush_early_info_finder(DefaultFlushEarlyInfoFinder());
-  server_context->set_cache_html_info_finder(
-      DefaultCacheHtmlInfoFinder(pcache, server_context));
-  server_context->set_critical_line_info_finder(
-      DefaultCriticalLineInfoFinder(server_context));
-  server_context->set_mobilize_cached_finder(
-      DefaultMobilizeCachedFinder(server_context));
   server_context->set_hostname(hostname_);
   server_context->PostInitHook();
   InitDecodingDriver(server_context);
@@ -560,8 +506,6 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
   fetch_options.implicit_cache_ttl_ms =
       server_context->global_options()->implicit_cache_ttl_ms();
   fetch_options.respect_vary = false;
-  // Minimum TTL for cachable resources, -1 for no minimum.
-  fetch_options.min_cache_ttl_ms = -1;
   RequestContextPtr request_ctx(new RequestContext(
       fetch_options, server_context->thread_system()->NewMutex(),
       server_context->timer()));
@@ -571,9 +515,11 @@ void RewriteDriverFactory::InitServerContext(ServerContext* server_context) {
                                    true /* startup fetch */);
 }
 
-CentralControllerInterface* RewriteDriverFactory::CreateCentralController() {
-  return new CompatibleCentralController(
-      default_options()->image_max_rewrites_at_once(), statistics());
+std::shared_ptr<CentralController> RewriteDriverFactory::GetCentralController(
+    NamedLockManager* lock_manager) {
+  return std::make_shared<CompatibleCentralController>(
+      default_options()->image_max_rewrites_at_once(), statistics(),
+      thread_system(), lock_manager);
 }
 
 void RewriteDriverFactory::RebuildDecodingDriverForTests(
@@ -656,17 +602,6 @@ UrlAsyncFetcher* RewriteDriverFactory::ComputeUrlAsyncFetcher() {
   return url_async_fetcher_;
 }
 
-UrlAsyncFetcher* RewriteDriverFactory::ComputeDistributedFetcher() {
-  if (distributed_async_fetcher_ == NULL) {
-    if (base_distributed_async_fetcher_.get() == NULL) {
-      distributed_async_fetcher_ = DefaultDistributedUrlFetcher();
-    } else {
-      distributed_async_fetcher_ = base_distributed_async_fetcher_.get();
-    }
-  }
-  return distributed_async_fetcher_;
-}
-
 void RewriteDriverFactory::SetupSlurpDirectories() {
   CHECK(!FetchersComputed());
   if (slurp_read_only_) {
@@ -741,10 +676,14 @@ void RewriteDriverFactory::ShutDown() {
   }
 
   // Now get active RewriteDrivers for each manager to wrap up.
+  int timeout_secs = RunningOnValgrind() ? 20 : 5;
+  int64 cutoff_time_ms = timer_->NowMs() + timeout_secs * Timer::kSecondMs;
+
   for (ServerContextSet::iterator p = server_contexts_.begin();
        p != server_contexts_.end(); ++p) {
     ServerContext* server_context = *p;
-    server_context->ShutDownDrivers();
+    server_context->central_controller()->ShutDown();
+    server_context->ShutDownDrivers(cutoff_time_ms);
   }
 
   // Shut down the remaining worker threads, to quiesce the system while
@@ -778,11 +717,9 @@ void RewriteDriverFactory::InitStats(Statistics* statistics) {
   RewriteDriver::InitStats(statistics);
   RewriteStats::InitStats(statistics);
   CacheBatcher::InitStats(statistics);
-  CompatibleCentralController::InitStats(statistics);
+  InProcessCentralController::InitStats(statistics);
   CriticalImagesFinder::InitStats(statistics);
-  CriticalCssFinder::InitStats(statistics);
   CriticalSelectorFinder::InitStats(statistics);
-  MobilizeCachedFinder::InitStats(statistics);
   PropertyStoreGetCallback::InitStats(statistics);
 }
 
@@ -801,16 +738,10 @@ void RewriteDriverFactory::SetStatistics(Statistics* statistics) {
 
 RewriteStats* RewriteDriverFactory::rewrite_stats() {
   if (rewrite_stats_.get() == NULL) {
-    rewrite_stats_.reset(new RewriteStats(statistics_, thread_system_.get(),
-                                          timer()));
+    rewrite_stats_.reset(new RewriteStats(
+        HasWaveforms(), statistics_, thread_system_.get(), timer()));
   }
   return rewrite_stats_.get();
-}
-
-void RewriteDriverFactory::set_central_controller_interface(
-    CentralControllerInterface* interface) {
-  central_controller_interface_.reset(
-      new CentralControllerInterfaceAdapter(interface));
 }
 
 RewriteOptions* RewriteDriverFactory::NewRewriteOptions() {
@@ -823,11 +754,6 @@ RewriteOptions* RewriteDriverFactory::NewRewriteOptionsForQuery() {
 
 ExperimentMatcher* RewriteDriverFactory::NewExperimentMatcher() {
   return new ExperimentMatcher;
-}
-
-void RewriteDriverFactory::ScheduleExpensiveOperation(
-    ExpensiveOperationCallback* callback) {
-  central_controller_interface()->ScheduleExpensiveOperation(callback);
 }
 
 }  // namespace net_instaweb

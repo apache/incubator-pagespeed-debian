@@ -40,6 +40,7 @@ namespace {
 class CssOutlineFilterTest : public RewriteTestBase {
  protected:
   void SetupOutliner() {
+    DisableGzip();
     options()->set_css_outline_min_bytes(0);
     options()->SoftEnableFilterForTesting(RewriteOptions::kOutlineCss);
     rewrite_driver()->AddFilters();
@@ -249,7 +250,7 @@ TEST_F(CssOutlineFilterTest, DoNotOutlineScoped) {
   ValidateNoChanges("scoped", "<style scoped>* {display: none;}</style>");
 }
 
-// http://code.google.com/p/modpagespeed/issues/detail?id=416
+// http://github.com/pagespeed/mod_pagespeed/issues/416
 TEST_F(CssOutlineFilterTest, RewriteDomain) {
   SetupOutliner();
   AddRewriteDomainMapping("cdn.com", kTestDomain);

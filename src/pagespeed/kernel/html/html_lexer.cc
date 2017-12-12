@@ -25,6 +25,7 @@
 #include <cstdio>
 
 #include "base/logging.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
@@ -549,6 +550,7 @@ void HtmlLexer::EvalLiteralTag(char c) {
   // TODO(jmarantz): check for whitespace in unexpected places.
   if (c == '>') {
     // expecting "</x>" for tag x.
+    // Chromium source lacks CHECK_GT
     html_parse_->message_handler()->Check(
         literal_close_.size() > 3, "literal_close_.size() <= 3");  // NOLINT
     int literal_minus_close_size = literal_.size() - literal_close_.size();
@@ -583,7 +585,7 @@ void HtmlLexer::EvalScriptTag(char c) {
   // http://lists.w3.org/Archives/Public/public-html/2009Aug/0452.html
   // for a bit of backstory.
   if (c == '-') {
-    if (StringPiece(literal_).ends_with("<!--")) {
+    if (strings::EndsWith(StringPiece(literal_), "<!--")) {
       script_html_comment_ = true;
     }
   }
@@ -626,7 +628,7 @@ void HtmlLexer::EvalScriptTag(char c) {
       // Inside a comment, what looks like a 'terminated' <script>
       // gets us into an another level of escaping.
       script_html_comment_script_ = true;
-    } else if (c == '>' && StringPiece(literal_).ends_with("-->")) {
+    } else if (c == '>' && strings::EndsWith(StringPiece(literal_), "-->")) {
       // --> exits both level of escaping.
       script_html_comment_ = false;
       script_html_comment_script_ = false;
@@ -1087,7 +1089,7 @@ void HtmlLexer::Parse(const char* text, int size) {
 // The HTML-input sloppiness in these three methods is applied independent
 // of whether we think the document is XHTML, either via doctype or
 // mime-type.  The internet is full of lies.  See Issue 252:
-//   http://code.google.com/p/modpagespeed/issues/detail?id=252
+//   http://github.com/pagespeed/mod_pagespeed/issues/252
 
 bool HtmlLexer::IsImplicitlyClosedTag(HtmlName::Keyword keyword) const {
   return IS_IN_SET(kImplicitlyClosedHtmlTags, keyword);

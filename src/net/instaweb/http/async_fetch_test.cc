@@ -58,7 +58,7 @@ class AsyncFetchTest : public testing::Test {
   bool CheckCacheControlPublicWithVia(const char* via) {
     StringAsyncFetch fetch(request_context_);
     fetch.response_headers()->Add(HttpAttributes::kCacheControl, "max-age:100");
-    if (via != NULL) {
+    if (via != nullptr) {
       fetch.request_headers()->Add(HttpAttributes::kVia, via);
     }
     fetch.FixCacheControlForGoogleCache();
@@ -130,7 +130,7 @@ TEST_F(AsyncFetchTest, ContentLengthPropagatesToConditional) {
 }
 
 TEST_F(AsyncFetchTest, ViaHandling) {
-  EXPECT_FALSE(CheckCacheControlPublicWithVia(NULL));
+  EXPECT_FALSE(CheckCacheControlPublicWithVia(nullptr));
   EXPECT_TRUE(CheckCacheControlPublicWithVia("1.1 google"));
   EXPECT_TRUE(CheckCacheControlPublicWithVia("2.0 google"));
   EXPECT_TRUE(CheckCacheControlPublicWithVia("2 google"));

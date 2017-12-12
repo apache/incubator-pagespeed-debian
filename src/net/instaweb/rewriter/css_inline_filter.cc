@@ -60,6 +60,10 @@ class CssInlineFilter::Context : public InlineRewriteContext {
     return filter_->ShouldInline(resource, attrs_charset_, reason);
   }
 
+  bool PolicyPermitsRendering() const override {
+    return Driver()->content_security_policy().PermitsInlineStyle();
+  }
+
   virtual void Render() {
     if (num_output_partitions() < 1 ||
         !output_partition(0)->has_inlined_data()) {
@@ -82,6 +86,9 @@ class CssInlineFilter::Context : public InlineRewriteContext {
   }
 
   virtual const char* id() const { return filter_->id_; }
+  RewriteDriver::InputRole InputRole() const override {
+    return RewriteDriver::InputRole::kStyle;
+  }
 
  private:
   CssInlineFilter* filter_;
@@ -94,7 +101,8 @@ class CssInlineFilter::Context : public InlineRewriteContext {
 CssInlineFilter::CssInlineFilter(RewriteDriver* driver)
     : CommonFilter(driver),
       id_(RewriteOptions::kCssInlineId),
-      size_threshold_bytes_(driver->options()->css_inline_max_bytes()) {
+      size_threshold_bytes_(driver->options()->css_inline_max_bytes()),
+      in_body_(false) {
   Statistics* stats = server_context()->statistics();
   num_css_inlined_ = stats->GetVariable(kNumCssInlined);
 }
@@ -104,19 +112,38 @@ void CssInlineFilter::InitStats(Statistics* statistics) {
 }
 
 void CssInlineFilter::StartDocumentImpl() {
+    in_body_ = false;
 }
 
 CssInlineFilter::~CssInlineFilter() {}
+
+void CssInlineFilter::StartElementImpl(HtmlElement* element) {
+
+  if (element->keyword() == HtmlName::kBody) {
+    in_body_ = true;
+  }
+}
 
 void CssInlineFilter::EndElementImpl(HtmlElement* element) {
   // Don't inline if the CSS element is under <noscript>.
   if (noscript_element() != NULL) {
     return;
   }
+
   HtmlElement::Attribute* href = NULL;
   const char* media = NULL;
   if (CssTagScanner::ParseCssElement(element, &href, &media) &&
       !driver()->HasChildrenInFlushWindow(element)) {
+    if (driver()->is_amp_document()) {
+      // Don't inline into AMP documents. Those do permit font loading CSS,
+      // which we could in principle inline, but they also restrict the document
+      // to a single <style> tag, and we don't really have a good way of
+      // coordinating everything into that.
+      driver()->InsertDebugComment(
+          "CSS inlining not supported by PageSpeed for AMP documents", element);
+      return;
+    }
+
     // Only inline if the media type affects "screen".  We don't inline other
     // types since they're very unlikely to change the initial page view, and
     // inlining them would actually slow down the 99% case of "screen".
@@ -125,6 +152,20 @@ void CssInlineFilter::EndElementImpl(HtmlElement* element) {
           "CSS not inlined because media does not match screen", element);
       return;
     }
+
+    // Dont inline if style <link> element is in html body
+    // with pedantic filter enabled AND
+    // move_css_to_head is not enabled.
+    // This is to maintain w3c validation since style element is
+    // not recommended in html body. Issue fix #1153.
+    if (in_body_ &&
+        driver()->options()->Enabled(RewriteOptions::kPedantic) &&
+        !driver()->options()->Enabled(RewriteOptions::kMoveCssToHead)) {
+      driver()->InsertDebugComment(
+          "CSS not inlined because style link element in html body", element);
+      return;
+    }
+
     // Ask the LSC filter to work out how to handle this element. A return
     // value of true means we don't have to rewrite it so can skip that.
     // The state is carried forward to after we initiate rewriting since
@@ -152,7 +193,8 @@ void CssInlineFilter::EndElementImpl(HtmlElement* element) {
 
 ResourcePtr CssInlineFilter::CreateResource(const char* url,
                                             bool* is_authorized) {
-  return CreateInputResource(url, is_authorized);
+  return CreateInputResource(
+      url, RewriteDriver::InputRole::kStyle, is_authorized);
 }
 
 bool CssInlineFilter::HasClosingStyleTag(StringPiece contents) {
@@ -295,6 +337,11 @@ void CssInlineFilter::RenderInline(const ResourcePtr& resource,
   if (driver()->options()->Enabled(RewriteOptions::kComputeCriticalCss)) {
     // If compute_critical_css is enabled, add 'href' attribute to the style
     // node.
+    //
+    // compute_critical_css was used only for a google-internal system for
+    // computing critical css with a headless browser and storing it in pcache.
+    // It is never enabled for user requests.
+    //
     // Computing critical css needs this url to store the critical
     // css in the map.
     driver()->AddAttribute(style_element, HtmlName::kDataPagespeedHref,

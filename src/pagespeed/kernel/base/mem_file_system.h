@@ -32,7 +32,6 @@
 
 namespace net_instaweb {
 
-class AbstractMutex;
 class MessageHandler;
 class MockTimer;
 class ThreadSystem;
@@ -78,7 +77,7 @@ class MemFileSystem : public FileSystem {
   virtual bool Mtime(const StringPiece& path, int64* timestamp_sec,
                      MessageHandler* handler);
   virtual bool Size(const StringPiece& path, int64* size,
-                    MessageHandler* handler);
+                    MessageHandler* handler) const;
   virtual BoolOrError Exists(const char* path, MessageHandler* handler);
   virtual BoolOrError IsDir(const char* path, MessageHandler* handler);
 
@@ -88,6 +87,8 @@ class MemFileSystem : public FileSystem {
                                          int64 timeout_ms,
                                          const Timer* timer,
                                          MessageHandler* handler);
+  virtual bool BumpLockTimeout(const StringPiece& lock_name,
+                               MessageHandler* handler);
   virtual bool Unlock(const StringPiece& lock_name, MessageHandler* handler);
 
   // When atime is disabled, reading a file will not update its atime.
@@ -101,8 +102,12 @@ class MemFileSystem : public FileSystem {
   // However, that's disruptive to other tests that try to use
   // mock-time to examine millisecond-level timing, so we leave this
   // behavior off by default.
-  bool advance_time_on_update() { return advance_time_on_update_; }
+  bool advance_time_on_update() {
+    ScopedMutex lock(all_else_mutex_.get());
+    return advance_time_on_update_;
+  }
   void set_advance_time_on_update(bool x, MockTimer* mock_timer) {
+    ScopedMutex lock(all_else_mutex_.get());
     advance_time_on_update_ = x;
     mock_timer_ = mock_timer;
   }
@@ -112,22 +117,41 @@ class MemFileSystem : public FileSystem {
   void Clear();
 
   // Test-specific functionality to disable and re-enable the filesystem.
-  void Disable() { enabled_ = false; }
-  void Enable() { enabled_ = true; }
+  void Disable() {
+    ScopedMutex lock(all_else_mutex_.get());
+    enabled_ = false;
+  }
+  void Enable() {
+    ScopedMutex lock(all_else_mutex_.get());
+    enabled_ = true;
+  }
 
   // Access statistics.
   void ClearStats() {
+    ScopedMutex lock(all_else_mutex_.get());
     num_input_file_opens_ = 0;
     num_input_file_stats_ = 0;
     num_output_file_opens_ = 0;
     num_temp_file_opens_ = 0;
   }
-  int num_input_file_opens() const { return num_input_file_opens_; }
+  int num_input_file_opens() const {
+    ScopedMutex lock(all_else_mutex_.get());
+    return num_input_file_opens_;
+  }
 
   // returns number of times MTime was called.
-  int num_input_file_stats() const { return num_input_file_stats_; }
-  int num_output_file_opens() const { return num_output_file_opens_; }
-  int num_temp_file_opens() const { return num_temp_file_opens_; }
+  int num_input_file_stats() const {
+    ScopedMutex lock(all_else_mutex_.get());
+    return num_input_file_stats_;
+  }
+  int num_output_file_opens() const {
+    ScopedMutex lock(all_else_mutex_.get());
+    return num_output_file_opens_;
+  }
+  int num_temp_file_opens() const {
+    ScopedMutex lock(all_else_mutex_.get());
+    return num_temp_file_opens_;
+  }
 
   // Adds a callback to be called once after a file-write and then
   // deleted.

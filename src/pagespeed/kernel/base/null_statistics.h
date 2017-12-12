@@ -20,15 +20,12 @@
 #define PAGESPEED_KERNEL_BASE_NULL_STATISTICS_H_
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/statistics_template.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 
 namespace net_instaweb {
-
-class AbstractMutex;
-class CountHistogram;
-class Statistics;
 
 class NullStatisticsVariable {
  public:
@@ -37,7 +34,7 @@ class NullStatisticsVariable {
   void Set(int64 value) { }
   int64 Get() const { return 0; }
   int64 AddHelper(int64 delta) const { return 0; }
-  StringPiece GetName() const { return StringPiece(NULL); }
+  StringPiece GetName() const { return StringPiece(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NullStatisticsVariable);

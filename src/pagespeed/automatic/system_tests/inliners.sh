@@ -1,3 +1,18 @@
+#!/bin/bash
+#
+# Copyright 2016 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 test_filter inline_css converts 3 out of 5 link tags to style tags.
 fetch_until $URL 'grep -c <style' 3
 
@@ -13,9 +28,8 @@ if [ -z ${DISABLE_FONT_API_TESTS:-} ]; then
 user_agent =Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/51.0.2704.36 Safari/537.36
 EOF
 
-  fetch_until $URL 'grep -c @font-face' 7
-
-  OUT=$($WGET_DUMP $URL)
+  fetch_until -save $URL 'grep -c @font-face' 7 "" -ge
+  OUT=$(cat $FETCH_UNTIL_OUTFILE)
   check_from "$OUT" fgrep -qi "format('woff2')"
   check_not_from "$OUT" fgrep -qi "format('truetype')"
   check_not_from "$OUT" fgrep -qi "format('embedded-opentype')"
@@ -29,10 +43,10 @@ EOF
 user_agent = Mozilla/4.0 (compatible; MSIE 6.01; Windows NT 6.0)
 EOF
 
-  fetch_until $URL 'grep -c @font-face' 1
+  fetch_until -save $URL 'grep -c @font-face' 1
   # This should get an eot font. (It might also ship a woff, so we don't
   # check_not_from for that)
-  OUT=$($WGET_DUMP $URL)
+  OUT=$(cat $FETCH_UNTIL_OUTFILE)
   check_from "$OUT" fgrep -qi ".eot"
   check_not_from "$OUT" fgrep -qi ".ttf"
 
@@ -60,10 +74,11 @@ start_test inlining gzip-encoded resources
 #
 # compressed.css and compressed.js are gzipped on disk, but small enough that
 # PageSpeed would inline them if it were allowed to.  So fetch the page until we
-# see two .pagespeed. resources, then verify that we see the debug comments we
-# expect to see.
+# see 'gzip-encoded' two times, then verify that we see the debug comments we
+# expect to see. (We can't rely on .pagespeed. because we may get an
+# intermediate result, which will lack the debug comments we expect).
 URL="$TEST_ROOT/gzip_precompressed/?PageSpeedFilters=+debug"
-fetch_until -save $URL 'fgrep -c .pagespeed.' 2
+fetch_until -save $URL 'fgrep -c gzip-encoded' 2
 
 OUT=$(cat $FETCH_UNTIL_OUTFILE)
 # First verify that the inliners are actually enabled.

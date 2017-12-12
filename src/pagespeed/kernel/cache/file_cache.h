@@ -19,18 +19,20 @@
 #ifndef PAGESPEED_KERNEL_CACHE_FILE_CACHE_H_
 #define PAGESPEED_KERNEL_CACHE_FILE_CACHE_H_
 
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/cache_interface.h"
+#include "pagespeed/kernel/base/file_system.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/base/thread_system.h"
 
 namespace net_instaweb {
 
-class FileSystem;
 class Hasher;
 class MessageHandler;
-class SharedString;
 class SlowWorker;
 class Statistics;
 class Timer;
@@ -63,7 +65,7 @@ class FileCache : public CacheInterface {
   static void InitStats(Statistics* statistics);
 
   virtual void Get(const GoogleString& key, Callback* callback);
-  virtual void Put(const GoogleString& key, SharedString* value);
+  virtual void Put(const GoogleString& key, const SharedString& value);
   virtual void Delete(const GoogleString& key);
   void set_worker(SlowWorker* worker) { worker_ = worker; }
   SlowWorker* worker() { return worker_; }
@@ -87,6 +89,11 @@ class FileCache : public CacheInterface {
   static const char kDiskChecks[];
   // Files evicted from cache during cleanup.
   static const char kEvictions[];
+  // Number of times we didn't kick off cleaning because a previous cleaning run
+  // was still going.
+  static const char kSkippedCleanups[];
+  // Number of times we scanned the cache to see if it needed cleaning.
+  static const char kStartedCleanups[];
   static const char kWriteErrors[];
 
   // What to set clean_interval_ms to in order to disable cleaning.  This needs
@@ -132,17 +139,26 @@ class FileCache : public CacheInterface {
   // The full paths to our cleanup timestamp and lock files.
   GoogleString clean_time_path_;
   GoogleString clean_lock_path_;
+  // If set, we use this instead of the default LockBumpingProgressNotifier.  We
+  // do not take ownership.
+  FileSystem::ProgressNotifier* notifier_for_tests_;
 
   Variable* disk_checks_;
   Variable* cleanups_;
   Variable* evictions_;
   Variable* bytes_freed_in_cleanup_;
+  Variable* skipped_cleanups_;
+  Variable* started_cleanups_;
   Variable* write_errors_;
 
   // The filename where we keep the next scheduled cleanup time in seconds.
   static const char kCleanTimeName[];
   // The name of the global mutex protecting reads and writes to that file.
   static const char kCleanLockName[];
+
+  // How long a cache cleaner has to go without bumping it's lock before it
+  // might be usurped.
+  static const int kLockTimeoutMs;
 
   DISALLOW_COPY_AND_ASSIGN(FileCache);
 };
