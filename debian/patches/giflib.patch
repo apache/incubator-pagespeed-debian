@@ -1,10 +1,7 @@
-Author: Maks Orlovich <morlovich@google.com>
-Description: Build against system giflib
-
 --- a/src/pagespeed/kernel/image/gif_reader.cc
 +++ b/src/pagespeed/kernel/image/gif_reader.cc
-@@ -41,7 +41,7 @@
- #endif
+@@ -34,7 +34,7 @@
+ #include "third_party/libpng/src/png.h"
  #endif
  
 -#include "third_party/giflib/lib/gif_lib.h"
@@ -12,9 +9,10 @@ Description: Build against system giflib
  }
  
  #if GIFLIB_MAJOR < 5 || (GIFLIB_MAJOR == 5 && GIFLIB_MINOR == 0)
+
 --- a/src/pagespeed/kernel/image/gif_reader.h
 +++ b/src/pagespeed/kernel/image/gif_reader.h
-@@ -31,7 +31,7 @@
+@@ -30,7 +30,7 @@
  #include "pagespeed/kernel/image/scanline_utils.h"
  
  extern "C" {
@@ -23,9 +21,10 @@ Description: Build against system giflib
  
  #ifdef USE_SYSTEM_LIBPNG
  #include "png.h"                                               // NOLINT
+
 --- a/src/pagespeed/kernel/image/gif_square.h
 +++ b/src/pagespeed/kernel/image/gif_square.h
-@@ -27,7 +27,7 @@
+@@ -26,7 +26,7 @@
  #include "pagespeed/kernel/image/image_util.h"
  
  extern "C" {
@@ -34,9 +33,10 @@ Description: Build against system giflib
  }
  
  namespace net_instaweb {
+
 --- a/src/third_party/giflib/giflib.gyp
 +++ b/src/third_party/giflib/giflib.gyp
-@@ -13,92 +13,24 @@
+@@ -13,93 +13,24 @@
  # limitations under the License.
  
  {
@@ -53,6 +53,7 @@ Description: Build against system giflib
 -      'sources': [
 -        'lib/gifalloc.c',
 -        'lib/gif_err.c',
+-        'lib/openbsd-reallocarray.c'
 -      ]
 -    },
 -    {
@@ -84,7 +85,7 @@ Description: Build against system giflib
 +        'libraries': [
 +          '-lgif',
          ],
--      },
+       },
 -      'xcode_settings': {
 -        'WARNING_CFLAGS': [
 -          '-Wno-pointer-sign',
@@ -93,7 +94,6 @@ Description: Build against system giflib
 -      'cflags': [
 -        '-Wno-pointer-sign',
 -      ],
-+      }
      },
      {
        'target_name': 'egiflib',
@@ -121,21 +121,20 @@ Description: Build against system giflib
 -        'include_dirs': [
 -          '<(giflib_src_root)',
 -          '<(giflib_gen_arch_root)/include',
--        ],
--      },
--      'xcode_settings': {
--        'WARNING_CFLAGS': [
--          '-Wno-pointer-sign',
 +      'type': 'none',
 +      'all_dependent_settings': {
 +        'libraries': [
 +          '-lgif',
          ],
+       },
+-      'xcode_settings': {
+-        'WARNING_CFLAGS': [
+-          '-Wno-pointer-sign',
+-        ],
 -      },
 -      'cflags': [
 -        '-Wno-pointer-sign',
 -      ],
-+      }
      },
    ],
  }

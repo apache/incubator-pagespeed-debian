@@ -1,7 +1,3 @@
-Author: Maks Orlovich <morlovich@google.com>
-Description: Build against system re2
- This also disables building of the speed_test executable, which was pulling in a re2
- file for some microbenchmark utilities.
 --- a/src/build/all.gyp
 +++ b/src/build/all.gyp
 @@ -56,7 +56,6 @@
@@ -10,11 +6,12 @@ Description: Build against system re2
          '../net/instaweb/test.gyp:mod_pagespeed_test',
 -        '../net/instaweb/test.gyp:mod_pagespeed_speed_test',
          'install.gyp:*',
+         '<(DEPTH)/pagespeed/kernel.gyp:redis_cache_cluster_setup',
        ]
-     },
+
 --- a/src/net/instaweb/test.gyp
 +++ b/src/net/instaweb/test.gyp
-@@ -481,41 +481,6 @@
+@@ -497,41 +497,6 @@
        ],
      },
      {
@@ -56,6 +53,7 @@ Description: Build against system re2
        'target_name': 'css_minify_main',
        'type': 'executable',
        'sources': [
+
 --- a/src/pagespeed/kernel/util/re2.h
 +++ b/src/pagespeed/kernel/util/re2.h
 @@ -21,7 +21,7 @@
@@ -69,7 +67,7 @@ Description: Build against system re2
  
 --- a/src/third_party/re2/re2.gyp
 +++ b/src/third_party/re2/re2.gyp
-@@ -15,60 +15,15 @@
+@@ -15,56 +15,15 @@
  # Author: gagansingh@google.com (Gagandeep Singh)
  
  {
@@ -111,13 +109,9 @@ Description: Build against system re2
 -        'src/re2/tostring.cc',
 -        'src/re2/unicode_casefold.cc',
 -        'src/re2/unicode_groups.cc',
--        'src/util/hash.cc',
--        'src/util/logging.cc',
 -        'src/util/pcre.cc',
 -        'src/util/rune.cc',
 -        'src/util/strutil.cc',
--        'src/util/stringprintf.cc',
--        'src/util/valgrind.cc',
 -      ],
 -    },
 -    {

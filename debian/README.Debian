@@ -12,3 +12,8 @@ changed versions of the module .so, due to limitations on unloading
 imposed by dynamically linking to libprotobuf.
 
  -- Maksim Orlovich <morlovich@google.com>  Tue, 22 Nov 2016 16:50:08 +0000
+
+I have taken source of pagespeed version 1.13.35.1, and references from patches by Maksim Orlovich.
+I have updated some patches as well as added some new patches(tried on ubuntu 16.04).
+
+-- Ashish<ashish.k@gdbtech.in> Tue, 12 Dec 2017

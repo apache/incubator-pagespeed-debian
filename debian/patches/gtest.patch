@@ -1,68 +1,28 @@
-Author: Maks Orlovich <morlovich@google.com>
-Description: Build against system gmock + gtest
---- a/src/testing/gmock.gyp
-+++ b/src/testing/gmock.gyp
-@@ -7,55 +7,11 @@
-     {
-       'target_name': 'gmock',
-       'type': 'static_library',
--      'dependencies': [
--        'gtest.gyp:gtest',
--      ],
-       'sources': [
--        # Sources based on files in r173 of gmock.
--        'gmock/include/gmock/gmock-actions.h',
--        'gmock/include/gmock/gmock-cardinalities.h',
--        'gmock/include/gmock/gmock-generated-actions.h',
--        'gmock/include/gmock/gmock-generated-function-mockers.h',
--        'gmock/include/gmock/gmock-generated-matchers.h',
--        'gmock/include/gmock/gmock-generated-nice-strict.h',
--        'gmock/include/gmock/gmock-matchers.h',
--        'gmock/include/gmock/gmock-spec-builders.h',
--        'gmock/include/gmock/gmock.h',
--        'gmock/include/gmock/internal/gmock-generated-internal-utils.h',
--        'gmock/include/gmock/internal/gmock-internal-utils.h',
--        'gmock/include/gmock/internal/gmock-port.h',
--        'gmock/src/gmock-all.cc',
--        'gmock/src/gmock-cardinalities.cc',
--        'gmock/src/gmock-internal-utils.cc',
--        'gmock/src/gmock-matchers.cc',
--        'gmock/src/gmock-spec-builders.cc',
--        'gmock/src/gmock.cc',
--        'gmock_mutant.h',  # gMock helpers
--      ],
--      'sources!': [
--        'gmock/src/gmock-all.cc',  # Not needed by our build.
-+        '/usr/src/googletest/googlemock/src/gmock-all.cc',
-       ],
-       'include_dirs': [
--        'gmock',
--        'gmock/include',
--      ],
--      'direct_dependent_settings': {
--        'include_dirs': [
--          'gmock/include',  # So that gmock headers can find themselves.
--        ],
--      },
--      'export_dependent_settings': [
--        'gtest.gyp:gtest',
--      ],
--    },
--    {
--      'target_name': 'gmock_main',
--      'type': 'static_library',
--      'dependencies': [
--        'gmock',
--      ],
--      'sources': [
--        'gmock/src/gmock_main.cc',
-+        '/usr/src/googletest/googlemock/',
-       ],
-     },
-   ],
+--- a/src/pagespeed/kernel/base/gtest.h
++++ b/src/pagespeed/kernel/base/gtest.h
+@@ -22,7 +22,7 @@
+ 
+ #include "pagespeed/kernel/base/string.h"
+ #include "pagespeed/kernel/base/string_util.h"
+-#include "testing/gtest/include/gtest/gtest.h"
++#include "gtest/gtest.h"
+ 
+ namespace net_instaweb {
+ 
+--- a/src/pagespeed/kernel/base/gtest_prod.h
++++ b/src/pagespeed/kernel/base/gtest_prod.h
+@@ -20,6 +20,6 @@
+ #define PAGESPEED_KERNEL_BASE_GTEST_PROD_H_
+ 
+ 
+-#include "testing/gtest/include/gtest/gtest_prod.h"
++#include "gtest/gtest_prod.h"
+ 
+ #endif  // PAGESPEED_KERNEL_BASE_GTEST_PROD_H_
+
 --- a/src/testing/gtest.gyp
 +++ b/src/testing/gtest.gyp
-@@ -8,238 +8,27 @@
+@@ -8,218 +8,11 @@
        'target_name': 'gtest',
        'type': 'static_library',
        'sources': [
@@ -94,22 +54,19 @@ Description: Build against system gmock + gtest
 -        'gtest/src/gtest-test-part.cc',
 -        'gtest/src/gtest-typed-test.cc',
 -        'gtest/src/gtest.cc',
--        'multiprocess_func_list.cc',
--        'multiprocess_func_list.h',
--        'platform_test.h',
 -      ],
 -      'sources!': [
 -        'gtest/src/gtest-all.cc',  # Not needed by our build.
-+        '/usr/src/googletest/googletest/src/gtest-all.cc',
++        '/usr/src/gtest/src/gtest-all.cc',
        ],
        'include_dirs': [
 -        'gtest',
 -        'gtest/include',
--      ],
++        '/usr/src/gtest',
+       ],
 -      'dependencies': [
 -        'gtest_prod',
-+        '/usr/src/googletest/googletest/',
-       ],
+-      ],
 -      'defines': [
 -        # In order to allow regex matches in gtest to be shared between Windows
 -        # and other systems, we tell gtest to always use it's internal engine.
@@ -286,16 +243,13 @@ Description: Build against system gmock + gtest
      },
      {
        'target_name': 'gtest_main',
-       'type': 'static_library',
-+      'sources': [
-+        '/usr/src/googletest/googletest/src/gtest_main.cc',
-+      ],
-       'dependencies': [
+@@ -228,16 +21,15 @@
          'gtest',
        ],
--      'sources': [
+       'sources': [
 -        'gtest/src/gtest_main.cc',
--      ],
++        '/usr/src/gtest/src/gtest_main.cc',
+       ],
      },
      {
        'target_name': 'gtest_prod',
@@ -303,60 +257,10 @@ Description: Build against system gmock + gtest
        'type': 'none',
 -      'sources': [
 -        'gtest/include/gtest/gtest_prod.h',
+-      ],
 +      'dependencies': [
 +        'gtest',
-       ],
++      ]
      },
    ],
---- a/src/pagespeed/kernel/base/gtest.h
-+++ b/src/pagespeed/kernel/base/gtest.h
-@@ -22,7 +22,7 @@
- 
- #include "pagespeed/kernel/base/string.h"
- #include "pagespeed/kernel/base/string_util.h"
--#include "testing/gtest/include/gtest/gtest.h"
-+#include "gtest/gtest.h"
- 
- namespace net_instaweb {
- 
---- a/src/pagespeed/kernel/base/gtest_prod.h
-+++ b/src/pagespeed/kernel/base/gtest_prod.h
-@@ -20,6 +20,6 @@
- #define PAGESPEED_KERNEL_BASE_GTEST_PROD_H_
- 
- 
--#include "testing/gtest/include/gtest/gtest_prod.h"
-+#include "gtest/gtest_prod.h"
- 
- #endif  // PAGESPEED_KERNEL_BASE_GTEST_PROD_H_
---- a/src/third_party/chromium/src/base/gtest_prod_util.h
-+++ b/src/third_party/chromium/src/base/gtest_prod_util.h
-@@ -5,7 +5,7 @@
- #ifndef BASE_GTEST_PROD_UTIL_H_
- #define BASE_GTEST_PROD_UTIL_H_
- 
--#include "testing/gtest/include/gtest/gtest_prod.h"
-+#include "gtest/gtest_prod.h"
- 
- // This is a wrapper for gtest's FRIEND_TEST macro that friends
- // test with all possible prefixes. This is very helpful when changing the test
---- a/src/third_party/css_parser/src/testing/base/public/gunit.h
-+++ b/src/third_party/css_parser/src/testing/base/public/gunit.h
-@@ -16,6 +16,6 @@
- #ifndef TESTING_BASE_PUBLIC_GUNIT_H_
- #define TESTING_BASE_PUBLIC_GUNIT_H_
- 
--#include "testing/gtest/include/gtest/gtest.h"
-+#include "gtest/gtest.h"
- 
- #endif  // TESTING_BASE_PUBLIC_GUNIT_H_
---- a/src/third_party/css_parser/src/testing/production_stub/public/gunit_prod.h
-+++ b/src/third_party/css_parser/src/testing/production_stub/public/gunit_prod.h
-@@ -16,6 +16,6 @@
- #ifndef WEBUTIL_CSS_OPEN_SOURCE_TESTING_PRODUCTION_STUB_PUBLIC_GUNIT_PROD_H_
- #define WEBUTIL_CSS_OPEN_SOURCE_TESTING_PRODUCTION_STUB_PUBLIC_GUNIT_PROD_H_
- 
--#include "testing/gtest/include/gtest/gtest_prod.h"
-+#include "gtest/gtest_prod.h"
- 
- #endif  // WEBUTIL_CSS_OPEN_SOURCE_TESTING_PRODUCTION_STUB_PUBLIC_GUNIT_PROD_H_
+ }
