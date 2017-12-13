@@ -20,6 +20,6 @@
 #define PAGESPEED_KERNEL_BASE_GTEST_PROD_H_
 
 
-#include "gtest/gtest_prod.h"
+#include "testing/gtest/include/gtest/gtest_prod.h"
 
 #endif  // PAGESPEED_KERNEL_BASE_GTEST_PROD_H_

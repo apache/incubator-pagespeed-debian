@@ -3,6 +3,79 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'conditions': [
+      [ 'OS=="linux" or OS=="freebsd" or OS=="openbsd"', {
+        # Link to system .so since we already use it due to GTK.
+        'use_system_libpng%': 1,
+      }, {  # OS!="linux" and OS!="freebsd" and OS!="openbsd"
+        'use_system_libpng%': 0,
+      }],
+    ],
+  },
+  'conditions': [
+    ['use_system_libpng==0', {
+      'targets': [
+        {
+          'target_name': 'libpng',
+          'type': '<(component)',
+          'dependencies': [
+            '../zlib/zlib.gyp:zlib',
+          ],
+          'msvs_guid': 'C564F145-9172-42C3-BFCB-6014CA97DBCD',
+          'sources': [
+            'src/png.c',
+            'src/png.h',
+            'src/pngconf.h',
+            'src/pngerror.c',
+            'src/pnggccrd.c',
+            'src/pngget.c',
+            'src/pngmem.c',
+            'src/pngpread.c',
+            'src/pngread.c',
+            'src/pngrio.c',
+            'src/pngrtran.c',
+            'src/pngrutil.c',
+            'src/pngset.c',
+            'src/pngtrans.c',
+            'src/pngusr.h',
+            'src/pngvcrd.c',
+            'src/pngwio.c',
+            'src/pngwrite.c',
+            'src/pngwtran.c',
+            'src/pngwutil.c',
+          ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              'src/',
+            ],
+            'defines': [
+              # We end up including setjmp.h directly, but libpng
+              # doesn't like that. This define tells libpng to not
+              # complain about our inclusion of setjmp.h.
+              'PNG_SKIP_SETJMP_CHECK',
+            ],
+          },
+          'export_dependent_settings': [
+            '../zlib/zlib.gyp:zlib',
+          ],
+          'conditions': [
+            ['OS!="win"', {'product_name': 'png'}],
+            ['OS=="win" and component=="shared_library"', {
+              'defines': [
+                'PNG_BUILD_DLL',
+                'PNG_NO_MODULEDEF',
+              ],
+              'direct_dependent_settings': {
+                'defines': [
+                  'PNG_USE_DLL',
+                ],
+              },
+            }],
+          ],
+        },
+      ]
+    }, {
       'conditions': [
         ['sysroot!=""', {
           'variables': {
@@ -70,6 +143,8 @@
           },
         },
       ],
+    }],
+  ],
 }
 
 # Local Variables:

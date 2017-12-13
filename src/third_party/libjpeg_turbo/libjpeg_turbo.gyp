@@ -16,6 +16,38 @@
 # has set up the dependency to 'yasm', but does not include all files
 # which 'mod_pagespeed' needs. The additional files are included here.
 {
+  'variables': {
+    'conditions': [
+      [ 'os_posix == 1 and OS != "mac"', {
+        # Link to system .so since we already use it due to GTK.
+        'use_system_libjpeg%': 1,
+      }, {  # os_posix != 1 or OS == "mac"
+        'use_system_libjpeg%': 0,
+      }],
+    ],
+  },
+  'conditions': [
+    ['use_system_libjpeg==0', {
+      'targets': [
+        {
+          'target_name': 'libjpeg_turbo',
+          'type': 'static_library',
+          'sources': [
+            'src/jctrans.c',
+            'src/jdtrans.c',
+          ],
+          'dependencies': [
+            'src/libjpeg.gyp:libjpeg',
+          ],
+          'export_dependent_settings': [
+            'src/libjpeg.gyp:libjpeg',
+          ],
+          'conditions': [
+            ['OS!="win"', {'product_name': 'jpeg'}],
+          ],
+        },
+      ],
+    }, {
       'targets': [
         {
           'target_name': 'libjpeg_turbo',
@@ -32,4 +64,6 @@
           },
         }
       ],
+    }],
+  ],
 }

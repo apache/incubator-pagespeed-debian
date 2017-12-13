@@ -15,15 +15,56 @@
 # Author: gagansingh@google.com (Gagandeep Singh)
 
 {
+  'variables': {
+    're2_root': '<(DEPTH)/third_party/re2',
+  },
   'targets': [
     {
       'target_name': 're2',
       'type': '<(library)',
+      'include_dirs': [
+        '<(re2_root)/src/',
+      ],
       'all_dependent_settings': {
-        'libraries': [
-          '-lre2',
+        'include_dirs': [
+          '<(DEPTH)/third_party/re2/src/',
         ],
       },
+      'sources': [
+        'src/re2/bitstate.cc',
+        'src/re2/compile.cc',
+        'src/re2/dfa.cc',
+        'src/re2/filtered_re2.cc',
+        'src/re2/mimics_pcre.cc',
+        'src/re2/nfa.cc',
+        'src/re2/onepass.cc',
+        'src/re2/parse.cc',
+        'src/re2/perl_groups.cc',
+        'src/re2/prefilter.cc',
+        'src/re2/prefilter_tree.cc',
+        'src/re2/prog.cc',
+        'src/re2/re2.cc',
+        'src/re2/regexp.cc',
+        'src/re2/set.cc',
+        'src/re2/simplify.cc',
+        'src/re2/stringpiece.cc',
+        'src/re2/tostring.cc',
+        'src/re2/unicode_casefold.cc',
+        'src/re2/unicode_groups.cc',
+        'src/util/pcre.cc',
+        'src/util/rune.cc',
+        'src/util/strutil.cc',
+      ],
+    },
+    {
+      'target_name': 're2_bench_util',
+      'type': '<(library)',
+      'include_dirs': [
+        '<(re2_root)/src/',
+      ],
+      'sources': [
+        'src/util/benchmark.cc',
+      ],
     },
   ],
 }

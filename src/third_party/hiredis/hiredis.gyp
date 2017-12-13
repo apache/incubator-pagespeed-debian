@@ -13,15 +13,25 @@
 # limitations under the License.
 
 {
+  'variables': {
+    'hiredis_root': '<(DEPTH)/third_party/hiredis',
+    'hiredis_src': '<(hiredis_root)/src',
+  },
   'targets': [
     {
       'target_name': 'hiredis',
-      'type': 'none',
-      'all_dependent_settings': {
-        'libraries': [
-          '-lhiredis',
-        ],
-      },
+      'type': '<(library)',
+      'sources': [
+        '<(hiredis_src)/async.c',
+        '<(hiredis_src)/dict.c',
+        '<(hiredis_src)/hiredis.c',
+        '<(hiredis_src)/net.c',
+        '<(hiredis_src)/read.c',
+        '<(hiredis_src)/sds.c',
+      ],
+      'include_dirs': [
+        '<(hiredis_src)',
+      ],
     }
   ],
 }

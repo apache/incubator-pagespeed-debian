@@ -9,9 +9,9 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "x86_64-linux-gnu/unicode/ucnv.h"
-#include "x86_64-linux-gnu/unicode/ucnv_cb.h"
-#include "x86_64-linux-gnu/unicode/uidna.h"
+#include "third_party/icu/source/common/unicode/ucnv.h"
+#include "third_party/icu/source/common/unicode/ucnv_cb.h"
+#include "third_party/icu/source/common/unicode/uidna.h"
 #include "third_party/chromium/src/googleurl/src/url_canon_icu.h"
 #include "third_party/chromium/src/googleurl/src/url_canon_internal.h"  // for _itoa_s
 

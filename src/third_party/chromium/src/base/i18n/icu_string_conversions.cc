@@ -11,11 +11,11 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "x86_64-linux-gnu/unicode/ucnv.h"
-#include "x86_64-linux-gnu/unicode/ucnv_cb.h"
-#include "x86_64-linux-gnu/unicode/ucnv_err.h"
-#include "x86_64-linux-gnu/unicode/unorm.h"
-#include "x86_64-linux-gnu/unicode/ustring.h"
+#include "third_party/icu/source/common/unicode/ucnv.h"
+#include "third_party/icu/source/common/unicode/ucnv_cb.h"
+#include "third_party/icu/source/common/unicode/ucnv_err.h"
+#include "third_party/icu/source/common/unicode/unorm.h"
+#include "third_party/icu/source/common/unicode/ustring.h"
 
 namespace base {
 

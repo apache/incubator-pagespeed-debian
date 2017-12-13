@@ -17,6 +17,25 @@
 # Chromium.
 
 {
+  'variables': {
+    'use_system_openssl%': 0,
+  },
+  'conditions': [
+    ['use_system_openssl==0', {
+      'targets': [
+        {
+          'target_name': 'select_openssl',
+          'type': 'none',
+          'dependencies': [
+            '<(DEPTH)/third_party/serf/openssl.gyp:openssl',
+          ],
+          'export_dependent_settings': [
+            '<(DEPTH)/third_party/serf/openssl.gyp:openssl',
+          ],
+        },
+      ]
+    },
+    { # use_system_openssl
       'targets': [
         {
           'target_name': 'select_openssl',
@@ -36,5 +55,7 @@
           },
         },
       ],
+    }],
+  ],
 }
 

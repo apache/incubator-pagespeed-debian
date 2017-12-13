@@ -153,6 +153,9 @@
       }],
     ],
 
+    'defines': [ # See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+                 '_GLIBCXX_USE_CXX11_ABI=0' ],
+
     'cflags_cc+': [
       '-std=gnu++0x'
     ],

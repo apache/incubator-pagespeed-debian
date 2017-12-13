@@ -22,7 +22,7 @@
 
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
-#include "gtest/gtest.h"
+#include "testing/gtest/include/gtest/gtest.h"
 
 namespace net_instaweb {
 
