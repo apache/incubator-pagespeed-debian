@@ -37,10 +37,6 @@ class ApacheConfig : public SystemRewriteOptions {
   explicit ApacheConfig(ThreadSystem* thread_system);
   virtual ~ApacheConfig();
 
-  bool fetch_from_mod_spdy() const {
-    return fetch_from_mod_spdy_.value();
-  }
-
   // Make an identical copy of these options and return it.
   virtual ApacheConfig* Clone() const;
 
@@ -56,14 +52,40 @@ class ApacheConfig : public SystemRewriteOptions {
   void set_proxy_auth(StringPiece p) {
     set_option(p.as_string(), &proxy_auth_);
   }
-  const GoogleString& proxy_auth() const {
-    return proxy_auth_.value();
+  const GoogleString& proxy_auth() const { return proxy_auth_.value(); }
+
+  bool force_buffering() const { return force_buffering_.value(); }
+  void set_force_buffering(bool x) { set_option(x, &force_buffering_); }
+
+  bool proxy_all_requests_mode() const {
+    return proxy_all_requests_mode_.value();
+  }
+
+  bool measurement_proxy_mode() const {
+    return !measurement_proxy_root().empty() &&
+           !measurement_proxy_password().empty();
+  }
+
+  const GoogleString& measurement_proxy_root() const {
+    return measurement_proxy_root_.value();
+  }
+
+  const GoogleString& measurement_proxy_password() const {
+    return measurement_proxy_password_.value();
   }
 
   // Returns a suitably down cast version of 'instance' if it is an instance
   // of this class, NULL if not.
   static const ApacheConfig* DynamicCast(const RewriteOptions* instance);
   static ApacheConfig* DynamicCast(RewriteOptions* instance);
+
+  void Merge(const RewriteOptions& src) override;
+
+  OptionSettingResult ParseAndSetOptionFromName2(
+      StringPiece name, StringPiece arg1, StringPiece arg2,
+      GoogleString* msg, MessageHandler* handler) override;
+
+  GoogleString SubclassSignatureLockHeld() override;
 
  private:
   // Keeps the properties added by this subclass.  These are merged into
@@ -87,7 +109,11 @@ class ApacheConfig : public SystemRewriteOptions {
   void Init();
 
   Option<bool> fetch_from_mod_spdy_;
+  Option<bool> force_buffering_;
+  Option<bool> proxy_all_requests_mode_;
   Option<GoogleString> proxy_auth_;  // CookieName[=Value][:RedirectUrl]
+  Option<GoogleString> measurement_proxy_root_;
+  Option<GoogleString> measurement_proxy_password_;
 
   DISALLOW_COPY_AND_ASSIGN(ApacheConfig);
 };

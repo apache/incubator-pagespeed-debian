@@ -27,33 +27,33 @@
 
 namespace net_instaweb {
 
-ThreadSystem::Thread::Thread(
-    ThreadSystem* runtime, StringPiece name, ThreadFlags flags)
+ThreadSystem::Thread::Thread(ThreadSystem* runtime, StringPiece name,
+                             ThreadFlags flags)
     : impl_(runtime->NewThreadImpl(this, flags)),
       flags_(flags),
-      started_(false) {
+      started_(false),
+      join_called_(false) {
   name.CopyToString(&name_);
 }
 
 ThreadSystem::Thread::~Thread() {
+  if ((flags_ & ThreadSystem::kJoinable) && started_ && !join_called_) {
+    LOG(DFATAL) << "Joinable thread was started and not joined";
+  }
 }
 
 bool ThreadSystem::Thread::Start() {
+  DCHECK(!started_) << "Threads cannot be restarted, create a new instance";
   started_ = impl_->StartImpl();
   return started_;
 }
 
 void ThreadSystem::Thread::Join() {
-  if (!started_) {
-    LOG(DFATAL) << "Trying to join thread that wasn't Start()ed";
-    return;
-  }
+  CHECK(started_) << "Trying to join thread that wasn't Start()ed";
+  CHECK(flags_ & ThreadSystem::kJoinable) << "Trying to join a detached thread";
+  CHECK(!join_called_) << "Trying to join a thread more than once";
 
-  if ((flags_ & ThreadSystem::kJoinable) == 0) {
-    LOG(DFATAL) << "Trying to join a detached thread";
-    return;
-  }
-
+  join_called_ = true;
   impl_->JoinImpl();
 }
 

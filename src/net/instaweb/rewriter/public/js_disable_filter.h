@@ -20,15 +20,15 @@
 #define NET_INSTAWEB_REWRITER_PUBLIC_JS_DISABLE_FILTER_H_
 
 #include "net/instaweb/rewriter/public/common_filter.h"
+#include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/script_tag_scanner.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/string.h"
+#include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_filter.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 
 namespace net_instaweb {
-
-class HtmlElement;
-class RewriteDriver;
 
 // Disables javscript by converting input html:
 //   <script src="1.js">var a = 1...</script>
@@ -51,6 +51,8 @@ class JsDisableFilter : public CommonFilter {
     return "JsDisableFilter";
   }
 
+  ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
+
  private:
   virtual void StartDocumentImpl();
 
@@ -71,11 +73,6 @@ class JsDisableFilter : public CommonFilter {
   ScriptTagScanner script_tag_scanner_;
   int index_;
   bool ie_meta_tag_written_;
-  int prefetch_js_elements_count_;
-  int max_prefetch_js_elements_;
-  GoogleString prefetch_js_elements_;
-  bool should_look_for_prefetch_js_elements_;
-  UserAgentMatcher::PrefetchMechanism prefetch_mechanism_;
 
   DISALLOW_COPY_AND_ASSIGN(JsDisableFilter);
 };

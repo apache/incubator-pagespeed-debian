@@ -29,6 +29,8 @@ goog.provide('goog.labs.net.webChannel.ChannelRequest');
 goog.require('goog.Timer');
 goog.require('goog.async.Throttle');
 goog.require('goog.events.EventHandler');
+goog.require('goog.labs.net.webChannel.Channel');
+goog.require('goog.labs.net.webChannel.WebChannelDebug');
 goog.require('goog.labs.net.webChannel.requestStats');
 goog.require('goog.labs.net.webChannel.requestStats.ServerReachability');
 goog.require('goog.labs.net.webChannel.requestStats.Stat');
@@ -36,7 +38,6 @@ goog.require('goog.net.ErrorCode');
 goog.require('goog.net.EventType');
 goog.require('goog.net.XmlHttp');
 goog.require('goog.object');
-goog.require('goog.uri.utils.StandardQueryParam');
 goog.require('goog.userAgent');
 
 
@@ -55,8 +56,8 @@ goog.require('goog.userAgent');
  * @struct
  * @final
  */
-goog.labs.net.webChannel.ChannelRequest = function(channel, channelDebug,
-    opt_sessionId, opt_requestId, opt_retryId) {
+goog.labs.net.webChannel.ChannelRequest = function(
+    channel, channelDebug, opt_sessionId, opt_requestId, opt_retryId) {
   /**
    * The channel object that owns the request.
    * @private {goog.labs.net.webChannel.Channel}
@@ -277,7 +278,7 @@ ChannelRequest.Type_ = {
   /**
    * IMG requests.
    */
-  IMG: 2
+  CLOSE_REQUEST: 2
 };
 
 
@@ -429,27 +430,15 @@ ChannelRequest.prototype.xmlHttpPost = function(uri, postData, decodeChunks) {
  *     won't cause it to be added to the URL.
  * @param {boolean=} opt_noClose   Whether to request that the tcp/ip connection
  *     should be closed.
- * @param {boolean=} opt_duplicateRandom   Whether to duplicate the randomness
- *     parameter which is only required for the initial handshake. This allows
- *     a server to break compatibility with old version clients.
  */
-ChannelRequest.prototype.xmlHttpGet = function(uri, decodeChunks,
-    hostPrefix, opt_noClose, opt_duplicateRandom) {
+ChannelRequest.prototype.xmlHttpGet = function(
+    uri, decodeChunks, hostPrefix, opt_noClose) {
   this.type_ = ChannelRequest.Type_.XML_HTTP;
   this.baseUri_ = uri.clone().makeUnique();
   this.postData_ = null;
   this.decodeChunks_ = decodeChunks;
   if (opt_noClose) {
     this.sendClose_ = false;
-  }
-
-  // TODO(user): clean this up once we phase out all BrowserChannel clients,
-  if (opt_duplicateRandom) {
-    var randomParam = this.baseUri_.getParameterValue(
-        goog.uri.utils.StandardQueryParam.RANDOM);
-    this.baseUri_.setParameterValue(  // baseUri_ reusable for future requests
-        goog.uri.utils.StandardQueryParam.RANDOM + '1',  // 'zx1'
-        randomParam);
   }
 
   this.sendXmlHttp_(hostPrefix);
@@ -476,8 +465,8 @@ ChannelRequest.prototype.sendXmlHttp_ = function(hostPrefix) {
   // send the request either as a POST or GET
   this.xmlHttpChunkStart_ = 0;
   var useSecondaryDomains = this.channel_.shouldUseSecondaryDomains();
-  this.xmlHttp_ = this.channel_.createXhrIo(useSecondaryDomains ?
-      hostPrefix : null);
+  this.xmlHttp_ =
+      this.channel_.createXhrIo(useSecondaryDomains ? hostPrefix : null);
 
   if (this.readyStateChangeThrottleMs_ > 0) {
     this.readyStateChangeThrottle_ = new goog.async.Throttle(
@@ -485,8 +474,8 @@ ChannelRequest.prototype.sendXmlHttp_ = function(hostPrefix) {
         this.readyStateChangeThrottleMs_);
   }
 
-  this.eventHandler_.listen(this.xmlHttp_,
-      goog.net.EventType.READY_STATE_CHANGE,
+  this.eventHandler_.listen(
+      this.xmlHttp_, goog.net.EventType.READY_STATE_CHANGE,
       this.readyStateChangeHandler_);
 
   var headers = this.extraHeaders_ ? goog.object.clone(this.extraHeaders_) : {};
@@ -507,9 +496,8 @@ ChannelRequest.prototype.sendXmlHttp_ = function(hostPrefix) {
   }
   requestStats.notifyServerReachabilityEvent(
       requestStats.ServerReachability.REQUEST_MADE);
-  this.channelDebug_.xmlHttpChannelRequest(this.verb_,
-      this.requestUri_, this.rid_, this.retryId_,
-      this.postData_);
+  this.channelDebug_.xmlHttpChannelRequest(
+      this.verb_, this.requestUri_, this.rid_, this.retryId_, this.postData_);
 };
 
 
@@ -546,14 +534,15 @@ ChannelRequest.prototype.xmlHttpHandler_ = function(xmlhttp) {
     if (xmlhttp == this.xmlHttp_) {
       this.onXmlHttpReadyStateChanged_();
     } else {
-      this.channelDebug_.warning('Called back with an ' +
-                                     'unexpected xmlhttp');
+      this.channelDebug_.warning(
+          'Called back with an ' +
+          'unexpected xmlhttp');
     }
   } catch (ex) {
     this.channelDebug_.debug('Failed call to OnXmlHttpReadyStateChanged_');
     if (this.xmlHttp_ && this.xmlHttp_.getResponseText()) {
-      this.channelDebug_.dumpException(ex,
-          'ResponseText: ' + this.xmlHttp_.getResponseText());
+      this.channelDebug_.dumpException(
+          ex, 'ResponseText: ' + this.xmlHttp_.getResponseText());
     } else {
       this.channelDebug_.dumpException(ex, 'No response text');
     }
@@ -579,7 +568,7 @@ ChannelRequest.prototype.onXmlHttpReadyStateChanged_ = function() {
   // fire readyState == INTERACTIVE once.  We need the following code to poll
   if (readyState < goog.net.XmlHttp.ReadyState.INTERACTIVE ||
       readyState == goog.net.XmlHttp.ReadyState.INTERACTIVE &&
-      !goog.userAgent.OPERA && !this.xmlHttp_.getResponseText()) {
+          !goog.userAgent.OPERA && !this.xmlHttp_.getResponseText()) {
     // not yet ready
     return;
   }
@@ -587,11 +576,9 @@ ChannelRequest.prototype.onXmlHttpReadyStateChanged_ = function() {
   // Dispatch any appropriate network events.
   if (!this.cancelled_ && readyState == goog.net.XmlHttp.ReadyState.COMPLETE &&
       errorCode != goog.net.ErrorCode.ABORT) {
-
     // Pretty conservative, these are the only known scenarios which we'd
     // consider indicative of a truly non-functional network connection.
-    if (errorCode == goog.net.ErrorCode.TIMEOUT ||
-        statusCode <= 0) {
+    if (errorCode == goog.net.ErrorCode.TIMEOUT || statusCode <= 0) {
       requestStats.notifyServerReachabilityEvent(
           requestStats.ServerReachability.REQUEST_FAILED);
     } else {
@@ -607,19 +594,17 @@ ChannelRequest.prototype.onXmlHttpReadyStateChanged_ = function() {
   this.lastStatusCode_ = status;
   var responseText = this.xmlHttp_.getResponseText();
   if (!responseText) {
-    this.channelDebug_.debug('No response text for uri ' +
-        this.requestUri_ + ' status ' + status);
+    this.channelDebug_.debug(
+        'No response text for uri ' + this.requestUri_ + ' status ' + status);
   }
   this.successful_ = (status == 200);
 
   this.channelDebug_.xmlHttpChannelResponseMetaData(
-      /** @type {string} */ (this.verb_),
-      this.requestUri_, this.rid_, this.retryId_, readyState,
-      status);
+      /** @type {string} */ (this.verb_), this.requestUri_, this.rid_,
+      this.retryId_, readyState, status);
 
   if (!this.successful_) {
-    if (status == 400 &&
-        responseText.indexOf('Unknown SID') > 0) {
+    if (status == 400 && responseText.indexOf('Unknown SID') > 0) {
       // the server error string will include 'Unknown SID' which indicates the
       // server doesn't know about the session (maybe it got restarted, maybe
       // the user got moved to another server, etc.,). Handlers can special
@@ -679,18 +664,16 @@ ChannelRequest.prototype.onXmlHttpReadyStateChanged_ = function() {
  * @param {string} responseText The value of responseText.
  * @private
  */
-ChannelRequest.prototype.decodeNextChunks_ = function(readyState,
-    responseText) {
+ChannelRequest.prototype.decodeNextChunks_ = function(
+    readyState, responseText) {
   var decodeNextChunksSuccessful = true;
-  while (!this.cancelled_ &&
-         this.xmlHttpChunkStart_ < responseText.length) {
+  while (!this.cancelled_ && this.xmlHttpChunkStart_ < responseText.length) {
     var chunkText = this.getNextChunk_(responseText);
     if (chunkText == ChannelRequest.INCOMPLETE_CHUNK_) {
       if (readyState == goog.net.XmlHttp.ReadyState.COMPLETE) {
         // should have consumed entire response when the request is done
         this.lastError_ = ChannelRequest.Error.BAD_DATA;
-        requestStats.notifyStatEvent(
-            requestStats.Stat.REQUEST_INCOMPLETE_DATA);
+        requestStats.notifyStatEvent(requestStats.Stat.REQUEST_INCOMPLETE_DATA);
         decodeNextChunksSuccessful = false;
       }
       this.channelDebug_.xmlHttpChannelResponseText(
@@ -753,8 +736,8 @@ ChannelRequest.prototype.pollResponse_ = function() {
  * @private
  */
 ChannelRequest.prototype.startPolling_ = function() {
-  this.eventHandler_.listen(this.pollingTimer_, goog.Timer.TICK,
-      this.pollResponse_);
+  this.eventHandler_.listen(
+      this.pollingTimer_, goog.Timer.TICK, this.pollResponse_);
   this.pollingTimer_.start();
 };
 
@@ -799,26 +782,38 @@ ChannelRequest.prototype.getNextChunk_ = function(responseText) {
 
 
 /**
- * Uses an IMG tag to send an HTTP get to the server. This is only currently
- * used to terminate the connection, as an IMG tag is the most reliable way to
- * send something to the server while the page is getting torn down.
+ * Uses an IMG tag or navigator.sendBeacon to send an HTTP get to the server.
+ *
+ * This is only currently used to terminate the connection, as an IMG tag is
+ * the most reliable way to send something to the server while the page
+ * is getting torn down.
+ *
+ * Navigator.sendBeacon is available on Chrome and Firefox as a formal
+ * solution to ensure delivery without blocking window close. See
+ * https://developer.mozilla.org/en-US/docs/Web/API/Navigator/sendBeacon
+ *
+ * For Chrome Apps, sendBeacon is always necessary due to Content Security
+ * Policy (CSP) violation of using an IMG tag.
+ *
  * @param {goog.Uri} uri The uri to send a request to.
  */
-ChannelRequest.prototype.sendUsingImgTag = function(uri) {
-  this.type_ = ChannelRequest.Type_.IMG;
+ChannelRequest.prototype.sendCloseRequest = function(uri) {
+  this.type_ = ChannelRequest.Type_.CLOSE_REQUEST;
   this.baseUri_ = uri.clone().makeUnique();
-  this.imgTagGet_();
-};
 
+  var requestSent = false;
 
-/**
- * Starts the IMG request.
- *
- * @private
- */
-ChannelRequest.prototype.imgTagGet_ = function() {
-  var eltImg = new Image();
-  eltImg.src = this.baseUri_;
+  if (goog.global.navigator && goog.global.navigator.sendBeacon) {
+    // empty string body to avoid 413 error on chrome < 41
+    requestSent =
+        goog.global.navigator.sendBeacon(this.baseUri_.toString(), '');
+  }
+
+  if (!requestSent) {
+    var eltImg = new Image();
+    eltImg.src = this.baseUri_;
+  }
+
   this.requestStartTime_ = goog.now();
   this.ensureWatchDogTimer_();
 };
@@ -856,8 +851,8 @@ ChannelRequest.prototype.startWatchDogTimer_ = function(time) {
     // assertion
     throw Error('WatchDog timer not null');
   }
-  this.watchDogTimerId_ = requestStats.setTimeout(
-      goog.bind(this.onWatchDogTimeout_, this), time);
+  this.watchDogTimerId_ =
+      requestStats.setTimeout(goog.bind(this.onWatchDogTimeout_, this), time);
 };
 
 
@@ -908,17 +903,20 @@ ChannelRequest.prototype.handleTimeout_ = function() {
   }
 
   this.channelDebug_.timeoutResponse(this.requestUri_);
-  // IMG requests never notice if they were successful, and always 'time out'.
-  // This fact says nothing about reachability.
-  if (this.type_ != ChannelRequest.Type_.IMG) {
+
+  // IMG or SendBeacon requests never notice if they were successful,
+  // and always 'time out'. This fact says nothing about reachability.
+  if (this.type_ != ChannelRequest.Type_.CLOSE_REQUEST) {
     requestStats.notifyServerReachabilityEvent(
         requestStats.ServerReachability.REQUEST_FAILED);
+    requestStats.notifyStatEvent(requestStats.Stat.REQUEST_TIMEOUT);
   }
+
   this.cleanup_();
 
-  // set error and dispatch failure
+  // Set error and dispatch failure.
+  // This is called for CLOSE_REQUEST too to ensure channel_.onRequestComplete.
   this.lastError_ = ChannelRequest.Error.TIMEOUT;
-  requestStats.notifyStatEvent(requestStats.Stat.REQUEST_TIMEOUT);
   this.dispatchFailure_();
 };
 
@@ -1060,8 +1058,7 @@ ChannelRequest.prototype.safeOnRequestData_ = function(data) {
     requestStats.notifyServerReachabilityEvent(stats.BACK_CHANNEL_ACTIVITY);
   } catch (e) {
     // Dump debug info, but keep going without closing the channel.
-    this.channelDebug_.dumpException(
-        e, 'Error in httprequest callback');
+    this.channelDebug_.dumpException(e, 'Error in httprequest callback');
   }
 };
 
@@ -1076,9 +1073,9 @@ ChannelRequest.prototype.safeOnRequestData_ = function(data) {
  * @param {number=} opt_retryId  The retry id for this request.
  * @return {!ChannelRequest} The created channel request.
  */
-ChannelRequest.createChannelRequest = function(channel, channelDebug,
-    opt_sessionId, opt_requestId, opt_retryId) {
-  return new ChannelRequest(channel, channelDebug, opt_sessionId, opt_requestId,
-      opt_retryId);
+ChannelRequest.createChannelRequest = function(
+    channel, channelDebug, opt_sessionId, opt_requestId, opt_retryId) {
+  return new ChannelRequest(
+      channel, channelDebug, opt_sessionId, opt_requestId, opt_retryId);
 };
 });  // goog.scope

@@ -22,12 +22,12 @@
 #include <cstddef>
 
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/html/html_element.h"
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/html/html_parse.h"
 
 namespace net_instaweb {
 
-class HtmlElement;
 class HtmlEvent;
 
 class HtmlTestingPeer {
@@ -48,6 +48,9 @@ class HtmlTestingPeer {
   }
   static size_t symbol_table_size(HtmlParse* parser) {
     return parser->symbol_table_size();
+  }
+  static void set_buffer_events(HtmlParse* parse, bool value) {
+    parse->set_buffer_events(value);
   }
 
  private:

@@ -19,7 +19,6 @@
 #include "net/instaweb/rewriter/public/static_asset_manager.h"
 
 #include <cstddef>
-#include <memory>
 #include <utility>
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/rewrite_options.h"
@@ -36,8 +35,6 @@
 
 namespace net_instaweb {
 
-extern const char* CSS_mobilize_css;
-extern const char* CSS_mobilize_layout_css;
 extern const char* JS_add_instrumentation;
 extern const char* JS_add_instrumentation_opt;
 extern const char* JS_client_domain_rewriter;
@@ -60,22 +57,14 @@ extern const char* JS_deterministic;
 extern const char* JS_deterministic_opt;
 extern const char* JS_extended_instrumentation;
 extern const char* JS_extended_instrumentation_opt;
-extern const char* JS_ghost_click_buster_opt;
 extern const char* JS_js_defer;
 extern const char* JS_js_defer_opt;
 extern const char* JS_lazyload_images;
 extern const char* JS_lazyload_images_opt;
 extern const char* JS_local_storage_cache;
 extern const char* JS_local_storage_cache_opt;
-extern const char* JS_mobilize_js;
-extern const char* JS_mobilize_js_opt;
-extern const char* JS_mobilize_xhr_js;
-extern const char* JS_mobilize_xhr_js_opt;
-extern const char* JS_panel_loader_opt;
 extern const char* JS_responsive_js;
 extern const char* JS_responsive_js_opt;
-extern const char* JS_split_html_beacon;
-extern const char* JS_split_html_beacon_opt;
 
 // TODO(jud): use the data2c build flow to create this data.
 const unsigned char GIF_blank[] = {
@@ -90,27 +79,12 @@ const unsigned char GIF_blank[] = {
     0x3b};
 const int GIF_blank_len = arraysize(GIF_blank);
 
-// The generated files(blink.js, js_defer.js) are named in "<hash>-<fileName>"
-// format.
+// The generated file js_defer.js is named in "<hash>-<fileName>" format.
 const char StaticAssetManager::kGStaticBase[] =
     "//www.gstatic.com/psa/static/";
 
 // TODO(jud): Change to "/psaassets/".
 const char StaticAssetManager::kDefaultLibraryUrlPrefix[] = "/psajs/";
-
-// TODO(jud): Refactor this struct so that each static type served (js, images,
-// etc.) has it's own implementation.
-struct StaticAssetManager::Asset {
-  const char* file_name;
-  GoogleString js_optimized;
-  GoogleString js_debug;
-  GoogleString js_opt_hash;
-  GoogleString js_debug_hash;
-  GoogleString opt_url;
-  GoogleString debug_url;
-  GoogleString release_label;
-  ContentType content_type;
-};
 
 StaticAssetManager::StaticAssetManager(
     const GoogleString& static_asset_base,
@@ -242,9 +216,6 @@ void StaticAssetManager::InitializeAssetStrings() {
       "add_instrumentation";
   assets_[StaticAssetEnum::EXTENDED_INSTRUMENTATION_JS]->file_name =
       "extended_instrumentation";
-  GoogleString blink_js_string =
-      StrCat(JS_js_defer_opt, "\n", JS_panel_loader_opt);
-  assets_[StaticAssetEnum::BLINK_JS]->file_name = "blink";
   assets_[StaticAssetEnum::CLIENT_DOMAIN_REWRITER]->file_name =
       "client_domain_rewriter";
   assets_[StaticAssetEnum::CRITICAL_CSS_BEACON_JS]->file_name =
@@ -262,25 +233,22 @@ void StaticAssetManager::InitializeAssetStrings() {
       "delay_images_inline";
   assets_[StaticAssetEnum::LAZYLOAD_IMAGES_JS]->file_name = "lazyload_images";
   assets_[StaticAssetEnum::DETERMINISTIC_JS]->file_name = "deterministic";
-  assets_[StaticAssetEnum::GHOST_CLICK_BUSTER_JS]->file_name =
-      "ghost_click_buster";
   assets_[StaticAssetEnum::LOCAL_STORAGE_CACHE_JS]->file_name =
       "local_storage_cache";
-  assets_[StaticAssetEnum::MOBILIZE_JS]->file_name = "mobilize";
-  assets_[StaticAssetEnum::MOBILIZE_XHR_JS]->file_name = "mobilize_xhr";
-  assets_[StaticAssetEnum::MOBILIZE_CSS]->file_name = "mobilize_css";
-  assets_[StaticAssetEnum::MOBILIZE_LAYOUT_CSS]->file_name =
-      "mobilize_layout_css";
   assets_[StaticAssetEnum::RESPONSIVE_JS]->file_name = "responsive";
-  assets_[StaticAssetEnum::SPLIT_HTML_BEACON_JS]->file_name =
-      "split_html_beacon";
+  // Note that we still have to provide a name for these unused files because of
+  // the DCHECK for unique names below.
+  assets_[StaticAssetEnum::DEPRECATED_SPLIT_HTML_BEACON_JS]->file_name =
+      "deprecated_split_html_beacon";
+  assets_[StaticAssetEnum::DEPRECATED_GHOST_CLICK_BUSTER_JS]->file_name =
+      "deprecated_ghost_click_buster";
+  assets_[StaticAssetEnum::BLINK_JS]->file_name = "deprecated_blink";
 
   // Initialize compiled javascript strings->
   assets_[StaticAssetEnum::ADD_INSTRUMENTATION_JS]->js_optimized =
       JS_add_instrumentation_opt;
   assets_[StaticAssetEnum::EXTENDED_INSTRUMENTATION_JS]->js_optimized =
       JS_extended_instrumentation_opt;
-  assets_[StaticAssetEnum::BLINK_JS]->js_optimized = blink_js_string;
   assets_[StaticAssetEnum::CLIENT_DOMAIN_REWRITER]->js_optimized =
       JS_client_domain_rewriter_opt;
   assets_[StaticAssetEnum::CRITICAL_CSS_BEACON_JS]->js_optimized =
@@ -303,28 +271,15 @@ void StaticAssetManager::InitializeAssetStrings() {
       JS_lazyload_images_opt;
   assets_[StaticAssetEnum::DETERMINISTIC_JS]->js_optimized =
       JS_deterministic_opt;
-  assets_[StaticAssetEnum::GHOST_CLICK_BUSTER_JS]->js_optimized =
-      JS_ghost_click_buster_opt;
   assets_[StaticAssetEnum::LOCAL_STORAGE_CACHE_JS]->js_optimized =
       JS_local_storage_cache_opt;
-  assets_[StaticAssetEnum::MOBILIZE_JS]->js_optimized = JS_mobilize_js_opt;
-  assets_[StaticAssetEnum::MOBILIZE_XHR_JS]->js_optimized =
-      JS_mobilize_xhr_js_opt;
-  assets_[StaticAssetEnum::MOBILIZE_CSS]->js_optimized = CSS_mobilize_css;
-  assets_[StaticAssetEnum::MOBILIZE_LAYOUT_CSS]->js_optimized =
-      CSS_mobilize_layout_css;
   assets_[StaticAssetEnum::RESPONSIVE_JS]->js_optimized = JS_responsive_js_opt;
-  assets_[StaticAssetEnum::SPLIT_HTML_BEACON_JS]->js_optimized =
-      JS_split_html_beacon_opt;
 
   // Initialize cleartext javascript strings->
   assets_[StaticAssetEnum::ADD_INSTRUMENTATION_JS]->js_debug =
       JS_add_instrumentation;
   assets_[StaticAssetEnum::EXTENDED_INSTRUMENTATION_JS]->js_debug =
       JS_extended_instrumentation;
-  // Fetching the blink JS is not currently supported-> Add a comment in as the
-  // unit test expects debug code to include comments->
-  assets_[StaticAssetEnum::BLINK_JS]->js_debug = blink_js_string;
   assets_[StaticAssetEnum::CLIENT_DOMAIN_REWRITER]->js_debug =
       JS_client_domain_rewriter;
   assets_[StaticAssetEnum::CRITICAL_CSS_BEACON_JS]->js_debug =
@@ -342,19 +297,9 @@ void StaticAssetManager::InitializeAssetStrings() {
       JS_delay_images_inline;
   assets_[StaticAssetEnum::LAZYLOAD_IMAGES_JS]->js_debug = JS_lazyload_images;
   assets_[StaticAssetEnum::DETERMINISTIC_JS]->js_debug = JS_deterministic;
-  // GhostClickBuster uses goog.require, which needs to be minifed always.
-  assets_[StaticAssetEnum::GHOST_CLICK_BUSTER_JS]->js_debug =
-      JS_ghost_click_buster_opt;
   assets_[StaticAssetEnum::LOCAL_STORAGE_CACHE_JS]->js_debug =
       JS_local_storage_cache;
-  assets_[StaticAssetEnum::MOBILIZE_JS]->js_debug = JS_mobilize_js;
-  assets_[StaticAssetEnum::MOBILIZE_XHR_JS]->js_debug = JS_mobilize_xhr_js;
-  assets_[StaticAssetEnum::MOBILIZE_CSS]->js_debug = CSS_mobilize_css;
-  assets_[StaticAssetEnum::MOBILIZE_LAYOUT_CSS]->js_debug =
-      CSS_mobilize_layout_css;
   assets_[StaticAssetEnum::RESPONSIVE_JS]->js_debug = JS_responsive_js;
-  assets_[StaticAssetEnum::SPLIT_HTML_BEACON_JS]->js_debug =
-      JS_split_html_beacon;
 
   // Initialize non-JS assets
 
@@ -364,12 +309,18 @@ void StaticAssetManager::InitializeAssetStrings() {
   assets_[StaticAssetEnum::BLANK_GIF]->js_debug.append(
       reinterpret_cast<const char*>(GIF_blank), GIF_blank_len);
   assets_[StaticAssetEnum::BLANK_GIF]->content_type = kContentTypeGif;
-  assets_[StaticAssetEnum::MOBILIZE_CSS]->content_type = kContentTypeCss;
-  assets_[StaticAssetEnum::MOBILIZE_LAYOUT_CSS]->content_type = kContentTypeCss;
+
+  assets_[StaticAssetEnum::MOBILIZE_JS]->file_name = nullptr;
+  assets_[StaticAssetEnum::MOBILIZE_CSS]->file_name = nullptr;
+  assets_[StaticAssetEnum::DEPRECATED_MOBILIZE_XHR_JS]->file_name = nullptr;
+  assets_[StaticAssetEnum::DEPRECATED_MOBILIZE_LAYOUT_CSS]->file_name = nullptr;
 
   for (std::vector<Asset*>::iterator it = assets_.begin();
        it != assets_.end(); ++it) {
     Asset* asset = *it;
+    if (asset->file_name == nullptr) {
+      continue;
+    }
     asset->js_opt_hash = hasher_->Hash(asset->js_optimized);
     asset->js_debug_hash = hasher_->Hash(asset->js_debug);
 

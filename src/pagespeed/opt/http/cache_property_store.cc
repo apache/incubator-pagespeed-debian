@@ -146,7 +146,7 @@ class CachePropertyStoreCacheCallback : public CacheInterface::Callback {
   virtual void Done(CacheInterface::KeyState state) {
     bool valid = false;
     if (state == CacheInterface::kAvailable) {
-      StringPiece value_string = value()->Value();
+      StringPiece value_string = value().Value();
       ArrayInputStream input(value_string.data(), value_string.size());
       PropertyCacheValues values;
       if (values.ParseFromZeroCopyStream(&input)) {
@@ -158,7 +158,8 @@ class CachePropertyStoreCacheCallback : public CacheInterface::Callback {
         // timestamp to make this decision.
         for (int i = 0; i < values.value_size(); ++i) {
           min_write_timestamp_ms = std::min(
-              min_write_timestamp_ms, values.value(i).write_timestamp_ms());
+              min_write_timestamp_ms,
+              static_cast<int64>(values.value(i).write_timestamp_ms()));
         }
         // Return valid for empty cohort, and if IsCacheValid returns true for
         // Value with oldest timestamp.
@@ -289,13 +290,17 @@ GoogleString CachePropertyStore::Name() const {
   return out;
 }
 
-GoogleString CachePropertyStore::FormatName2(StringPiece cohort_name1,
+GoogleString CachePropertyStore::FormatName3(StringPiece cohort_name1,
                                              StringPiece cohort_cache1,
                                              StringPiece cohort_name2,
-                                             StringPiece cohort_cache2) {
+                                             StringPiece cohort_cache2,
+                                             StringPiece cohort_name3,
+                                             StringPiece cohort_cache3) {
   return StrCat(cohort_name1, ":", cohort_cache1,
                 "\n",
-                cohort_name2, ":", cohort_cache2);
+                cohort_name2, ":", cohort_cache2,
+                "\n",
+                cohort_name3, ":", cohort_cache3);
 }
 
 }  // namespace net_instaweb

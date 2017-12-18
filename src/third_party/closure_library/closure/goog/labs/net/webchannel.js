@@ -38,13 +38,11 @@
  *
  * Note that we have no immediate plan to move this API out of labs. While
  * the implementation is production ready, the API is subject to change
- * (addition):
- * 1. Completely new W3C APIs for Web messaging may emerge in near future.
+ * (addition only):
+ * 1. Adopt new Web APIs (mainly whatwg streams) and goog.net.streams.
  * 2. New programming models for cloud (on the server-side) may require
  *    new APIs to be defined.
  * 3. WebRTC DataChannel alignment
- * Lastly, we also want to white-list all internal use cases. As a general rule,
- * we expect most applications to rely on stateless/RPC services.
  *
  */
 
@@ -100,6 +98,17 @@ goog.net.WebChannel = function() {};
  * testUrl: the test URL for detecting connectivity during the initial
  * handshake. This parameter defaults to "/<channel_url>/test".
  *
+ * sendRawJson: whether to bypass v8 encoding of client-sent messages. Will be
+ * deprecated after v9 wire protocol is introduced. Only safe to set if the
+ * server is known to support this feature.
+ *
+ * httpSessionIdParam: the URL parameter name that contains the session id (
+ * for sticky routing of HTTP requests). When this param is specified, a server
+ * that supports this option will respond with an opaque session id as part of
+ * the initial handshake (via the X-HTTP-Session-Id header); and all the
+ * subsequent requests will contain the httpSessionIdParam. This option will
+ * take precedence over any duplicated parameter specified with
+ * messageUrlParams, whose value will be ignored.
  *
  * @typedef {{
  *   messageHeaders: (!Object<string, string>|undefined),
@@ -107,7 +116,9 @@ goog.net.WebChannel = function() {};
  *   clientProtocolHeaderRequired: (boolean|undefined),
  *   concurrentRequestLimit: (number|undefined),
  *   supportsCrossDomainXhr: (boolean|undefined),
- *   testUrl: (string|undefined)
+ *   testUrl: (string|undefined),
+ *   sendRawJson: (boolean|undefined),
+ *   httpSessionIdParam: (string|undefined)
  * }}
  */
 goog.net.WebChannel.Options;
@@ -115,6 +126,12 @@ goog.net.WebChannel.Options;
 
 /**
  * Types that are allowed as message data.
+ *
+ * Note that JS objects (sent by the client) can only have string encoded
+ * values due to the limitation of the current wire protocol.
+ *
+ * Unicode strings (sent by the server) may or may not need be escaped, as
+ * decided by the server.
  *
  * @typedef {(ArrayBuffer|Blob|Object<string, string>|Array)}
  */
@@ -266,25 +283,68 @@ goog.net.WebChannel.RuntimeProperties.prototype.isSpdyEnabled =
 
 
 /**
- * This method may be used by the application to stop ack of received messages
- * as a means of enabling or disabling flow-control on the server-side.
+ * For applications to query the current HTTP session id, sent by the server
+ * during the initial handshake.
  *
- * @param {boolean} enabled If true, enable flow-control behavior on the
- * server side. Setting it to false will cancel ay previous enabling action.
+ * @return {?string} the HTTP session id or null if no HTTP session is in use.
  */
-goog.net.WebChannel.RuntimeProperties.prototype.setServerFlowControl =
+goog.net.WebChannel.RuntimeProperties.prototype.getHttpSessionId =
     goog.abstractMethod;
 
 
 /**
- * This method may be used by the application to throttle the rate of outgoing
- * messages, as a means of sender initiated flow-control.
+ * This method generates an in-band commit request to the server, which will
+ * ack the commit request as soon as all messages sent prior to this commit
+ * request have been committed by the application.
+ *
+ * Committing a message has a stronger semantics than delivering a message
+ * to the application. Detail spec:
+ * https://github.com/bidiweb/webchannel/blob/master/commit.md
+ *
+ * Timeout or cancellation is not supported and the application may have to
+ * abort the channel if the commit-ack fails to arrive in time.
+ *
+ * @param {function()} callback The callback will be invoked once an
+ * ack has been received for the current commit or any newly issued commit.
+ */
+goog.net.WebChannel.RuntimeProperties.prototype.commit = goog.abstractMethod;
+
+
+/**
+ * This method may be used by the application to recover from a peer failure
+ * or to enable sender-initiated flow-control.
+ *
+ * Detail spec: https://github.com/bidiweb/webchannel/blob/master/commit.md
  *
  * @return {number} The total number of messages that have not received
- * ack from the server and therefore remain in the buffer.
+ * commit-ack from the server; or if no commit has been issued, the number
+ * of messages that have not been delivered to the server application.
  */
 goog.net.WebChannel.RuntimeProperties.prototype.getNonAckedMessageCount =
     goog.abstractMethod;
+
+
+/**
+ * This method registers a callback to handle the commit request sent
+ * by the server. Commit protocol spec:
+ * https://github.com/bidiweb/webchannel/blob/master/commit.md
+ *
+ * @param {function(!Object)} callback The callback will take an opaque
+ * commitId which needs be passed back to the server when an ack-commit
+ * response is generated by the client application, via ackCommit().
+ */
+goog.net.WebChannel.RuntimeProperties.prototype.onCommit = goog.abstractMethod;
+
+
+/**
+ * This method is used by the application to generate an ack-commit response
+ * for the given commitId. Commit protocol spec:
+ * https://github.com/bidiweb/webchannel/blob/master/commit.md
+ *
+ * @param {!Object} commitId The commitId which denotes the commit request
+ * from the server that needs be ack'ed.
+ */
+goog.net.WebChannel.RuntimeProperties.prototype.ackCommit = goog.abstractMethod;
 
 
 /**
@@ -295,7 +355,7 @@ goog.net.WebChannel.RuntimeProperties.prototype.getLastStatusCode =
 
 
 /**
- * A special header to indicate to the server what messaging protocol
+ * A request header to indicate to the server the messaging protocol
  * each HTTP message is speaking.
  *
  * @type {string}
@@ -309,3 +369,24 @@ goog.net.WebChannel.X_CLIENT_PROTOCOL = 'X-Client-Protocol';
  * @type {string}
  */
 goog.net.WebChannel.X_CLIENT_PROTOCOL_WEB_CHANNEL = 'webchannel';
+
+
+/**
+ * A response header for the server to signal the wire-protocol that
+ * the browser establishes with the server (or proxy), e.g. "spdy" (aka http/2)
+ * "quic". This information avoids the need to use private APIs to decide if
+ * HTTP requests are multiplexed etc.
+ *
+ * @type {string}
+ */
+goog.net.WebChannel.X_CLIENT_WIRE_PROTOCOL = 'X-Client-Wire-Protocol';
+
+
+/**
+ * A response header for the server to send back the HTTP session id as part of
+ * the initial handshake. The value of the HTTP session id is opaque to the
+ * WebChannel protocol.
+ *
+ * @type {string}
+ */
+goog.net.WebChannel.X_HTTP_SESSION_ID = 'X-HTTP-Session-Id';

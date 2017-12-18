@@ -19,7 +19,6 @@
 #include "net/instaweb/rewriter/public/css_summarizer_base.h"
 
 #include <cstddef>
-#include <memory>
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
@@ -49,11 +48,10 @@
 #include "pagespeed/kernel/html/html_node.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/data_url.h"
+#include "pagespeed/kernel/util/url_segment_encoder.h"
 #include "webutil/css/parser.h"
 
 namespace net_instaweb {
-
-class UrlSegmentEncoder;
 
 // Rewrite context for CssSummarizerBase --- it invokes the filter's
 // summarization functions on parsed CSS ASTs when available, and synchronizes
@@ -70,6 +68,11 @@ class CssSummarizerBase::Context : public SingleRewriteContext {
   void SetupExternalRewrite(HtmlElement* element);
 
  protected:
+  bool PolicyPermitsRendering() const override {
+    // Subclasses are responsible for dealing with CSP.
+    return true;
+  }
+
   virtual void Render();
   virtual void WillNotRender();
   virtual void Cancel();
@@ -150,7 +153,7 @@ void CssSummarizerBase::Context::Render() {
   if (num_output_partitions() == 0) {
     // Failed at partition -> resource fetch failed or uncacheable.
     summary_info.state = kSummaryInputUnavailable;
-    filter_->WillNotRenderSummary(pos_, element_, text_, &is_element_deleted);
+    filter_->WillNotRenderSummary(pos_, element_, text_);
   } else {
     const CachedResult& result = *output_partition(0);
     // Transfer the summarization result from the metadata cache (where it was
@@ -171,7 +174,7 @@ void CssSummarizerBase::Context::Render() {
       filter_->RenderSummary(pos_, element_, text_, &is_element_deleted);
     } else {
       summary_info.state = kSummaryCssParseError;
-      filter_->WillNotRenderSummary(pos_, element_, text_, &is_element_deleted);
+      filter_->WillNotRenderSummary(pos_, element_, text_);
     }
   }
   if (is_element_deleted) {
@@ -181,11 +184,7 @@ void CssSummarizerBase::Context::Render() {
 }
 
 void CssSummarizerBase::Context::WillNotRender() {
-  bool is_element_deleted = false;
-  filter_->WillNotRenderSummary(pos_, element_, text_, &is_element_deleted);
-  if (is_element_deleted) {
-    slot(0)->set_disable_further_processing(true);
-  }
+  filter_->WillNotRenderSummary(pos_, element_, text_);
 }
 
 void CssSummarizerBase::Context::Cancel() {
@@ -210,7 +209,7 @@ void CssSummarizerBase::Context::RewriteSingle(
   parser.set_quirks_mode(false);
 
   scoped_ptr<Css::Stylesheet> stylesheet(parser.ParseRawStylesheet());
-  CachedResult* result = output_partition(0);
+  CachedResult* result = mutable_output_partition(0);
   if (stylesheet.get() == NULL ||
       parser.errors_seen_mask() != Css::Parser::kNoError) {
     // TODO(morlovich): do we want a stat here?
@@ -288,8 +287,7 @@ void CssSummarizerBase::RenderSummary(
 }
 
 void CssSummarizerBase::WillNotRenderSummary(
-    int pos, HtmlElement* element, HtmlCharactersNode* char_node,
-    bool* is_element_deleted) {
+    int pos, HtmlElement* element, HtmlCharactersNode* char_node) {
 }
 
 void CssSummarizerBase::Clear() {
@@ -456,8 +454,9 @@ void CssSummarizerBase::StartExternalRewrite(
     HtmlElement* link, HtmlElement::Attribute* src, StringPiece rel) {
   // Create the input resource for the slot.
   bool is_authorized;
-  ResourcePtr input_resource(CreateInputResource(src->DecodedValueOrNull(),
-                                                 &is_authorized));
+  ResourcePtr input_resource(CreateInputResource(
+      src->DecodedValueOrNull(), RewriteDriver::InputRole::kStyle,
+      &is_authorized));
   if (input_resource.get() == NULL) {
     // Record a failure, so the subclass knows of it.
     summaries_.push_back(SummaryInfo());
@@ -465,9 +464,7 @@ void CssSummarizerBase::StartExternalRewrite(
     const char* url = src->DecodedValueOrNull();
     summaries_.back().location = (url != NULL ? url : driver()->UrlLine());
 
-    bool is_element_deleted = false;  // unused after call because no slot here
-    WillNotRenderSummary(summaries_.size() - 1, link, NULL /* char_node */,
-                         &is_element_deleted);
+    WillNotRenderSummary(summaries_.size() - 1, link, nullptr /* char_node */);
 
     // TODO(morlovich): Stat?
     if (DebugMode()) {

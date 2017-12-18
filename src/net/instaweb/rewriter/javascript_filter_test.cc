@@ -86,6 +86,10 @@ const char kJsonMinData[] = "{'foo':['bar','baz']}";
 const char kOrigJsonName[] = "hello.json";
 const char kRewrittenJsonName[] = "hello.json";
 
+GoogleString ScriptSrc(const StringPiece& url) {
+  return net_instaweb::StrCat("<script src=\"", url, "\"></script>");
+}
+
 }  // namespace
 
 namespace net_instaweb {
@@ -206,8 +210,8 @@ TEST_P(JavascriptFilterTest, DoRewrite) {
             total_bytes_saved_->Get());
   EXPECT_EQ(STATIC_STRLEN(kJsData), total_original_bytes_->Get());
   EXPECT_EQ(1, num_uses_->Get());
-  EXPECT_STREQ("jm", AppliedRewriterStringFromLog());
-  VerifyRewriterInfoEntry(log_record, "jm", 0, 0, 1, 1,
+  EXPECT_STREQ(kFilterId, AppliedRewriterStringFromLog());
+  VerifyRewriterInfoEntry(log_record, kFilterId, 0, 0, 1, 1,
                         "http://test.com/hello.js");
 }
 
@@ -227,7 +231,8 @@ TEST_P(JavascriptFilterTest, DebugForUnauthorizedDomain) {
   GoogleUrl gurl(kUnauthorizedJs);
   StrAppend(&html_output,
             "<!--",
-            RewriteDriver::GenerateUnauthorizedDomainDebugComment(gurl),
+            rewrite_driver()->GenerateUnauthorizedDomainDebugComment(
+                gurl, RewriteDriver::InputRole::kScript),
             "-->"
             "\n");
   html_output = AddHtmlBody(html_output);
@@ -357,8 +362,8 @@ TEST_P(JavascriptFilterTest, JsPreserveURLsOnTest) {
 
   // We should have optimized the JS even though we didn't render the URL.
   ClearStats();
-  GoogleString out_js_url = Encode(kTestDomain, "jm", "0", kRewrittenJsName,
-                                   "js");
+  GoogleString out_js_url = Encode(
+      kTestDomain, kFilterId, "0", kRewrittenJsName, "js");
   GoogleString out_js;
   EXPECT_TRUE(FetchResourceUrl(out_js_url, &out_js));
   EXPECT_EQ(1, http_cache()->cache_hits()->Get());
@@ -400,7 +405,8 @@ TEST_P(JavascriptFilterTest, JsPreserveOverridingExtend) {
   // We should have preemptively optimized the JS even though we didn't render
   // the URL.
   ClearStats();
-  GoogleString out_js_url = Encode(kTestDomain, "jm", "0", kOrigJsName, "js");
+  GoogleString out_js_url = Encode(
+      kTestDomain, kFilterId, "0", kOrigJsName, "js");
   GoogleString out_js;
   EXPECT_TRUE(FetchResourceUrl(out_js_url, &out_js));
   EXPECT_EQ(1, http_cache()->cache_hits()->Get());
@@ -433,13 +439,13 @@ TEST_P(JavascriptFilterTest, JsExtendOverridingPreserve) {
   // Make sure the URL is updated.
   ValidateExpected("js_extend_overrides_preserve",
                    GenerateHtml(kOrigJsName),
-                   GenerateHtml(
-                       Encode("", "jm", "0", kRewrittenJsName, "js").c_str()));
+                   GenerateHtml(Encode(
+                       "", kFilterId, "0", kRewrittenJsName, "js").c_str()));
 
   ClearStats();
   GoogleString out_js;
-  GoogleString out_js_url = Encode(kTestDomain, "jm", "0", kRewrittenJsName,
-                                   "js");
+  GoogleString out_js_url = Encode(
+      kTestDomain, kFilterId, "0", kRewrittenJsName, "js");
   EXPECT_TRUE(FetchResourceUrl(out_js_url, &out_js));
   EXPECT_EQ(1, http_cache()->cache_hits()->Get());
   EXPECT_EQ(0, http_cache()->cache_misses()->Get());
@@ -478,8 +484,8 @@ TEST_P(JavascriptFilterTest, JsPreserveURLsNoPreemptiveRewriteTest) {
 
   // But, if we fetch the JS directly, we should receive the optimized version.
   ClearStats();
-  GoogleString out_js_url = Encode(kTestDomain, "jm", "0", kRewrittenJsName,
-                                   "js");
+  GoogleString out_js_url = Encode(
+      kTestDomain, kFilterId, "0", kRewrittenJsName, "js");
   GoogleString out_js;
   EXPECT_TRUE(FetchResourceUrl(out_js_url, &out_js));
   EXPECT_EQ(kJsMinData, out_js);
@@ -629,7 +635,7 @@ TEST_P(JavascriptFilterTest, ServeRewrittenLibrary) {
   InitFiltersAndTest(100);
   GoogleString content;
   EXPECT_TRUE(
-      FetchResource(kTestDomain, "jm", kRewrittenJsName, "js", &content));
+      FetchResource(kTestDomain, kFilterId, kRewrittenJsName, "js", &content));
   EXPECT_EQ(kJsData, content);
 
   // And having done so, we should still identify the library in subsequent html
@@ -693,7 +699,7 @@ TEST_P(JavascriptFilterTest, InvalidInputMimetype) {
   SetResponseWithDefaultHeaders(kNotJsFile, not_java_script, kJsData, 100);
   ValidateExpected("wrong_mime",
                    GenerateHtml(kNotJsFile),
-                   GenerateHtml(Encode("", "jm", "0",
+                   GenerateHtml(Encode("", kFilterId, "0",
                                        kNotJsFile, "js").c_str()));
 }
 
@@ -763,7 +769,7 @@ TEST_P(JavascriptFilterTest, StripInlineWhitespace) {
       "StripInlineWhitespace",
       StrCat("<script src='", kOrigJsName, "'>   \t\n   </script>"),
       StrCat("<script src='",
-             Encode("", "jm", "0", kOrigJsName, "js"),
+             Encode("", kFilterId, "0", kOrigJsName, "js"),
              "'></script>"));
 }
 
@@ -773,7 +779,7 @@ TEST_P(JavascriptFilterTest, RetainInlineData) {
   ValidateExpected("StripInlineWhitespace",
                    StrCat("<script src='", kOrigJsName, "'> data </script>"),
                    StrCat("<script src='",
-                          Encode("", "jm", "0", kOrigJsName, "js"),
+                          Encode("", kFilterId, "0", kOrigJsName, "js"),
                           "'> data </script>"));
 }
 
@@ -838,15 +844,15 @@ TEST_P(JavascriptFilterTest, XHtmlInlineJavascript) {
                    StringPrintf(xhtml_script_format.c_str(), kJsMinData));
 }
 
-// http://code.google.com/p/modpagespeed/issues/detail?id=324
+// http://github.com/pagespeed/mod_pagespeed/issues/324
 TEST_P(JavascriptFilterTest, RetainExtraHeaders) {
   InitFilters();
   GoogleString url = StrCat(kTestDomain, kOrigJsName);
   SetResponseWithDefaultHeaders(url, kContentTypeJavascript, kJsData, 300);
-  TestRetainExtraHeaders(kOrigJsName, "jm", "js");
+  TestRetainExtraHeaders(kOrigJsName, kFilterId, "js");
 }
 
-// http://code.google.com/p/modpagespeed/issues/detail?id=327 -- we were
+// http://github.com/pagespeed/mod_pagespeed/issues/327 -- we were
 // previously busting regexps with backslashes in them.
 TEST_P(JavascriptFilterTest, BackslashInRegexp) {
   InitFilters();
@@ -869,7 +875,7 @@ TEST_P(JavascriptFilterTest, WeirdSrcCrash) {
   SetResponseWithDefaultHeaders(kUrl, kContentTypeJavascript, kJsData, 300);
   ValidateExpected("weird_attr", "<script src=foo<bar>Content",
                    StrCat("<script src=",
-                          Encode("", "jm", "0", kUrl, "js"),
+                          Encode("", kFilterId, "0", kUrl, "js"),
                           ">Content"));
   ValidateNoChanges("weird_tag", "<script<foo>");
 }
@@ -927,7 +933,7 @@ TEST_P(JavascriptFilterTest, NoReuseInline) {
   EXPECT_EQ(1, num_uses_->Get());
 }
 
-// See http://code.google.com/p/modpagespeed/issues/detail?id=542
+// See http://github.com/pagespeed/mod_pagespeed/issues/542
 TEST_P(JavascriptFilterTest, ExtraCdataOnMalformedInput) {
   InitFiltersAndTest(100);
 
@@ -1249,7 +1255,7 @@ TEST_P(JavascriptFilterTest, SourceMapUnsanitaryUrl) {
 // For non-pagespeed input JS, we must add ?PageSpeed=off to the source URL
 // to avoid IPRO rewriting the source. However, we should not add ?PageSpeed=off
 // for .pagespeed. input files, because that doesn't make any sense.
-// https://code.google.com/p/modpagespeed/issues/detail?id=1043
+// https://github.com/pagespeed/mod_pagespeed/issues/1043
 TEST_P(JavascriptFilterTest, ProperSourceMapForPagespeedInput) {
   if (!options()->use_experimental_js_minifier()) return;
 
@@ -1406,6 +1412,155 @@ TEST_P(JavascriptFilterTest, ExternalAndNotInline) {
 
 TEST_P(JavascriptFilterTest, ContentTypeValidation) {
   ValidateFallbackHeaderSanitization(kFilterId);
+}
+
+TEST_P(JavascriptFilterTest, BasicCsp) {
+  InitFilters();
+  EnableDebug();
+
+  SetResponseWithDefaultHeaders(
+      "scripts/a.js", kContentTypeJavascript, kJsData, 100);
+  SetResponseWithDefaultHeaders(
+      "uploads/sneaky.png", kContentTypeJavascript, kJsData, 100);
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src */scripts/;  default-src */uploads/\">";
+
+  ValidateExpected(
+      "basic_csp",
+      StrCat(kCsp,
+             ScriptSrc("scripts/a.js"),
+             ScriptSrc("uploads/sneaky.png")),
+      StrCat(kCsp,
+             ScriptSrc(Encode("scripts/", "jm", "0", "a.js", "js")),
+             ScriptSrc("uploads/sneaky.png"),
+              "<!--The preceding resource was not rewritten "
+             "because CSP disallows its fetch-->"));
+}
+
+TEST_P(JavascriptFilterTest, RenderCsp) {
+  InitFilters();
+  EnableDebug();
+
+  SetResponseWithDefaultHeaders(
+      "scripts/a.js", kContentTypeJavascript, kJsData, 100);
+  SetResponseWithDefaultHeaders(
+      "uploads/sneaky.png", kContentTypeJavascript, kJsData, 100);
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src */scripts/a.js;\">";
+
+  // First try w/o CSP, should rewrite.
+  ValidateExpected(
+      "no_csp",
+      ScriptSrc("scripts/a.js"),
+      ScriptSrc(Encode("scripts/", "jm", "0", "a.js", "js")));
+
+  // Now render again w/CSP -- blocked since .pagespeed. resource isn't
+  // permitted.
+  ValidateExpected(
+      "render_csp",
+      StrCat(kCsp, ScriptSrc("scripts/a.js")),
+      StrCat(kCsp, ScriptSrc("scripts/a.js"),
+             "<!--PageSpeed output (by JavascriptFilter) not permitted by "
+             "Content Security Policy-->"));
+}
+
+TEST_P(JavascriptFilterTest, CspIrrelevant) {
+  InitFilters();
+  EnableDebug();
+
+  SetResponseWithDefaultHeaders(
+      "scripts/a.js", kContentTypeJavascript, kJsData, 100);
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src https:\">";
+
+  ValidateExpected(
+      "basic_csp",
+      StrCat(kCsp,
+             ScriptSrc("scripts/a.js")),
+      StrCat(kCsp,
+             ScriptSrc(Encode("scripts/", "jm", "0", "a.js", "js"))));
+}
+
+TEST_P(JavascriptFilterTest, InlineCsp) {
+  InitFilters();
+  EnableDebug();
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src */scripts/;  default-src */uploads/\">";
+  static const char kScript[] =
+      "<script> var a  = 42;</script>";
+
+  ValidateExpected(
+      "inline_csp",
+      StrCat(kCsp, kScript),
+      StrCat(kCsp, kScript,
+             "<!--Avoiding modifying inline script with CSP present-->"));
+}
+
+TEST_P(JavascriptFilterTest, InlineCsp2) {
+  InitFilters();
+  EnableDebug();
+
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"default-src */uploads/\">";
+  static const char kScript[] =
+      "<script> var a  = 42;</script>";
+
+  ValidateExpected(
+      "inline_csp2",
+      StrCat(kCsp, kScript),
+      StrCat(kCsp, kScript,
+             "<!--Avoiding modifying inline script with CSP present-->"));
+}
+
+TEST_P(JavascriptFilterTest, InlineCsp3) {
+  InitFilters();
+  EnableDebug();
+
+  // This one doesn't restrict scripts.
+  static const char kCsp[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"img-src */uploads/\">";
+  static const char kScript[] =
+      "<script> var a  = 42;</script>";
+  static const char kScriptMin[] =
+      "<script>var a=42;</script>";
+
+  ValidateExpected(
+      "inline_csp3",
+      StrCat(kCsp, kScript),
+      StrCat(kCsp, kScriptMin));
+}
+
+TEST_P(JavascriptFilterTest, CspBaseUri) {
+  InitFilters();
+  EnableDebug();
+  SetResponseWithDefaultHeaders(
+      "scripts/a.js", kContentTypeJavascript, kJsData, 100);
+
+  static const char kCspAndBase[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"base-uri whatever; script-src *\">"
+      "<base href=\"http://test.com/\">";
+
+  ValidateExpected(
+      "base_uri_csp",
+      StrCat(kCspAndBase,
+             ScriptSrc("scripts/a.js"),
+             ScriptSrc("http://test.com/scripts/a.js")),
+      StrCat(kCspAndBase,
+             "<!--Unable to check safety of a base with CSP base-uri, "
+             "proceeding conservatively.-->",
+             ScriptSrc("scripts/a.js"),
+             ScriptSrc("http://test.com/scripts/a.js.pagespeed.jm.0.js")));
 }
 
 // We test with use_experimental_minifier == GetParam() as both true and false.

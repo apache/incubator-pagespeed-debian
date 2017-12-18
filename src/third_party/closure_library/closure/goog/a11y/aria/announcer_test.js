@@ -21,6 +21,7 @@ goog.require('goog.a11y.aria.LivePriority');
 goog.require('goog.a11y.aria.State');
 goog.require('goog.array');
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.dom.iframe');
 goog.require('goog.testing.MockClock');
 goog.require('goog.testing.jsunit');
@@ -32,8 +33,9 @@ var mockClock;
 
 function setUp() {
   sandbox = goog.dom.getElement('sandbox');
-  someDiv = goog.dom.createDom('div', {id: 'someDiv'}, 'DIV');
-  someSpan = goog.dom.createDom('span', {id: 'someSpan'}, 'SPAN');
+  someDiv = goog.dom.createDom(goog.dom.TagName.DIV, {id: 'someDiv'}, 'DIV');
+  someSpan =
+      goog.dom.createDom(goog.dom.TagName.SPAN, {id: 'someSpan'}, 'SPAN');
   sandbox.appendChild(someDiv);
   someDiv.appendChild(someSpan);
 
@@ -41,7 +43,7 @@ function setUp() {
 }
 
 function tearDown() {
-  sandbox.innerHTML = '';
+  goog.dom.removeChildren(sandbox);
   someDiv = null;
   someSpan = null;
 
@@ -89,8 +91,8 @@ function testAnnouncerAssertive() {
 function testAnnouncerInIframe() {
   var text = 'test content';
   var frame = goog.dom.iframe.createWithContent(sandbox);
-  var helper = goog.dom.getDomHelper(
-      goog.dom.getFrameContentDocument(frame).body);
+  var helper =
+      goog.dom.getDomHelper(goog.dom.getFrameContentDocument(frame).body);
   var announcer = new goog.a11y.aria.Announcer(helper);
   announcer.say(text, 'polite', helper);
   checkLiveRegionContains(text, 'polite', helper);
@@ -110,14 +112,14 @@ function testAnnouncerWithAriaHidden() {
   // Announce a new message and make sure that the aria-hidden was removed.
   announcer.say(text2);
   checkLiveRegionContains(text2, 'polite');
-  assertEquals('',
-      goog.a11y.aria.getState(liveRegion, goog.a11y.aria.State.HIDDEN));
+  assertEquals(
+      '', goog.a11y.aria.getState(liveRegion, goog.a11y.aria.State.HIDDEN));
   goog.dispose(announcer);
 }
 
 function getLiveRegion(priority, opt_domHelper) {
   var dom = opt_domHelper || goog.dom.getDomHelper();
-  var divs = dom.getElementsByTagNameAndClass('div', null);
+  var divs = dom.getElementsByTagNameAndClass(goog.dom.TagName.DIV, null);
   var liveRegions = [];
   goog.array.forEach(divs, function(div) {
     if (goog.a11y.aria.getState(div, 'live') == priority) {

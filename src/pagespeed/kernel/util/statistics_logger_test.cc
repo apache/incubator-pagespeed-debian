@@ -26,6 +26,7 @@
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/json.h"
 #include "pagespeed/kernel/base/mem_file_system.h"
+#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/mock_message_handler.h"
 #include "pagespeed/kernel/base/mock_timer.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -36,6 +37,7 @@
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/base/timer.h"
+#include "pagespeed/kernel/base/writer.h"
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/util/platform.h"
 #include "pagespeed/kernel/util/simple_stats.h"
@@ -190,9 +192,9 @@ TEST_F(StatisticsLoggerTest, TestParseDataForGraphs) {
   VarMap parsed_var_data;
   ParseDataForGraphs(&reader, &list_of_timestamps, &parsed_var_data);
   // Though the fake log file only contains 4 variables, the method should
-  // still return all the 84 variables needed by the graphs page with 0 as
+  // still return all the variables needed by the graphs page with 0 as
   // place holders.
-  EXPECT_EQ(84, parsed_var_data.size());
+  EXPECT_EQ(92, parsed_var_data.size());
   EXPECT_EQ(4, list_of_timestamps.size());
   file_system_.Close(log_file, &handler_);
 }
@@ -337,6 +339,23 @@ TEST_F(StatisticsLoggerTest, NoMalformedJson) {
       json_dump_graphs;
 }
 
+TEST_F(StatisticsLoggerTest, Escaping) {
+  // Make sure we do proper escaping of variable names. Not
+  // escaping them from HTML can cause an XSS when IE6
+  // missniffs, while escaping for JSON is just pedantic
+  std::set<GoogleString> var_titles;
+  var_titles.insert("<bo_o>\\");
+  int64 start_time, end_time, granularity_ms;
+  CreateFakeLogfile(&var_titles, &start_time, &end_time,
+                    &granularity_ms);
+
+  GoogleString json_dump;
+  StringWriter writer(&json_dump);
+  logger_.DumpJSON(false, var_titles, start_time, end_time,
+                   granularity_ms, &writer, &handler_);
+  EXPECT_NE(GoogleString::npos, json_dump.find("&lt;bo_o&gt;\\\\"))
+      << json_dump;
+}
 
 // Make sure we return sensible results when there is data missing from log.
 // This is not just to deal with data corruption, but any time the set of

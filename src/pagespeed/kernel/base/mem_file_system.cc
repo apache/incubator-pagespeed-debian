@@ -43,14 +43,14 @@ class MemInputFile : public FileSystem::InputFile {
         offset_(0) {
   }
 
-  virtual bool Close(MessageHandler* message_handler) {
+  bool Close(MessageHandler* message_handler) override {
     offset_ = contents_.length();
     return true;
   }
 
-  virtual const char* filename() { return filename_.c_str(); }
+  const char* filename() override { return filename_.c_str(); }
 
-  virtual int Read(char* buf, int size, MessageHandler* message_handler) {
+  int Read(char* buf, int size, MessageHandler* message_handler) override {
     if (size + offset_ > static_cast<int>(contents_.length())) {
       size = contents_.length() - offset_;
     }
@@ -59,7 +59,12 @@ class MemInputFile : public FileSystem::InputFile {
     return size;
   }
 
-  virtual bool ReadFile(GoogleString* buf, MessageHandler* message_handler) {
+  bool ReadFile(GoogleString* buf, int64 max_file_size,
+                MessageHandler* message_handler) override {
+    if (max_file_size != FileSystem::kUnlimitedSize &&
+        contents_.length() > static_cast<size_t>(max_file_size)) {
+      return false;
+    }
     *buf = contents_;
     return true;
   }
@@ -330,10 +335,10 @@ bool MemFileSystem::Mtime(const StringPiece& path, int64* timestamp_sec,
 }
 
 bool MemFileSystem::Size(const StringPiece& path, int64* size,
-                         MessageHandler* handler) {
+                         MessageHandler* handler) const {
   ScopedMutex lock(all_else_mutex_.get());
   const GoogleString path_string = path.as_string();
-  StringStringMap::const_iterator iter = string_map_.find(path_string);
+  auto iter = string_map_.find(path_string);
   if (iter != string_map_.end()) {
     *size = iter->second.size();
     return true;
@@ -346,12 +351,10 @@ BoolOrError MemFileSystem::TryLock(const StringPiece& lock_name,
                                    MessageHandler* handler) {
   ScopedMutex lock(lock_map_mutex_.get());
 
-  if (lock_map_.count(lock_name.as_string()) != 0) {
-    return BoolOrError(false);
-  } else {
-    lock_map_[lock_name.as_string()] = timer_->NowMs();
-    return BoolOrError(true);
-  }
+  auto ret = lock_map_.insert(
+      std::make_pair(lock_name.as_string(), timer_->NowMs()));
+  bool inserted = ret.second;
+  return BoolOrError(inserted);
 }
 
 BoolOrError MemFileSystem::TryLockWithTimeout(const StringPiece& lock_name,
@@ -361,14 +364,35 @@ BoolOrError MemFileSystem::TryLockWithTimeout(const StringPiece& lock_name,
   ScopedMutex lock(lock_map_mutex_.get());
 
   DCHECK_EQ(timer, timer_);
-  GoogleString name = lock_name.as_string();
   int64 now = timer->NowMs();
-  if (lock_map_.count(name) != 0 &&
-      now <= lock_map_[name] + timeout_ms) {
+  auto ret = lock_map_.insert(std::make_pair(lock_name.as_string(), now));
+  auto iter = ret.first;
+  bool inserted = ret.second;
+  if (inserted) {
+    // Lock wasn't already held, successfully issued.
+    return BoolOrError(true);
+  } else if (now <= iter->second + timeout_ms) {
+    // Lock was held, timeout hasn't expired.
     return BoolOrError(false);
   } else {
-    lock_map_[name] = timer->NowMs();
+    // Steal lock.
+    iter->second = now;
     return BoolOrError(true);
+  }
+}
+
+bool MemFileSystem::BumpLockTimeout(const StringPiece& lock_name,
+                                    MessageHandler* handler) {
+  ScopedMutex lock(lock_map_mutex_.get());
+
+  auto iter = lock_map_.find(lock_name.as_string());
+  if (iter == lock_map_.end()) {
+    handler->Info(lock_name.as_string().c_str(), 0,
+                  "Failed to bump lock: lock not held");
+    return false;
+  } else {
+    iter->second = timer_->NowMs();
+    return true;
   }
 }
 

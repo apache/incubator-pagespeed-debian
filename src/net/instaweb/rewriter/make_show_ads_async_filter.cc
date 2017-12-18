@@ -177,9 +177,15 @@ bool MakeShowAdsAsyncFilter::IsApplicableShowAds(
 void MakeShowAdsAsyncFilter::ReplaceShowAdsWithAdsByGoogleElement(
     const ShowAdsSnippetParser::AttributeMap& parsed_attributes,
     HtmlElement* show_ads_element) {
+  // Note container_element will be NULL if the script is at the
+  // top level in the DOM; this is OK (see test
+  // MakeShowAdsAsyncFilterTest.ShowAdsNoParent)
   HtmlElement* container_element = show_ads_element->parent();
-  DCHECK(container_element != NULL);
-  DCHECK(driver()->IsRewritable(show_ads_element));
+  if (!driver()->IsRewritable(show_ads_element)) {
+    LOG(DFATAL) << "show_ads_element is not rewriteable: " <<
+        show_ads_element->ToString();
+    return;
+  }
 
   // If no script with src pointing to adsbygoogle.js has been seen, creates one
   // and inserts it before 'show_ads_element'.
@@ -187,7 +193,7 @@ void MakeShowAdsAsyncFilter::ReplaceShowAdsWithAdsByGoogleElement(
     HtmlElement* script_element = driver()->NewElement(
         container_element, HtmlName::kScript);
     script_element->set_style(HtmlElement::EXPLICIT_CLOSE);
-    driver()->AddAttribute(script_element, HtmlName::kAsync, NULL);
+    driver()->AddAttribute(script_element, HtmlName::kAsync, StringPiece());
     driver()->AddAttribute(script_element,
                            HtmlName::kSrc,
                            ads_util::kAdsByGoogleJavascriptSrc);

@@ -27,6 +27,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/css_resource_slot.h"
 #include "net/instaweb/rewriter/public/css_util.h"
 #include "net/instaweb/rewriter/public/image.h"
@@ -175,7 +176,8 @@ class SpriteFuture {
   // (3) Insert the new value into the values vector.
   bool ReadSingleValue(Css::Values* values, int values_offset,
                        Css::Value** x_value, Css::Value** y_value) {
-    Css::Value* extra_value = new Css::Value(Css::Identifier::CENTER);
+    std::unique_ptr<Css::Value> extra_value(
+        new Css::Value(Css::Identifier::CENTER));
     Css::Value* value = values->at(values_offset);
     if (value->GetLexicalUnitType() == Css::Value::IDENT) {
       switch (value->GetIdentifier().ident()) {
@@ -183,21 +185,22 @@ class SpriteFuture {
         case Css::Identifier::RIGHT:
         case Css::Identifier::CENTER:
           *x_value = value;
-          *y_value = extra_value;
+          *y_value = extra_value.get();
           break;
         case Css::Identifier::TOP:
         case Css::Identifier::BOTTOM:
           *y_value = value;
-          *x_value = extra_value;
+          *x_value = extra_value.get();
           break;
         default:
-          delete extra_value;
           return false;
       }
     } else {
+      // TODO(morlovich): A single-value position is fine, it's
+      // the same as if it were followed by center.
       return false;
     }
-    values->insert(values->begin() + values_offset + 1, extra_value);
+    values->insert(values->begin() + values_offset + 1, extra_value.release());
     return true;
   }
 
@@ -834,13 +837,17 @@ class ImageCombineFilter::Context : public RewriteContext {
     RewriteDone(result, partition_index);
   }
 
+  bool PolicyPermitsRendering() const {
+    return AreOutputsAllowedByCsp(CspDirective::kImgSrc);
+  }
+
   // Finalize the declarations for the sprited slots.
   // TODO(nforman): be smarter about when to sprite and when not.
   // e.g. if it turns out all the divs are too big to use the sprite
   // except for one, don't use it.
   virtual void Render() {
     for (int p = 0, np = num_output_partitions(); p < np; ++p) {
-      CachedResult* partition = output_partition(p);
+      const CachedResult* partition = output_partition(p);
       int num_inputs = partition->input_size();
       if (num_inputs > 1) {
         if (!partition->has_spriter_result()) {
@@ -1176,7 +1183,8 @@ bool ImageCombineFilter::AddCssBackgroundContext(
                                                    decls));
   future->Initialize(values->at(value_index));
 
-  ResourcePtr resource = CreateInputResource(url_piece, is_authorized);
+  ResourcePtr resource = CreateInputResource(
+      url_piece, RewriteDriver::InputRole::kImg, is_authorized);
   if (resource.get() == NULL) {
     return false;
   }

@@ -32,17 +32,10 @@
 
 #include <cstdlib>  // NOLINT
 #include <string>  // NOLINT
-#if !defined(CHROMIUM_REVISION) || CHROMIUM_REVISION >= 205050
-#  include "base/strings/string_number_conversions.h"
-#  include "base/strings/string_piece.h"
-#  include "base/strings/string_util.h"
-#  include "base/strings/stringprintf.h"
-#else
-#  include "base/string_number_conversions.h"
-#  include "base/string_piece.h"
-#  include "base/string_util.h"
-#  include "base/stringprintf.h"
-#endif
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 
 using base::StringAppendF;
 using base::StringAppendV;
@@ -51,6 +44,16 @@ using base::StringPiece;
 using base::StringPrintf;
 
 typedef StringPiece::size_type stringpiece_ssize_type;
+
+namespace strings {
+inline bool StartsWith(StringPiece a, StringPiece b) {
+  return a.starts_with(b);
+}
+inline bool EndsWith(StringPiece a, StringPiece b) {
+  return a.ends_with(b);
+}
+}
+
 
 // Quick macro to get the size of a static char[] without trailing '\0'.
 // Note: Cannot be used for char*, std::string, etc.
@@ -577,6 +580,10 @@ inline bool IsHexDigit(char c) {
          ('a' <= c && c <= 'f');
 }
 
+inline bool IsDecimalDigit(char c) {
+  return (c >= '0' && c <= '9');
+}
+
 // In-place removal of leading and trailing HTML whitespace.  Returns true if
 // any whitespace was trimmed.
 bool TrimWhitespace(StringPiece* str);
@@ -662,7 +669,9 @@ bool SplitStringPieceToIntegerVector(StringPiece src, StringPiece separators,
                                      std::vector<int>* ints);
 
 // Does a path end in slash?
-inline bool EndsInSlash(StringPiece path) { return path.ends_with("/"); }
+inline bool EndsInSlash(StringPiece path) {
+  return strings::EndsWith(path, "/");
+}
 
 // Make sure directory's path ends in '/'.
 inline void EnsureEndsInSlash(GoogleString* dir) {

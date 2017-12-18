@@ -24,6 +24,7 @@
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/domain_lawyer.h"
 #include "net/instaweb/rewriter/public/output_resource_kind.h"
 #include "net/instaweb/rewriter/public/resource.h"
@@ -220,15 +221,17 @@ void OutputResource::SetHash(StringPiece hash) {
 void OutputResource::LoadAndCallback(NotCacheablePolicy not_cacheable_policy,
                                      const RequestContextPtr& request_context,
                                      AsyncCallback* callback) {
-  LOG(DFATAL) << "Output resources shouldn't be loaded via "
-                 "LoadAsync, but rather through FetchResource";
+  // TODO(oschaaf): Output resources shouldn't be loaded via LoadAsync, but
+  // rather through FetchResource. Yet 
+  // ProxyInterfaceTest.TestNoDebugAbortAfterMoreThenOneYear does manage to hit
+  // this code. See https://github.com/pagespeed/mod_pagespeed/issues/1553
   callback->Done(false /* lock_failure */, writing_complete_);
 }
 
 GoogleString OutputResource::decoded_base() const {
   GoogleUrl gurl(url());
   GoogleString decoded_url;
-  if (server_context()->url_namer()->Decode(gurl, rewrite_options(), NULL,
+  if (server_context()->url_namer()->Decode(gurl, rewrite_options(),
                                             &decoded_url)) {
     gurl.Reset(decoded_url);
   }

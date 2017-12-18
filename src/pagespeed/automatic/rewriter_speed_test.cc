@@ -29,6 +29,10 @@
 // Benchmark                               Time(ns)    CPU(ns) Iterations
 // ----------------------------------------------------------------------
 // BM_ParseAndSerializeReuseParserX50   40979557   40900000        100
+//
+// Disclaimer: comparing runs over time and across different machines
+// can be misleading.  When contemplating an algorithm change, always do
+// interleaved runs with the old & new algorithm.
 
 #include <algorithm>
 #include <cstdlib>  // for exit
@@ -37,6 +41,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/public/process_context.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/automatic/static_rewriter.h"
 #include "pagespeed/kernel/base/benchmark.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
@@ -77,11 +82,11 @@ const StringPiece GetHtmlText() {
       // includes an unterminated <xmp> tag, so anything afterwards
       // will just get accumulated into that --- which was especially
       // noticeable in the X100 test.
-      if (StringPiece(files[i]).ends_with("xmp_tag.html")) {
+      if (strings::EndsWith(StringPiece(files[i]), "xmp_tag.html")) {
         continue;
       }
 
-      if (StringPiece(files[i]).ends_with(".html")) {
+      if (strings::EndsWith(StringPiece(files[i]), ".html")) {
         if (!file_system.ReadFile(files[i].c_str(), &buffer, &handler)) {
           LOG(ERROR) << "Unable to open:" << files[i];
           exit(1);

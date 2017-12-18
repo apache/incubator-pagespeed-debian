@@ -1,0 +1,45 @@
+--- a/src/pagespeed/system/redis_cache.h
++++ b/src/pagespeed/system/redis_cache.h
+@@ -40,7 +40,7 @@
+ #include "pagespeed/kernel/cache/cache_interface.h"
+ #include "pagespeed/kernel/thread/thread_synchronizer.h"
+ #include "pagespeed/system/external_server_spec.h"
+-#include "third_party/hiredis/src/hiredis.h"
++#include "hiredis/hiredis.h"
+ 
+ namespace net_instaweb {
+ 
+--- a/src/third_party/hiredis/hiredis.gyp
++++ b/src/third_party/hiredis/hiredis.gyp
+@@ -13,25 +13,15 @@
+ # limitations under the License.
+ 
+ {
+-  'variables': {
+-    'hiredis_root': '<(DEPTH)/third_party/hiredis',
+-    'hiredis_src': '<(hiredis_root)/src',
+-  },
+   'targets': [
+     {
+       'target_name': 'hiredis',
+-      'type': '<(library)',
+-      'sources': [
+-        '<(hiredis_src)/async.c',
+-        '<(hiredis_src)/dict.c',
+-        '<(hiredis_src)/hiredis.c',
+-        '<(hiredis_src)/net.c',
+-        '<(hiredis_src)/read.c',
+-        '<(hiredis_src)/sds.c',
+-      ],
+-      'include_dirs': [
+-        '<(hiredis_src)',
+-      ],
++      'type': 'none',
++      'all_dependent_settings': {
++        'libraries': [
++          '-lhiredis',
++        ],
++      },
+     }
+   ],
+ }

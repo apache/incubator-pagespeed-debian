@@ -26,6 +26,7 @@
       'sources': [
         'lib/gifalloc.c',
         'lib/gif_err.c',
+        'lib/openbsd-reallocarray.c'
       ]
     },
     {

@@ -99,7 +99,8 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     StringWriter writer(hierarchy_->input_contents_backing_store());
     // See RewriteDriver::ResolveCssUrls about why we disable trimming in
     // proxy mode. We also disable it if trimming is not enabled.
-    if ( driver->server_context()->url_namer()->ProxyMode() ||
+    if ( driver->server_context()->url_namer()->ProxyMode()
+         == UrlNamer::ProxyExtent::kFull ||
         !driver->options()->trim_urls_in_css() ||
         !driver->options()->Enabled(RewriteOptions::kLeftTrimUrls)) {
       transformer.set_trim_urls(false);
@@ -154,7 +155,8 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     hierarchy_->RollUpContents();
 
     // Our result is the combination of all our imports and our own rules.
-    output_partition(0)->set_inlined_data(hierarchy_->minified_contents());
+    mutable_output_partition(0)->set_inlined_data(
+        hierarchy_->minified_contents());
 
     ServerContext* server_context = FindServerContext();
     server_context->MergeNonCachingResponseHeaders(input_resource_,
@@ -168,6 +170,11 @@ class CssFlattenImportsContext : public SingleRewriteContext {
     } else {
       RewriteDone(kRewriteFailed, 0);
     }
+  }
+
+  bool PolicyPermitsRendering() const {
+    // We apply CSP policy for flattening at top-level, not here.
+    return true;
   }
 
   virtual void Render() {

@@ -2980,6 +2980,7 @@ class TestNotifyFilter : public CommonFilter {
       RewriteDone(kRewriteFailed, 0);
     }
 
+    bool PolicyPermitsRendering() const override { return true; }
     virtual const char* id() const { return "testnotify"; }
     virtual OutputResourceKind kind() const { return kRewrittenResource; }
 
@@ -3002,7 +3003,8 @@ class TestNotifyFilter : public CommonFilter {
     if (href != NULL) {
       bool unused;
       ResourcePtr input_resource(CreateInputResource(
-          href->DecodedValueOrNull(), &unused));
+          href->DecodedValueOrNull(), RewriteDriver::InputRole::kUnknown,
+          &unused));
       ResourceSlotPtr slot(driver()->GetSlot(input_resource, element, href));
       Context* context = new Context(driver(), sync_);
       context->AddSlot(slot);
@@ -3057,6 +3059,7 @@ TEST_F(RewriteContextTest, RenderCompletesCacheAsync) {
 }
 
 TEST_F(RewriteContextTest, TestDisableBackgroundRewritesForBots) {
+  DisableGzip();
   InitTrimFilters(kRewrittenResource);
   InitResources();
   options()->ClearSignatureForTesting();
@@ -3166,6 +3169,7 @@ TEST_F(RewriteContextTest, TestDisableBackgroundRewritesForBots) {
 }
 
 TEST_F(RewriteContextTest, TestFreshen) {
+  DisableGzip();
   FetcherUpdateDateHeaders();
 
   // Note that this must be >= kDefaultImplicitCacheTtlMs for freshening.
@@ -4037,6 +4041,7 @@ TEST_F(RewriteContextTest, TestReuse) {
 }
 
 TEST_F(RewriteContextTest, TestFallbackOnFetchFails) {
+  DisableGzip();
   FetcherUpdateDateHeaders();
   InitTrimFilters(kRewrittenResource);
   EnableDebug();
@@ -4499,7 +4504,7 @@ TEST_F(RewriteContextTest, BlockingRewrite) {
   EXPECT_EQ(2, counting_url_async_fetcher()->fetch_count());
 }
 
-// See http://code.google.com/p/modpagespeed/issues/detail?id=494.  Make sure
+// See http://github.com/pagespeed/mod_pagespeed/issues/494.  Make sure
 // we apply domain-mapping when fetching resources, so that we get HTTP cache
 // hits on the resource fetch based on the CSS file we optimized during the
 // HTML rewrite.
@@ -5098,6 +5103,7 @@ class FailOnHashMismatchFilter : public RewriteFilter {
 
     virtual bool FailOnHashMismatch() const { return true; }
 
+    bool PolicyPermitsRendering() const override { return true; }
     virtual const char* id() const { return kFilterId; }
     virtual OutputResourceKind kind() const { return kRewrittenResource; }
     virtual void RewriteSingle(

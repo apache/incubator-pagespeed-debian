@@ -16,6 +16,7 @@
  * @fileoverview Mock of XhrIo for unit testing.
  */
 
+goog.setTestOnly('goog.testing.net.XhrIo');
 goog.provide('goog.testing.net.XhrIo');
 
 goog.require('goog.array');
@@ -29,7 +30,9 @@ goog.require('goog.net.HttpStatus');
 goog.require('goog.net.XhrIo');
 goog.require('goog.net.XmlHttp');
 goog.require('goog.object');
+goog.require('goog.structs');
 goog.require('goog.structs.Map');
+goog.require('goog.uri.utils');
 
 
 
@@ -47,7 +50,7 @@ goog.testing.net.XhrIo = function(opt_testQueue) {
   /**
    * Map of default headers to add to every request, use:
    * XhrIo.headers.set(name, value)
-   * @type {goog.structs.Map}
+   * @type {!goog.structs.Map}
    */
   this.headers = new goog.structs.Map();
 
@@ -66,6 +69,13 @@ goog.inherits(goog.testing.net.XhrIo, goog.events.EventTarget);
  * @enum {string}
  */
 goog.testing.net.XhrIo.ResponseType = goog.net.XhrIo.ResponseType;
+
+
+/**
+ * The pattern matching the 'http' and 'https' URI schemes.
+ * @private {!RegExp}
+ */
+goog.testing.net.XhrIo.HTTP_SCHEME_PATTERN_ = /^https?$/i;
 
 
 /**
@@ -117,18 +127,17 @@ goog.testing.net.XhrIo.cleanup = function() {
  *     request. Default to false. See {@link goog.net.XhrIo#setWithCredentials}.
  * @return {!goog.testing.net.XhrIo} The mocked sent XhrIo.
  */
-goog.testing.net.XhrIo.send = function(url, opt_callback, opt_method,
-                                       opt_content, opt_headers,
-                                       opt_timeoutInterval,
-                                       opt_withCredentials) {
+goog.testing.net.XhrIo.send = function(
+    url, opt_callback, opt_method, opt_content, opt_headers,
+    opt_timeoutInterval, opt_withCredentials) {
   var x = new goog.testing.net.XhrIo();
   goog.testing.net.XhrIo.sendInstances_.push(x);
   if (opt_callback) {
     goog.events.listen(x, goog.net.EventType.COMPLETE, opt_callback);
   }
-  goog.events.listen(x,
-                     goog.net.EventType.READY,
-                     goog.partial(goog.testing.net.XhrIo.cleanupSend_, x));
+  goog.events.listen(
+      x, goog.net.EventType.READY,
+      goog.partial(goog.testing.net.XhrIo.cleanupSend_, x));
   if (opt_timeoutInterval) {
     x.setTimeoutInterval(opt_timeoutInterval);
   }
@@ -207,8 +216,7 @@ goog.testing.net.XhrIo.prototype.lastHeaders_;
  * @type {goog.net.ErrorCode}
  * @private
  */
-goog.testing.net.XhrIo.prototype.lastErrorCode_ =
-    goog.net.ErrorCode.NO_ERROR;
+goog.testing.net.XhrIo.prototype.lastErrorCode_ = goog.net.ErrorCode.NO_ERROR;
 
 
 /**
@@ -228,6 +236,14 @@ goog.testing.net.XhrIo.prototype.response_ = '';
 
 
 /**
+ * The status code.
+ * @type {number}
+ * @private
+ */
+goog.testing.net.XhrIo.prototype.statusCode_ = 0;
+
+
+/**
  * Mock ready state.
  * @type {number}
  * @private
@@ -243,7 +259,6 @@ goog.testing.net.XhrIo.prototype.readyState_ =
  * @private
  */
 goog.testing.net.XhrIo.prototype.timeoutInterval_ = 0;
-
 
 
 /**
@@ -268,6 +283,15 @@ goog.testing.net.XhrIo.prototype.responseType_ =
  * @private
  */
 goog.testing.net.XhrIo.prototype.withCredentials_ = false;
+
+
+/**
+ * Whether progress events shall be sent for this request.
+ *
+ * @type {boolean}
+ * @private
+ */
+goog.testing.net.XhrIo.prototype.progressEventsEnabled_ = false;
 
 
 /**
@@ -340,8 +364,8 @@ goog.testing.net.XhrIo.prototype.getResponseType = function() {
  * @param {boolean} withCredentials Whether this should be a "credentialed"
  *     request.
  */
-goog.testing.net.XhrIo.prototype.setWithCredentials =
-    function(withCredentials) {
+goog.testing.net.XhrIo.prototype.setWithCredentials = function(
+    withCredentials) {
   this.withCredentials_ = withCredentials;
 };
 
@@ -356,6 +380,27 @@ goog.testing.net.XhrIo.prototype.getWithCredentials = function() {
 
 
 /**
+ * Sets whether progress events are enabled for this request. Note
+ * that progress events require pre-flight OPTIONS request handling
+ * for CORS requests, and may cause trouble with older browsers. See
+ * goog.net.XhrIo.progressEventsEnabled_ for details.
+ * @param {boolean} enabled Whether progress events should be enabled.
+ */
+goog.testing.net.XhrIo.prototype.setProgressEventsEnabled = function(enabled) {
+  this.progressEventsEnabled_ = enabled;
+};
+
+
+/**
+ * Gets whether progress events are enabled.
+ * @return {boolean} Whether progress events are enabled for this request.
+ */
+goog.testing.net.XhrIo.prototype.getProgressEventsEnabled = function() {
+  return this.progressEventsEnabled_;
+};
+
+
+/**
  * Abort the current XMLHttpRequest
  * @param {goog.net.ErrorCode=} opt_failureCode Optional error code to use -
  *     defaults to ABORT.
@@ -364,6 +409,8 @@ goog.testing.net.XhrIo.prototype.abort = function(opt_failureCode) {
   if (this.active_) {
     try {
       this.active_ = false;
+      this.readyState_ = goog.net.XmlHttp.ReadyState.UNINITIALIZED;
+      this.statusCode_ = -1;
       this.lastErrorCode_ = opt_failureCode || goog.net.ErrorCode.ABORT;
       this.dispatchEvent(goog.net.EventType.COMPLETE);
       this.dispatchEvent(goog.net.EventType.ABORT);
@@ -382,8 +429,8 @@ goog.testing.net.XhrIo.prototype.abort = function(opt_failureCode) {
  * @param {Object|goog.structs.Map=} opt_headers Map of headers to add to the
  *     request.
  */
-goog.testing.net.XhrIo.prototype.send = function(url, opt_method, opt_content,
-                                                 opt_headers) {
+goog.testing.net.XhrIo.prototype.send = function(
+    url, opt_method, opt_content, opt_headers) {
   if (this.xhr_) {
     throw Error('[goog.net.XhrIo] Object is active with another request');
   }
@@ -391,7 +438,17 @@ goog.testing.net.XhrIo.prototype.send = function(url, opt_method, opt_content,
   this.lastUri_ = url;
   this.lastMethod_ = opt_method || 'GET';
   this.lastContent_ = opt_content;
-  this.lastHeaders_ = opt_headers;
+  if (!this.headers.isEmpty()) {
+    this.lastHeaders_ = this.headers.toObject();
+    // Add headers specific to this request
+    if (opt_headers) {
+      goog.structs.forEach(opt_headers, goog.bind(function(value, key) {
+        this.lastHeaders_[key] = value;
+      }, this));
+    }
+  } else {
+    this.lastHeaders_ = opt_headers;
+  }
 
   if (this.testQueue_) {
     this.testQueue_.enqueue(['s', url, opt_method, opt_content, opt_headers]);
@@ -418,8 +475,8 @@ goog.testing.net.XhrIo.prototype.createXhr = function() {
  * Simulates changing to the new ready state.
  * @param {number} readyState Ready state to change to.
  */
-goog.testing.net.XhrIo.prototype.simulateReadyStateChange =
-    function(readyState) {
+goog.testing.net.XhrIo.prototype.simulateReadyStateChange = function(
+    readyState) {
   if (readyState < this.readyState_) {
     throw Error('Readystate cannot go backwards');
   }
@@ -449,8 +506,8 @@ goog.testing.net.XhrIo.prototype.simulateReadyStateChange =
  * @param {string} partialResponse A string to append to the response text.
  * @param {Object=} opt_headers Simulated response headers.
  */
-goog.testing.net.XhrIo.prototype.simulatePartialResponse =
-    function(partialResponse, opt_headers) {
+goog.testing.net.XhrIo.prototype.simulatePartialResponse = function(
+    partialResponse, opt_headers) {
   this.response_ += partialResponse;
   this.responseHeaders_ = opt_headers || {};
   this.statusCode_ = 200;
@@ -464,8 +521,8 @@ goog.testing.net.XhrIo.prototype.simulatePartialResponse =
  * @param {string|Document|ArrayBuffer|null} response Simulated response.
  * @param {Object=} opt_headers Simulated response headers.
  */
-goog.testing.net.XhrIo.prototype.simulateResponse = function(statusCode,
-    response, opt_headers) {
+goog.testing.net.XhrIo.prototype.simulateResponse = function(
+    statusCode, response, opt_headers) {
   this.statusCode_ = statusCode;
   this.response_ = response || '';
   this.responseHeaders_ = opt_headers || {};
@@ -497,6 +554,31 @@ goog.testing.net.XhrIo.prototype.simulateReady = function() {
 
 
 /**
+ * Simulates the Xhr progress event.
+ * @param {boolean} lengthComputable Whether progress is measurable.
+ * @param {number} loaded Amount of work already performed.
+ * @param {number} total Total amount of work to perform.
+ * @param {boolean=} opt_isDownload Whether the progress is from a download or
+ *     upload.
+ */
+goog.testing.net.XhrIo.prototype.simulateProgress = function(
+    lengthComputable, loaded, total, opt_isDownload) {
+  var progressEvent = {
+    type: goog.net.EventType.PROGRESS,
+    lengthComputable: lengthComputable,
+    loaded: loaded,
+    total: total
+  };
+  this.dispatchEvent(progressEvent);
+  var specificProgress = goog.object.clone(progressEvent);
+  specificProgress.type = opt_isDownload ?
+      goog.net.EventType.DOWNLOAD_PROGRESS :
+      goog.net.EventType.UPLOAD_PROGRESS;
+  this.dispatchEvent(specificProgress);
+};
+
+
+/**
  * @return {boolean} Whether there is an active request.
  */
 goog.testing.net.XhrIo.prototype.isActive = function() {
@@ -518,15 +600,21 @@ goog.testing.net.XhrIo.prototype.isComplete = function() {
  * @return {boolean} Whether the request compeleted successfully.
  */
 goog.testing.net.XhrIo.prototype.isSuccess = function() {
-  switch (this.getStatus()) {
-    case goog.net.HttpStatus.OK:
-    case goog.net.HttpStatus.NO_CONTENT:
-    case goog.net.HttpStatus.NOT_MODIFIED:
-      return true;
+  var status = this.getStatus();
+  // A zero status code is considered successful for local files.
+  return goog.net.HttpStatus.isSuccess(status) ||
+      status === 0 && !this.isLastUriEffectiveSchemeHttp_();
+};
 
-    default:
-      return false;
-  }
+
+/**
+ * @return {boolean} whether the effective scheme of the last URI that was
+ *     fetched was 'http' or 'https'.
+ * @private
+ */
+goog.testing.net.XhrIo.prototype.isLastUriEffectiveSchemeHttp_ = function() {
+  var scheme = goog.uri.utils.getEffectiveScheme(String(this.lastUri_));
+  return goog.testing.net.XhrIo.HTTP_SCHEME_PATTERN_.test(scheme);
 };
 
 
@@ -623,8 +711,8 @@ goog.testing.net.XhrIo.prototype.getLastRequestHeaders = function() {
 goog.testing.net.XhrIo.prototype.getResponseText = function() {
   if (goog.isString(this.response_)) {
     return this.response_;
-  } else if (goog.global['ArrayBuffer'] &&
-      this.response_ instanceof ArrayBuffer) {
+  } else if (
+      goog.global['ArrayBuffer'] && this.response_ instanceof ArrayBuffer) {
     return '';
   } else {
     return goog.dom.xml.serialize(/** @type {Document} */ (this.response_));
@@ -669,8 +757,10 @@ goog.testing.net.XhrIo.prototype.getResponseXml = function() {
   // NOTE(user): I haven't found out how to check in Internet Explorer
   // whether the response is XML document, so I do it the other way around.
   return goog.isString(this.response_) ||
-      (goog.global['ArrayBuffer'] && this.response_ instanceof ArrayBuffer) ?
-      null : /** @type {Document} */ (this.response_);
+          (goog.global['ArrayBuffer'] &&
+           this.response_ instanceof ArrayBuffer) ?
+      null :
+      /** @type {Document} */ (this.response_);
 };
 
 
@@ -708,13 +798,7 @@ goog.testing.net.XhrIo.prototype.getAllResponseHeaders = function() {
   if (!this.isComplete()) {
     return '';
   }
-
-  var headers = [];
-  goog.object.forEach(this.responseHeaders_, function(value, name) {
-    headers.push(name + ': ' + value);
-  });
-
-  return headers.join('\r\n');
+  return this.getAllStreamingResponseHeaders();
 };
 
 
@@ -740,4 +824,32 @@ goog.testing.net.XhrIo.prototype.getResponseHeaders = function() {
     }
   });
   return headersObject;
+};
+
+
+/**
+ * Get the value of the response-header with the given name from the Xhr object.
+ * As opposed to {@link #getResponseHeader}, this method does not require that
+ * the request has completed.
+ * @param {string} key The name of the response-header to retrieve.
+ * @return {?string} The value of the response-header, or null if it is
+ *     unavailable.
+ */
+goog.testing.net.XhrIo.prototype.getStreamingResponseHeader = function(key) {
+  return key in this.responseHeaders_ ? this.responseHeaders_[key] : null;
+};
+
+
+/**
+ * Gets the text of all the headers in the response. As opposed to
+ * {@link #getAllResponseHeaders}, this method does not require that the request
+ * has completed.
+ * @return {string} The value of the response headers or empty string.
+ */
+goog.testing.net.XhrIo.prototype.getAllStreamingResponseHeaders = function() {
+  var headers = [];
+  goog.object.forEach(this.responseHeaders_, function(value, name) {
+    headers.push(name + ': ' + value);
+  });
+  return headers.join('\r\n');
 };

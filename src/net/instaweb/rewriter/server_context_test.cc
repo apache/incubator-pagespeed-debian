@@ -29,6 +29,7 @@
 #include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
 #include "net/instaweb/http/public/mock_url_fetcher.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/beacon_critical_images_finder.h"
 #include "net/instaweb/rewriter/public/critical_finder_support_util.h"
 #include "net/instaweb/rewriter/public/critical_images_finder.h"
@@ -181,8 +182,8 @@ class ServerContextTest : public RewriteTestBase {
     rewrite_driver()->SetBaseUrlForFetch(url);
     GoogleUrl resource_url(url);
     bool unused;
-    ResourcePtr resource(rewrite_driver()->CreateInputResource(resource_url,
-                                                               &unused));
+    ResourcePtr resource(rewrite_driver()->CreateInputResource(
+        resource_url, RewriteDriver::InputRole::kUnknown, &unused));
     if ((resource.get() != NULL) && !ReadIfCached(resource)) {
       resource.clear();
     }
@@ -304,7 +305,8 @@ class ServerContextTest : public RewriteTestBase {
     GoogleUrl gurl(AbsolutifyUrl(url));
     rewrite_driver()->SetBaseUrlForFetch(kTestDomain);
     bool unused;
-    ResourcePtr resource(rewrite_driver()->CreateInputResource(gurl, &unused));
+    ResourcePtr resource(rewrite_driver()->CreateInputResource(
+        gurl, RewriteDriver::InputRole::kUnknown, &unused));
     VerifyContentsCallback callback(resource, "payload");
     resource->LoadAsync(Resource::kLoadEvenIfNotCacheable,
                         rewrite_driver()->request_context(),
@@ -320,7 +322,8 @@ class ServerContextTest : public RewriteTestBase {
     SetCustomCachingResponse(url, 100, "foo");
     GoogleUrl gurl(AbsolutifyUrl(url));
     bool unused;
-    ResourcePtr resource(rewrite_driver()->CreateInputResource(gurl, &unused));
+    ResourcePtr resource(rewrite_driver()->CreateInputResource(
+        gurl, RewriteDriver::InputRole::kImg, &unused));
     if (!is_background_fetch) {
       rewrite_driver()->SetRequestHeaders(*headers);
     }
@@ -442,8 +445,8 @@ TEST_F(ServerContextTest, CustomOptionsWithNoUrlNamerOptions) {
   options->EnableFilter(RewriteOptions::kDelayImages);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDelayImages));
 
-  options->EnableFilter(RewriteOptions::kCachePartialHtml);
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kCachePartialHtml));
+  options->EnableFilter(RewriteOptions::kCachePartialHtmlDeprecated);
+  EXPECT_FALSE(options->Enabled(RewriteOptions::kCachePartialHtmlDeprecated));
   options->EnableFilter(RewriteOptions::kDeferIframe);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDeferIframe));
   options->EnableFilter(RewriteOptions::kDeferJavascript);
@@ -454,8 +457,6 @@ TEST_F(ServerContextTest, CustomOptionsWithNoUrlNamerOptions) {
   EXPECT_FALSE(options->Enabled(RewriteOptions::kLazyloadImages));
   options->EnableFilter(RewriteOptions::kLocalStorageCache);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kLocalStorageCache));
-  options->EnableFilter(RewriteOptions::kSplitHtml);
-  EXPECT_FALSE(options->Enabled(RewriteOptions::kSplitHtml));
   options->EnableFilter(RewriteOptions::kPrioritizeCriticalCss);
   EXPECT_FALSE(options->Enabled(RewriteOptions::kPrioritizeCriticalCss));
 }
@@ -539,6 +540,17 @@ TEST_F(ServerContextTest, CustomOptionsWithUrlNamerOptions) {
   EXPECT_FALSE(options->Enabled(RewriteOptions::kDelayImages));
 }
 
+TEST_F(ServerContextTest, QueryOptionsWithInvalidUrl) {
+  RequestHeaders request_headers;
+  GoogleUrl gurl("bogus");
+  ASSERT_FALSE(gurl.IsWebValid());
+  RewriteQuery rewrite_query;
+  RequestContextPtr null_request_context;
+  EXPECT_FALSE(server_context()->GetQueryOptions(
+      null_request_context, options(), &gurl, &request_headers, NULL,
+      &rewrite_query));
+}
+
 TEST_F(ServerContextTest, TestNamed) {
   TestNamed();
 }
@@ -559,6 +571,9 @@ TEST_F(ServerContextTest, TestOutputInputUrl) {
                           true, "foo();");
 }
 
+// Test to make sure we do not let a crafted output resource URL to get us to
+// fetch and host things from a non-lawyer permitted external host; which could
+// lead to XSS vulnerabilities or a firewall bypass.
 TEST_F(ServerContextTest, TestOutputInputUrlEvil) {
   options()->EnableFilter(RewriteOptions::kRewriteJavascriptExternal);
   rewrite_driver()->AddFilters();
@@ -631,62 +646,6 @@ TEST_F(ServerContextTest, TestMapRewriteAndOrigin) {
       StringPiece(), output.get());
   EXPECT_EQ(Encode("http://cdn.com/", "ce", "0", "style.css", "css"),
             output->url());
-}
-
-TEST_F(ServerContextTest, ScanSplitHtmlRequestSplitEnabled) {
-  options()->EnableFilter(RewriteOptions::kSplitHtml);
-  RequestContextPtr ctx(CreateRequestContext());
-  GoogleString url("http://test.com/?x_split=btf");
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_TRUE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_BELOW_THE_FOLD, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/", url);
-
-  url = "http://test.com/?a=b&x_split=btf";
-  ctx.reset(CreateRequestContext());
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_TRUE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_BELOW_THE_FOLD, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?a=b", url);
-
-  url = "http://test.com/?a=b&x_split=atf";
-  ctx.reset(CreateRequestContext());
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_TRUE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_ABOVE_THE_FOLD, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?a=b", url);
-
-  url = "http://test.com/?a=b&x_split=junk";
-  ctx.reset(CreateRequestContext());
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_TRUE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?a=b", url);
-
-  ctx.reset(CreateRequestContext());
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_FALSE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?a=b", url);
-}
-
-TEST_F(ServerContextTest, ScanSplitHtmlRequestOptionsNull) {
-  RequestContextPtr ctx(CreateRequestContext());
-  GoogleString url("http://test.com/?x_split=btf");
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_FALSE(server_context()->ScanSplitHtmlRequest(ctx, NULL, &url));
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?x_split=btf", url);
-}
-
-TEST_F(ServerContextTest, ScanSplitHtmlRequestSplitDisabled) {
-  options()->DisableFilter(RewriteOptions::kSplitHtml);
-  RequestContextPtr ctx(CreateRequestContext());
-  GoogleString url("http://test.com/?x_split=btf");
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_FALSE(server_context()->ScanSplitHtmlRequest(ctx, options(), &url));
-  EXPECT_EQ(RequestContext::SPLIT_FULL, ctx->split_request_type());
-  EXPECT_EQ("http://test.com/?x_split=btf", url);
 }
 
 class MockRewriteFilter : public RewriteFilter {
@@ -1319,7 +1278,7 @@ TEST_F(BeaconTest, BasicPcacheSetup) {
 TEST_F(BeaconTest, HandleBeaconRenderedDimensionsofImages) {
   GoogleString img1 = "http://www.example.com/img1.png";
   GoogleString hash1 = IntegerToString(
-      HashString<CasePreserve, int>(img1.c_str(), img1.size()));
+      HashString<CasePreserve, unsigned>(img1.c_str(), img1.size()));
   options()->EnableFilter(RewriteOptions::kResizeToRenderedImageDimensions);
   RenderedImages rendered_images;
   RenderedImages_Image* images = rendered_images.add_image();
@@ -1342,9 +1301,9 @@ TEST_F(BeaconTest, HandleBeaconCritImages) {
   GoogleString img1 = "http://www.example.com/img1.png";
   GoogleString img2 = "http://www.example.com/img2.png";
   GoogleString hash1 = IntegerToString(
-      HashString<CasePreserve, int>(img1.c_str(), img1.size()));
+      HashString<CasePreserve, unsigned>(img1.c_str(), img1.size()));
   GoogleString hash2 = IntegerToString(
-      HashString<CasePreserve, int>(img2.c_str(), img2.size()));
+      HashString<CasePreserve, unsigned>(img2.c_str(), img2.size()));
 
   StringSet critical_image_hashes;
   critical_image_hashes.insert(hash1);
@@ -1587,7 +1546,7 @@ TEST_F(ServerContextTest, TestMergeNonCachingResponseHeaders) {
 
 class ServerContextCacheControlTest : public ServerContextTest {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ServerContextTest::SetUp();
     implicit_public_100_ = CreateCustomCachingResource("ipub_100", 100, "");
     implicit_public_200_ = CreateCustomCachingResource("ipub_200", 200, "");
@@ -1748,8 +1707,8 @@ TEST_F(ServerContextTest, PartlyFailedFetch) {
   GoogleUrl gurl(abs_url);
   SetBaseUrlForFetch(abs_url);
   bool is_authorized;
-  ResourcePtr resource = rewrite_driver()->CreateInputResource(gurl,
-                                                               &is_authorized);
+  ResourcePtr resource = rewrite_driver()->CreateInputResource(
+      gurl, RewriteDriver::InputRole::kStyle, &is_authorized);
   ASSERT_TRUE(resource.get() != NULL);
   EXPECT_TRUE(is_authorized);
   MockResourceCallback callback(resource, factory()->thread_system());
@@ -1779,15 +1738,16 @@ TEST_F(ServerContextTest, LoadFromFileReadAsync) {
 
   SetBaseUrlForFetch("http://test.com");
   bool unused;
-  ResourcePtr resource(rewrite_driver()->CreateInputResource(test_url,
-                                                             &unused));
+  ResourcePtr resource(rewrite_driver()->CreateInputResource(
+      test_url, RewriteDriver::InputRole::kStyle, &unused));
   VerifyContentsCallback callback(resource, kContents);
   resource->LoadAsync(Resource::kReportFailureIfNotCacheable,
                       rewrite_driver()->request_context(),
                       &callback);
   callback.AssertCalled();
 
-  resource = rewrite_driver()->CreateInputResource(test_url, &unused);
+  resource = rewrite_driver()->CreateInputResource(
+      test_url, RewriteDriver::InputRole::kStyle, &unused);
   VerifyContentsCallback callback2(resource, kContents);
   resource->LoadAsync(Resource::kReportFailureIfNotCacheable,
                       rewrite_driver()->request_context(),
@@ -1802,7 +1762,8 @@ void CheckMatchesHeaders(const ResponseHeaders& headers,
   ASSERT_TRUE(input.has_type());
   EXPECT_EQ(InputInfo::CACHED, input.type());
 
-  ASSERT_TRUE(input.has_last_modified_time_ms());
+  EXPECT_EQ(headers.has_last_modified_time_ms(),
+            input.has_last_modified_time_ms());
   EXPECT_EQ(headers.last_modified_time_ms(), input.last_modified_time_ms());
 
   ASSERT_TRUE(input.has_expiration_time_ms());
@@ -1826,7 +1787,8 @@ TEST_F(ServerContextTest, FillInPartitionInputInfo) {
   SetFetchResponse(kUrl, headers, kContents);
   GoogleUrl gurl(kUrl);
   bool unused;
-  ResourcePtr resource(rewrite_driver()->CreateInputResource(gurl, &unused));
+  ResourcePtr resource(rewrite_driver()->CreateInputResource(
+      gurl, RewriteDriver::InputRole::kUnknown, &unused));
   VerifyContentsCallback callback(resource, kContents);
   resource->LoadAsync(Resource::kReportFailureIfNotCacheable,
                       rewrite_driver()->request_context(),
@@ -1842,6 +1804,14 @@ TEST_F(ServerContextTest, FillInPartitionInputInfo) {
   ASSERT_TRUE(with_hash.has_input_content_hash());
   EXPECT_STREQ("zEEebBNnDlISRim4rIP30", with_hash.input_content_hash());
   EXPECT_FALSE(without_hash.has_input_content_hash());
+
+  resource->response_headers()->RemoveAll(HttpAttributes::kLastModified);
+  resource->response_headers()->ComputeCaching();
+  EXPECT_FALSE(resource->response_headers()->has_last_modified_time_ms());
+  InputInfo without_last_modified;
+  resource->FillInPartitionInputInfo(Resource::kOmitInputHash,
+                                     &without_last_modified);
+  CheckMatchesHeaders(*resource->response_headers(), without_last_modified);
 }
 
 // Test of referer for BackgroundFetch: When the resource fetching request

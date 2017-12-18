@@ -13,20 +13,10 @@
 # limitations under the License.
 
 {
-  'variables': {
-    'gflags_root': '<(DEPTH)/third_party/gflags',
-    'conditions': [
-      ['OS=="win"', {
-        'gflags_gen_arch_root': '<(gflags_root)/gen/win',
-      }, {
-        'gflags_gen_arch_root': '<(gflags_root)/gen/posix',
-      }],
-    ],
-  },
   'targets': [
     {
       'target_name': 'gflags',
-      'type': 'static_library',
+      'type': 'none',
       'include_dirs': [
         '<(gflags_gen_arch_root)/include/private',  # For config.h
         '<(gflags_gen_arch_root)/include',  # For configured files.

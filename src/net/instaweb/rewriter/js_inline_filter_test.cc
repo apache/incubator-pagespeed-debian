@@ -242,12 +242,13 @@ TEST_F(JsInlineFilterTest, DoInlineJavascriptDifferentDomain) {
 TEST_F(JsInlineFilterTest, DoNotInlineJavascriptDifferentDomain) {
   // Different domains:
   GoogleUrl gurl("http://scripts.example.org/script.js");
-  TestNoInlineJavascript("http://www.example.net/index.html",
-                         gurl.Spec().as_string(),
-                         "",
-                         "function id(x) { return x; }\n",
-                         RewriteDriver::GenerateUnauthorizedDomainDebugComment(
-                             gurl));
+  TestNoInlineJavascript(
+      "http://www.example.net/index.html",
+      gurl.Spec().as_string(),
+      "",
+      "function id(x) { return x; }\n",
+      rewrite_driver()->GenerateUnauthorizedDomainDebugComment(
+          gurl, RewriteDriver::InputRole::kScript));
   EXPECT_EQ(0, statistics()->GetVariable(JsInlineFilter::kNumJsInlined)->Get());
 }
 
@@ -303,12 +304,13 @@ TEST_F(JsInlineFilterTest, DontInlineDisallowed) {
 
   // The script is disallowed; can't be inlined.
   GoogleUrl gurl("http://www.example.com/script.js");
-  TestNoInlineJavascript("http://www.example.com/index.html",
-                         gurl.Spec().as_string(),
-                         "",
-                         "function close() { return 'inline!'; }\n",
-                         RewriteDriver::GenerateUnauthorizedDomainDebugComment(
-                             gurl));
+  TestNoInlineJavascript(
+      "http://www.example.com/index.html",
+      gurl.Spec().as_string(),
+      "",
+      "function close() { return 'inline!'; }\n",
+      rewrite_driver()->GenerateUnauthorizedDomainDebugComment(
+           gurl, RewriteDriver::InputRole::kScript));
 }
 
 TEST_F(JsInlineFilterTest, DoInlineDisallowedIfAllowedWhenInlining) {
@@ -503,6 +505,31 @@ TEST_F(JsInlineFilterTest, NoFlushSplittingScriptTag) {
   html_parse()->FinishParse();
   EXPECT_STREQ("<div><script>function id(x) { return x; }\n</script> </div>",
                output_buffer_);
+}
+
+TEST_F(JsInlineFilterTest, BasicCsp) {
+  SetHtmlMimetype();
+  AddFilter(RewriteOptions::kInlineJavascript);
+  EnableDebug();
+
+  static const char kJs[] = "function id(x) { return x; }\n";
+  SetResponseWithDefaultHeaders("script.js", kContentTypeJavascript, kJs, 3000);
+
+  static const char kCspNoInline[] =
+      "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src *;\">";
+  static const char kCspYesInline[] =
+      "<meta http-equiv=\"Content-Security-Policy\" "
+      "content=\"script-src * 'unsafe-inline';\">";
+
+  ValidateExpected("no_inline_csp",
+                   StrCat(kCspNoInline, "<script src=script.js></script>"),
+                   StrCat(kCspNoInline, "<script src=script.js></script>"
+                          "<!--PageSpeed output (by ji) not permitted by "
+                          "Content Security Policy-->"));
+  ValidateExpected(
+      "inline_csp",
+      StrCat(kCspYesInline, "<script src=script.js></script>"),
+      StrCat(kCspYesInline, "<script>function id(x) { return x; }\n</script>"));
 }
 
 }  // namespace

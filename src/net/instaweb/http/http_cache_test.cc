@@ -27,7 +27,6 @@
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/gtest.h"
-#include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/mock_hasher.h"
 #include "pagespeed/kernel/base/mock_timer.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
@@ -56,6 +55,16 @@ const char kUrl3[] = "http://www.test.com/3";
 const char kHttpsUrl[] = "https://www.test.com/";
 const char kFragment[] = "www.test.com";
 const char kFragment2[] = "www.other.com";
+const char kCssText[] = ".a         {color:blue;}                    "
+    "                                                                "
+    "                                                                "
+    "                                                                "
+    "                                                                "
+    "                                                                "
+    "                                                                ";
+
+const size_t kPayloadSizeWithoutHeaders = STATIC_STRLEN(kUrl) +
+    STATIC_STRLEN(kFragment) + STATIC_STRLEN(kCssText);
 }  // namespace
 
 namespace net_instaweb {
@@ -138,8 +147,8 @@ class HTTPCacheTest : public testing::Test {
 
   HTTPCache::FindResult FindWithCallback(
       const GoogleString& key, const GoogleString& fragment, HTTPValue* value,
-      ResponseHeaders* headers, MessageHandler* handler, Callback* callback) {
-    http_cache_->Find(key, fragment, handler, callback);
+      ResponseHeaders* headers, Callback* callback) {
+    http_cache_->Find(key, fragment, &message_handler_, callback);
     EXPECT_TRUE(callback->called_);
     if (callback->result_.status == HTTPCache::kFound) {
       value->Link(callback->http_value());
@@ -150,28 +159,28 @@ class HTTPCacheTest : public testing::Test {
 
   HTTPCache::FindResult Find(
       const GoogleString& key, const GoogleString& fragment, HTTPValue* value,
-      ResponseHeaders* headers, MessageHandler* handler) {
+      ResponseHeaders* headers) {
     scoped_ptr<Callback> callback(NewCallback());
     return FindWithCallback(
-        key, fragment, value, headers, handler, callback.get());
+        key, fragment, value, headers, callback.get());
   }
 
   HTTPCache::FindResult FindAcceptGzip(
       const GoogleString& key, const GoogleString& fragment, HTTPValue* value,
-      ResponseHeaders* headers, MessageHandler* handler) {
+      ResponseHeaders* headers) {
     scoped_ptr<Callback> callback(NewCallback());
     callback->request_context()->SetAcceptsGzip(true);
     return FindWithCallback(
-        key, fragment, value, headers, handler, callback.get());
+        key, fragment, value, headers, callback.get());
   }
 
   HTTPCache::FindResult Find(
       const GoogleString& key, const GoogleString& fragment, HTTPValue* value,
-      ResponseHeaders* headers, MessageHandler* handler, bool cache_valid) {
+      ResponseHeaders* headers, bool cache_valid) {
     scoped_ptr<Callback> callback(NewCallback());
     callback->cache_valid_ = cache_valid;
     return FindWithCallback(
-        key, fragment, value, headers, handler, callback.get());
+        key, fragment, value, headers, callback.get());
   }
 
   Callback* NewCallback() {
@@ -180,21 +189,51 @@ class HTTPCacheTest : public testing::Test {
   }
 
   void Put(const GoogleString& key, const GoogleString& fragment,
-           ResponseHeaders* headers, const StringPiece& content,
-           MessageHandler* handler) {
+           ResponseHeaders* headers, StringPiece content) {
     http_cache_->Put(key, fragment, RequestHeaders::Properties(),
                      ResponseHeaders::kRespectVaryOnResources,
-                     headers, content, handler);
+                     headers, content, &message_handler_);
   }
 
   void PopulateGzippedEntry(const char* cache_control,
                             ResponseHeaders* response_headers) {
+    PutGzippedEntry(cache_control, response_headers, false, 9);
+  }
+
+  void PutGzippedEntry(const char* cache_control,
+                       ResponseHeaders* response_headers,
+                       bool gzip_data_first,
+                       int compression_level) {
     InitHeaders(response_headers, cache_control);
     response_headers->Add(HttpAttributes::kContentType, "text/css");
-    static const char kCssText[] = ".a         {color:blue;}                  ";
-    http_cache_->SetCompressionLevel(9);
+    GoogleString value;
+    if (gzip_data_first) {
+      StringWriter writer(&value);
+      ASSERT_TRUE(GzipInflater::Deflate(
+          kCssText, GzipInflater::InflateType::kGzip, &writer));
+      response_headers->Add(HttpAttributes::kContentEncoding, "gzip");
+    } else {
+      value = kCssText;
+    }
+    http_cache_->SetCompressionLevel(compression_level);
     response_headers->ComputeCaching();
-    Put(kUrl, kFragment, response_headers, kCssText, &message_handler_);
+    Put(kUrl, kFragment, response_headers, value);
+  }
+
+  size_t CacheSizeAfterPut(int cache_compression_level,
+                           bool compress_before_put) {
+    ResponseHeaders response_headers;
+    PutGzippedEntry("max-age:300", &response_headers, compress_before_put,
+                    cache_compression_level);
+    HTTPValue value;
+    response_headers.Clear();
+    HTTPCache::FindResult found = Find(kUrl, kFragment, &value,
+                                       &response_headers);
+    StringPiece contents;
+    CHECK(value.ExtractContents(&contents));
+    EXPECT_STREQ(kCssText, contents);
+    EXPECT_EQ(kFoundResult, found);
+    return lru_cache_.size_bytes();
   }
 
   scoped_ptr<ThreadSystem> thread_system_;
@@ -215,12 +254,11 @@ TEST_F(HTTPCacheTest, PutGet) {
 
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
-  HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+  HTTPCache::FindResult found = Find(kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -239,7 +277,7 @@ TEST_F(HTTPCacheTest, PutGet) {
   // be able to fetch this resource out of the cache.
   mock_timer_.AdvanceMs(301 * 1000);
   found = FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                           &message_handler_, callback.get());
+                           callback.get());
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(meta_data_out.headers_complete());
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheBackendHits));
@@ -250,7 +288,7 @@ TEST_F(HTTPCacheTest, PutGet) {
   // However, the fallback value should be filled in.
   HTTPValue* fallback_value = callback->fallback_http_value();
   meta_data_out.Clear();
-  contents.clear();
+  contents = StringPiece();
   EXPECT_FALSE(fallback_value->Empty());
   ASSERT_TRUE(fallback_value->ExtractHeaders(&meta_data_out,
                                              &message_handler_));
@@ -265,7 +303,7 @@ TEST_F(HTTPCacheTest, PutGet) {
   scoped_ptr<Callback> callback2(NewCallback());
   callback2->cache_valid_ = false;
   found = FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                           &message_handler_, callback2.get());
+                           callback2.get());
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(meta_data_out.headers_complete());
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheBackendHits));
@@ -286,12 +324,12 @@ TEST_F(HTTPCacheTest, PutGetCompressed) {
   meta_data_in.Replace(HttpAttributes::kContentType,
                        kContentTypeCss.mime_type());
   meta_data_in.ComputeCaching();
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = FindAcceptGzip(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -320,12 +358,12 @@ TEST_F(HTTPCacheTest, StaticInflatingFetch) {
   meta_data_in.Replace(HttpAttributes::kContentType,
                        kContentTypeCss.mime_type());
   meta_data_in.ComputeCaching();
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = FindAcceptGzip(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -363,12 +401,12 @@ TEST_F(HTTPCacheTest, PutGetCompressedJpg) {
   meta_data_in.Replace(HttpAttributes::kContentType,
                        kContentTypeJpeg.mime_type());
   meta_data_in.ComputeCaching();
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = FindAcceptGzip(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -390,12 +428,12 @@ TEST_F(HTTPCacheTest, PutGetForInvalidUrl) {
                        kContentTypeHtml.mime_type());
   meta_data_in.ComputeCaching();
   // The response for the invalid url does not get cached.
-  Put("blah", kFragment, &meta_data_in, "content", &message_handler_);
+  Put("blah", kFragment, &meta_data_in, "content");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      "blah", kFragment, &value, &meta_data_out, &message_handler_);
+      "blah", kFragment, &value, &meta_data_out);
   ASSERT_EQ(kNotFoundResult, found);
 }
 
@@ -409,22 +447,22 @@ TEST_F(HTTPCacheTest, PutGetForHttps) {
   // Disable caching of html on https.
   http_cache_->set_disable_html_caching_on_https(true);
   // The html response does not get cached.
-  Put(kHttpsUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kHttpsUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kHttpsUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kHttpsUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kNotFoundResult, found);
 
   // However a css file is cached.
   meta_data_in.Replace(HttpAttributes::kContentType,
                        kContentTypeCss.mime_type());
   meta_data_in.ComputeCaching();
-  Put(kHttpsUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kHttpsUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
-  found = Find(kHttpsUrl, kFragment, &value, &meta_data_out, &message_handler_);
+  found = Find(kHttpsUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -441,13 +479,13 @@ TEST_F(HTTPCacheTest, EtagsAddedIfAbsent) {
   simple_stats_.Clear();
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
 
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
 
@@ -468,13 +506,13 @@ TEST_F(HTTPCacheTest, EtagsNotAddedIfPresent) {
   ResponseHeaders meta_data_in, meta_data_out;
   meta_data_in.Add(HttpAttributes::kEtag, "Etag!");
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
 
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
 
@@ -495,12 +533,12 @@ TEST_F(HTTPCacheTest, CookiesNotCached) {
   meta_data_in.Add(HttpAttributes::kSetCookie, "cookies!");
   meta_data_in.Add(HttpAttributes::kSetCookie2, "more cookies!");
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -524,13 +562,13 @@ TEST_F(HTTPCacheTest, RememberFetchFailed) {
   HTTPValue value;
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusOtherError),
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 
   // Now advance time 301 seconds; the cache should allow us to try fetching
   // again.
   mock_timer_.AdvanceMs(301 * 1000);
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 
   http_cache_->set_failure_caching_ttl_sec(kFetchStatusOtherError, 600);
   http_cache_->RememberFailure(kUrl, kFragment, kFetchStatusOtherError,
@@ -541,7 +579,7 @@ TEST_F(HTTPCacheTest, RememberFetchFailed) {
   mock_timer_.AdvanceMs(301 * 1000);
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusOtherError),
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 }
 
 // Verifies that the cache will 'remember' 'non-cacheable' according to the
@@ -553,13 +591,13 @@ TEST_F(HTTPCacheTest, RememberNotCacheable200) {
   HTTPValue value;
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusUncacheable200),
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 
   // Now advance time 301 seconds; the cache should allow us to try fetching
   // again.
   mock_timer_.AdvanceMs(301 * 1000);
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 
   http_cache_->set_failure_caching_ttl_sec(kFetchStatusUncacheable200, 600);
   http_cache_->RememberFailure(kUrl, kFragment, kFetchStatusUncacheable200,
@@ -570,7 +608,7 @@ TEST_F(HTTPCacheTest, RememberNotCacheable200) {
   mock_timer_.AdvanceMs(301 * 1000);
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusUncacheable200),
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 }
 
 // Make sure we don't remember 'non-cacheable' once we've put it into
@@ -585,28 +623,28 @@ TEST_F(HTTPCacheTest, IgnoreFailurePuts) {
 
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl3, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl3, kFragment, &meta_data_in, "content");
 
   HTTPValue value_out;
   EXPECT_EQ(
       HTTPCache::FindResult(HTTPCache::kRecentFailure,
                             kFetchStatusUncacheableError),
-      Find(kUrl, kFragment, &value_out, &meta_data_out, &message_handler_));
+      Find(kUrl, kFragment, &value_out, &meta_data_out));
   EXPECT_EQ(
       kNotFoundResult,
-      Find(kUrl2, kFragment, &value_out, &meta_data_out, &message_handler_));
+      Find(kUrl2, kFragment, &value_out, &meta_data_out));
   EXPECT_EQ(
       kFoundResult,
-      Find(kUrl3, kFragment, &value_out, &meta_data_out, &message_handler_));
+      Find(kUrl3, kFragment, &value_out, &meta_data_out));
 }
 
 TEST_F(HTTPCacheTest, Uncacheable) {
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, NULL);
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(meta_data_out.headers_complete());
 }
@@ -614,10 +652,10 @@ TEST_F(HTTPCacheTest, Uncacheable) {
 TEST_F(HTTPCacheTest, UncacheablePrivate) {
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "private, max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kUrl, kFragment, &value, &meta_data_out, &message_handler_);
+      kUrl, kFragment, &value, &meta_data_out);
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(meta_data_out.headers_complete());
 }
@@ -626,30 +664,30 @@ TEST_F(HTTPCacheTest, UncacheablePrivate) {
 TEST_F(HTTPCacheTest, CacheInvalidation) {
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   HTTPValue value;
   // Check with cache valid.
   EXPECT_EQ(
       kFoundResult,
-      Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_, true));
+      Find(kUrl, kFragment, &value, &meta_data_out, true));
   // Check with cache invalidated.
   EXPECT_EQ(
       kNotFoundResult,
-      Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_, false));
+      Find(kUrl, kFragment, &value, &meta_data_out, false));
 }
 
 TEST_F(HTTPCacheTest, IsFresh) {
   const char kDataIn[] = "content";
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, kDataIn, &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, kDataIn);
   HTTPValue value;
   scoped_ptr<Callback> callback(NewCallback());
   callback->fresh_ = true;
   // Check with IsFresh set to true.
   EXPECT_EQ(kFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   StringPiece contents;
   EXPECT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
@@ -662,7 +700,7 @@ TEST_F(HTTPCacheTest, IsFresh) {
   // Check with IsFresh set to false.
   EXPECT_EQ(kNotFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   EXPECT_TRUE(value.Empty());
   EXPECT_TRUE(callback->fallback_http_value()->ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
@@ -677,13 +715,13 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMs) {
   const char kDataIn[] = "content";
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, kDataIn, &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, kDataIn);
   HTTPValue value;
   scoped_ptr<Callback> callback(NewCallback());
   callback->override_cache_ttl_ms_ = 400 * 1000;
   EXPECT_EQ(kFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   StringPiece contents;
   EXPECT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
@@ -700,7 +738,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMs) {
   callback->override_cache_ttl_ms_ = 200 * 1000;
   EXPECT_EQ(kFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   EXPECT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
   EXPECT_TRUE(callback->fallback_http_value()->Empty());
@@ -714,11 +752,11 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMs) {
   value.Clear();
   meta_data_in.Clear();
   InitHeaders(&meta_data_in, "private");
-  Put(kUrl, kFragment, &meta_data_in, kDataIn, &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, kDataIn);
   callback->override_cache_ttl_ms_ = 400 * 1000;
   EXPECT_EQ(kFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   EXPECT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
   EXPECT_TRUE(callback->fallback_http_value()->Empty());
@@ -736,7 +774,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMs) {
   callback->override_cache_ttl_ms_ = 300 * 1000;
   EXPECT_EQ(kNotFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheFallbacks));
 
   // Set the override cache TTL to 400 seconds. The lookup succeeds and the
@@ -748,7 +786,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMs) {
   callback->override_cache_ttl_ms_ = 400 * 1000;
   EXPECT_EQ(kFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
   EXPECT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ(kDataIn, contents);
   EXPECT_TRUE(callback->fallback_http_value()->Empty());
@@ -766,7 +804,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyNotCacheable200) {
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusUncacheable200),
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 
   // Now change the value of override_cache_ttl_ms_. The lookup returns
   // kNotFound now.
@@ -775,7 +813,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyNotCacheable200) {
   callback->override_cache_ttl_ms_ = 200 * 1000;
   EXPECT_EQ(kNotFoundResult,
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 }
 
 TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyNotCacheableNon200) {
@@ -787,7 +825,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyNotCacheableNon200) {
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusUncacheableError),
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 
   // Now change the value of override_cache_ttl_ms_. The lookup returns
   // kNotFound now.
@@ -797,7 +835,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyNotCacheableNon200) {
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusUncacheableError),
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 }
 
 TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyFetchFailed) {
@@ -809,7 +847,7 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyFetchFailed) {
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusOtherError),
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 
   // Now change the value of override_cache_ttl_ms_. The lookup continues to
   // return recent failure with kFetchStatusOtherError.
@@ -819,21 +857,21 @@ TEST_F(HTTPCacheTest, OverrideCacheTtlMsForOriginallyFetchFailed) {
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusOtherError),
             FindWithCallback(kUrl, kFragment, &value, &meta_data_out,
-                             &message_handler_, callback.get()));
+                             callback.get()));
 }
 
 TEST_F(HTTPCacheTest, FragmentsIndependent) {
   HTTPValue value;
   ResponseHeaders meta_data_in, meta_data_out;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(kUrl, kFragment, &meta_data_in, "content", &message_handler_);
+  Put(kUrl, kFragment, &meta_data_in, "content");
   ASSERT_EQ(kFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
   ASSERT_EQ(kNotFoundResult,
-            Find(kUrl, kFragment2, &value, &meta_data_out, &message_handler_));
-  Put(kUrl, kFragment2, &meta_data_in, "content", &message_handler_);
+            Find(kUrl, kFragment2, &value, &meta_data_out));
+  Put(kUrl, kFragment2, &meta_data_in, "content");
   ASSERT_EQ(kFoundResult,
-            Find(kUrl, kFragment2, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment2, &value, &meta_data_out));
 }
 
 TEST_F(HTTPCacheTest, UpdateVersion) {
@@ -844,43 +882,43 @@ TEST_F(HTTPCacheTest, UpdateVersion) {
 
   // Equivalent to pre-versioned caching.
   http_cache_->set_version_prefix("");
-  Put(kUrl, "", &meta_data_in, "v1: No fragment", &message_handler_);
-  Put(kUrl, kFragment, &meta_data_in, "v1: Fragment", &message_handler_);
+  Put(kUrl, "", &meta_data_in, "v1: No fragment");
+  Put(kUrl, kFragment, &meta_data_in, "v1: Fragment");
 
   EXPECT_EQ(kFoundResult,
-            Find(kUrl, "", &value, &meta_data_out, &message_handler_));
+            Find(kUrl, "", &value, &meta_data_out));
   ASSERT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ("v1: No fragment", contents);
   EXPECT_EQ(kFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
   ASSERT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ("v1: Fragment", contents);
 
   // Setting version invalidates old data.
   http_cache_->SetVersion(2);
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, "", &value, &meta_data_out, &message_handler_));
+            Find(kUrl, "", &value, &meta_data_out));
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 
-  Put(kUrl, "", &meta_data_in, "v2: No fragment", &message_handler_);
-  Put(kUrl, kFragment, &meta_data_in, "v2: Fragment", &message_handler_);
+  Put(kUrl, "", &meta_data_in, "v2: No fragment");
+  Put(kUrl, kFragment, &meta_data_in, "v2: Fragment");
 
   EXPECT_EQ(kFoundResult,
-            Find(kUrl, "", &value, &meta_data_out, &message_handler_));
+            Find(kUrl, "", &value, &meta_data_out));
   ASSERT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ("v2: No fragment", contents);
   EXPECT_EQ(kFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
   ASSERT_TRUE(value.ExtractContents(&contents));
   EXPECT_STREQ("v2: Fragment", contents);
 
   // Updating version invalidates old data.
   http_cache_->SetVersion(3);
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, "", &value, &meta_data_out, &message_handler_));
+            Find(kUrl, "", &value, &meta_data_out));
   EXPECT_EQ(kNotFoundResult,
-            Find(kUrl, kFragment, &value, &meta_data_out, &message_handler_));
+            Find(kUrl, kFragment, &value, &meta_data_out));
 }
 
 TEST_F(HTTPCacheTest, NoMutateOnPut) {
@@ -905,7 +943,7 @@ TEST_F(HTTPCacheTest, DecompressFallbackValue) {
   scoped_ptr<Callback> callback(NewCallback());
   HTTPValue value;
   EXPECT_EQ(kNotFoundResult, FindWithCallback(  // Not found because it's stale.
-      kUrl, kFragment, &value, &response_headers, &message_handler_,
+      kUrl, kFragment, &value, &response_headers,
       callback.get()));
   EXPECT_TRUE(callback->fallback_http_value()->ExtractHeaders(
       &response_headers, &message_handler_));
@@ -928,12 +966,52 @@ TEST_F(HTTPCacheTest, LeaveFallbackCompressed) {
   Callback callback(request_context);
   HTTPValue value;
   EXPECT_EQ(kNotFoundResult, FindWithCallback(
-      kUrl, kFragment, &value, &response_headers, &message_handler_,
+      kUrl, kFragment, &value, &response_headers,
       &callback));
   EXPECT_TRUE(callback.fallback_http_value()->ExtractHeaders(
       &response_headers, &message_handler_));
   EXPECT_TRUE(response_headers.HasValue(
       HttpAttributes::kContentEncoding, "gzip"));
+}
+
+TEST_F(HTTPCacheTest, PutAlreadyCompressedWithCompressionOff) {
+  size_t cache_size = CacheSizeAfterPut(0, true);
+  // The physical cache entry includes the key, fragment, and value, which
+  // we know exactly.  It also includes the serialized headers, and we
+  // don't know the exact size of that, as HTTPValue does not expose it.
+  // But what we can say safely is that even though we passed a compressed
+  // value to HTTPCache, by uncompressing it and adding the header size,
+  // it will be larger than kPayloadSizeWithoutHeaders.
+  EXPECT_LT(kPayloadSizeWithoutHeaders, cache_size);
+}
+
+TEST_F(HTTPCacheTest, PutAlreadyCompressedWithCompressionOn) {
+  size_t cache_size = CacheSizeAfterPut(9, true);
+  // Here we are storing compressed values into the cache, and kCssText is
+  // highly compressible.  So the stored size will be less than the
+  // kPayloadSizeWithoutHeaders, despite the fact that we are also storing
+  // the headers.
+  EXPECT_GT(kPayloadSizeWithoutHeaders, cache_size);
+}
+
+TEST_F(HTTPCacheTest, PutUncompressedWithCompressionOff) {
+  size_t cache_size = CacheSizeAfterPut(0, false);
+  // The physical cache entry includes the key, fragment, and value, which
+  // we know exactly.  It also includes the serialized headers, and we
+  // don't know the exact size of that, as HTTPValue does not expose it.
+  // But what we can say safely is that even though we passed a compressed
+  // value to HTTPCache, by uncompressing it and adding the header size,
+  // it will be larger than kPayloadSizeWithoutHeaders.
+  EXPECT_LT(kPayloadSizeWithoutHeaders, cache_size);
+}
+
+TEST_F(HTTPCacheTest, PutUncompressedWithCompressionOn) {
+  size_t cache_size = CacheSizeAfterPut(9, false);
+  // Here we are storing compressed values into the cache, and kCssText is
+  // highly compressible.  So the stored size will be less than the
+  // kPayloadSizeWithoutHeaders, despite the fact that we are also storing
+  // the headers.
+  EXPECT_GT(kPayloadSizeWithoutHeaders, cache_size);
 }
 
 class HTTPCacheWriteThroughTest : public HTTPCacheTest {
@@ -1004,7 +1082,7 @@ class HTTPCacheWriteThroughTest : public HTTPCacheTest {
     HTTPValue value;
     ResponseHeaders headers;
     HTTPCache::FindResult found = Find(
-        key_, fragment_, &value, &headers, &message_handler_);
+        key_, fragment_, &value, &headers);
     EXPECT_EQ(kFoundResult, found);
     EXPECT_TRUE(headers.headers_complete());
     StringPiece contents;
@@ -1016,8 +1094,7 @@ class HTTPCacheWriteThroughTest : public HTTPCacheTest {
   void CheckCachedValueExpired() {
     HTTPValue value;
     ResponseHeaders headers;
-    HTTPCache::FindResult found = Find(key_, fragment_, &value, &headers,
-                                       &message_handler_);
+    HTTPCache::FindResult found = Find(key_, fragment_, &value, &headers);
     EXPECT_EQ(kNotFoundResult, found);
     EXPECT_FALSE(headers.headers_complete());
   }
@@ -1031,10 +1108,9 @@ class HTTPCacheWriteThroughTest : public HTTPCacheTest {
   HTTPCache::FindResult Find(const GoogleString& key,
                              const GoogleString& fragment,
                              HTTPValue* value,
-                             ResponseHeaders* headers,
-                             MessageHandler* handler) {
+                             ResponseHeaders* headers) {
     FakeHttpCacheCallback callback(thread_system_.get());
-    http_cache_->Find(key, fragment, handler, &callback);
+    http_cache_->Find(key, fragment, &message_handler_, &callback);
     EXPECT_TRUE(callback.called_);
     if (callback.result_.status == HTTPCache::kFound) {
       value->Link(callback.http_value());
@@ -1065,7 +1141,7 @@ TEST_F(HTTPCacheWriteThroughTest, PutGet) {
   ClearStats();
   ResponseHeaders headers_in;
   InitHeaders(&headers_in, "max-age=300");
-  Put(key_, fragment_, &headers_in, content_, &message_handler_);
+  Put(key_, fragment_, &headers_in, content_);
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheExpirations));
@@ -1236,7 +1312,7 @@ TEST_F(HTTPCacheWriteThroughTest, SizeLimit) {
   // Key: v2/www.test.com/http://www.test.com/1 --- 37 bytes.
   // Value: 145 bytes
   // 145 + 37 = 182.
-  Put(key_, fragment_, &headers_in, "Name", &message_handler_);
+  Put(key_, fragment_, &headers_in, "Name");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheExpirations));
@@ -1252,7 +1328,7 @@ TEST_F(HTTPCacheWriteThroughTest, SizeLimit) {
 
   // This one will not, as the value is a bit bigger and the key has same
   // length.
-  Put(key2_, fragment_, &headers_in, "TooBigForCache1", &message_handler_);
+  Put(key2_, fragment_, &headers_in, "TooBigForCache1");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheExpirations));
@@ -1277,22 +1353,22 @@ TEST_F(HTTPCacheWriteThroughTest, PutGetForHttps) {
   // Disable caching of html on https.
   http_cache_->set_disable_html_caching_on_https(true);
   // The html response does not get cached.
-  Put(kHttpsUrl, fragment_, &meta_data_in, "content", &message_handler_);
+  Put(kHttpsUrl, fragment_, &meta_data_in, "content");
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   HTTPValue value;
   HTTPCache::FindResult found = Find(
-      kHttpsUrl, fragment_, &value, &meta_data_out, &message_handler_);
+      kHttpsUrl, fragment_, &value, &meta_data_out);
   ASSERT_EQ(kNotFoundResult, found);
 
   // However a css file is cached.
   meta_data_in.Replace(HttpAttributes::kContentType,
                        kContentTypeCss.mime_type());
   meta_data_in.ComputeCaching();
-  Put(kHttpsUrl, fragment_, &meta_data_in, "content", &message_handler_);
+  Put(kHttpsUrl, fragment_, &meta_data_in, "content");
   EXPECT_EQ(1, GetStat(HTTPCache::kCacheInserts));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
-  found = Find(kHttpsUrl, fragment_, &value, &meta_data_out, &message_handler_);
+  found = Find(kHttpsUrl, fragment_, &value, &meta_data_out);
   ASSERT_EQ(kFoundResult, found);
   ASSERT_TRUE(meta_data_out.headers_complete());
   StringPiece contents;
@@ -1315,13 +1391,13 @@ TEST_F(HTTPCacheWriteThroughTest, RememberFetchFailedOrNotCacheable) {
   HTTPValue value;
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusOtherError),
-            Find(key_, fragment_, &value, &headers_out, &message_handler_));
+            Find(key_, fragment_, &value, &headers_out));
 
   // Now advance time 301 seconds; the cache should allow us to try fetching
   // again.
   mock_timer_.AdvanceMs(301 * 1000);
   EXPECT_EQ(kNotFoundResult,
-            Find(key_, fragment_, &value, &headers_out, &message_handler_));
+            Find(key_, fragment_, &value, &headers_out));
 }
 
 TEST_F(HTTPCacheWriteThroughTest, RememberFetchDropped) {
@@ -1332,13 +1408,13 @@ TEST_F(HTTPCacheWriteThroughTest, RememberFetchDropped) {
   HTTPValue value;
   EXPECT_EQ(HTTPCache::FindResult(HTTPCache::kRecentFailure,
                                   kFetchStatusDropped),
-            Find(key_, fragment_, &value, &headers_out, &message_handler_));
+            Find(key_, fragment_, &value, &headers_out));
 
   // Now advance time 11 seconds; the cache should allow us to try fetching
   // again.
   mock_timer_.AdvanceMs(11 * Timer::kSecondMs);
   EXPECT_EQ(kNotFoundResult,
-            Find(key_, fragment_, &value, &headers_out, &message_handler_));
+            Find(key_, fragment_, &value, &headers_out));
 }
 
 // Make sure we don't remember 'non-cacheable' once we've put it into
@@ -1355,20 +1431,19 @@ TEST_F(HTTPCacheWriteThroughTest, SetIgnoreFailurePuts) {
   EXPECT_EQ(
       HTTPCache::FindResult(HTTPCache::kRecentFailure,
                             kFetchStatusUncacheableError),
-      Find(key_, fragment_, &value_out, &headers_out, &message_handler_));
+      Find(key_, fragment_, &value_out, &headers_out));
   EXPECT_EQ(
       kNotFoundResult,
-      Find(key2_, fragment_, &value_out, &headers_out, &message_handler_));
+      Find(key2_, fragment_, &value_out, &headers_out));
 }
 
 TEST_F(HTTPCacheWriteThroughTest, Uncacheable) {
   ClearStats();
   ResponseHeaders headers_in, headers_out;
   InitHeaders(&headers_in, NULL);
-  Put(key_, fragment_, &headers_in, content_, &message_handler_);
+  Put(key_, fragment_, &headers_in, content_);
   HTTPValue value;
-  HTTPCache::FindResult found = Find(
-      key_, fragment_, &value, &headers_out, &message_handler_);
+  HTTPCache::FindResult found = Find(key_, fragment_, &value, &headers_out);
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(headers_out.headers_complete());
 }
@@ -1377,10 +1452,9 @@ TEST_F(HTTPCacheWriteThroughTest, UncacheablePrivate) {
   ClearStats();
   ResponseHeaders headers_in, headers_out;
   InitHeaders(&headers_in, "private, max-age=300");
-  Put(key_, fragment_, &headers_in, content_, &message_handler_);
+  Put(key_, fragment_, &headers_in, content_);
   HTTPValue value;
-  HTTPCache::FindResult found = Find(
-      key_, fragment_, &value, &headers_out, &message_handler_);
+  HTTPCache::FindResult found = Find(key_, fragment_, &value, &headers_out);
   ASSERT_EQ(kNotFoundResult, found);
   ASSERT_FALSE(headers_out.headers_complete());
 }
@@ -1390,7 +1464,7 @@ TEST_F(HTTPCacheWriteThroughTest, CacheInvalidation) {
   ClearStats();
   ResponseHeaders meta_data_in;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(key_, fragment_, &meta_data_in, content_, &message_handler_);
+  Put(key_, fragment_, &meta_data_in, content_);
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheExpirations));
@@ -1497,7 +1571,7 @@ TEST_F(HTTPCacheWriteThroughTest, CacheFreshness) {
   ClearStats();
   ResponseHeaders meta_data_in;
   InitHeaders(&meta_data_in, "max-age=300");
-  Put(key_, fragment_, &meta_data_in, content_, &message_handler_);
+  Put(key_, fragment_, &meta_data_in, content_);
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheHits));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheMisses));
   EXPECT_EQ(0, GetStat(HTTPCache::kCacheExpirations));

@@ -17,7 +17,6 @@
 // Author: jmarantz@google.com (Joshua Marantz)
 
 #include "base/logging.h"
-#include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/benchmark.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/gtest.h"
@@ -33,6 +32,10 @@
 //   BM_1MWholeFile                10000            122070 ns/op
 //   BM_1MStreamingFile             2000            760416 ns/op
 //
+//
+// Disclaimer: comparing runs over time and across different machines
+// can be misleading.  When contemplating an algorithm change, always do
+// interleaved runs with the old & new algorithm.
 
 namespace net_instaweb {
 

@@ -30,6 +30,8 @@
 
 namespace net_instaweb {
 
+// TODO(piatek): Remove this default constructor that permits NULL request
+// contexts.
 AsyncFetch::AsyncFetch()
     : request_headers_(NULL),
       response_headers_(NULL),
@@ -107,15 +109,43 @@ void AsyncFetch::HeadersComplete() {
 
 void AsyncFetch::Done(bool success) {
   if (!headers_complete_) {
-    if (!success &&
-        (response_headers()->status_code() == 0)) {
-      // Failing fetches might not set status codes but we expect
-      // successful ones to.
-      response_headers()->set_status_code(HttpStatus::kNotFound);
+    if (!success) {
+      if (response_headers()->status_code() == 0) {
+        // Failing fetches might not set status codes but we expect
+        // successful ones to.
+        response_headers()->set_status_code(HttpStatus::kNotFound);
+      } else if (response_headers()->status_code() == HttpStatus::kOK) {
+        // Our API here is not ideal when Done is called with success=false.
+        // The problem is that we need to call HeadersComplete before we call
+        // HandleDone, but there's no way to tell HeadersComplete that we're in
+        // a bad state and it should throw away anything it has and return an
+        // error to the visitor.  This was a problem with ngx_pagespeed, because
+        // it sends out the headers immediately on HeadersComplete.
+        //
+        // Since this can't be handled by the callee, handle it here.
+        response_headers()->Clear();
+        response_headers()->set_status_code(HttpStatus::kInternalServerError);
+      }
     }
     response_headers()->ComputeCaching();
     HeadersComplete();
   }
+  // You might think we could put DCHECK here that either !success or
+  // response_headers()->IsErrorStatus(), right?  The way to abort a request is
+  // either to report a failure in your response headers, or to call
+  // Done(success=false) and have the code for !success above set failing
+  // response headers for you.  (The first one is better, because Done(false)
+  // doesn't know whether it should be reporting a 4xx or 5xx error and
+  // sysadmins generally care about things like this.)
+  //
+  // The problem is, what about errors we don't discover until after we've sent
+  // out headers?  For example, say we're streaming gzipped data from somewhere,
+  // ungzipping it as we go, and we hit a gzip decoding error.  Whoops!  Nothing
+  // we can really do there, except abort the request, and currently we call
+  // Done(false) when we do that.
+  //
+  // TODO(jefftk): remove Done(bool) and require everyone to just set failing
+  // response headers if that's what they want.
   HandleDone(success);
 }
 
@@ -409,14 +439,10 @@ void ConditionalSharedAsyncFetch::HandleHeadersComplete() {
     // and stop passing any events through to the base fetch.
     serving_cached_value_ = true;
     int64 implicit_cache_ttl_ms = response_headers()->implicit_cache_ttl_ms();
-    int64 min_cache_ttl_ms = response_headers()->min_cache_ttl_ms();
     response_headers()->Clear();
     cached_value_.ExtractHeaders(response_headers(), handler_);
     if (response_headers()->is_implicitly_cacheable()) {
       response_headers()->SetCacheControlMaxAge(implicit_cache_ttl_ms);
-      response_headers()->ComputeCaching();
-    } else if (response_headers()->cache_ttl_ms() < min_cache_ttl_ms) {
-      response_headers()->SetCacheControlMaxAge(min_cache_ttl_ms);
       response_headers()->ComputeCaching();
     }
     SharedAsyncFetch::HandleHeadersComplete();

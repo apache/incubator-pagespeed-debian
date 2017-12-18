@@ -32,9 +32,10 @@ goog.require('goog.userAgent');
  * @private
  */
 goog.events.getVendorPrefixedName_ = function(eventName) {
-  return goog.userAgent.WEBKIT ? 'webkit' + eventName :
+  return goog.userAgent.WEBKIT ?
+      'webkit' + eventName :
       (goog.userAgent.OPERA ? 'o' + eventName.toLowerCase() :
-          eventName.toLowerCase());
+                              eventName.toLowerCase());
 };
 
 
@@ -54,9 +55,11 @@ goog.events.EventType = {
   MOUSEMOVE: 'mousemove',
   MOUSEENTER: 'mouseenter',
   MOUSELEAVE: 'mouseleave',
-  // Select start is non-standard.
-  // See http://msdn.microsoft.com/en-us/library/ie/ms536969(v=vs.85).aspx.
-  SELECTSTART: 'selectstart', // IE, Safari, Chrome
+
+  // Selection events.
+  // https://www.w3.org/TR/selection-api/
+  SELECTIONCHANGE: 'selectionchange',
+  SELECTSTART: 'selectstart',  // IE, Safari, Chrome
 
   // Wheel events
   // http://www.w3.org/TR/DOM-Level-3-Events/#events-wheelevents
@@ -70,7 +73,7 @@ goog.events.EventType = {
   // Focus
   BLUR: 'blur',
   FOCUS: 'focus',
-  DEACTIVATE: 'deactivate', // IE only
+  DEACTIVATE: 'deactivate',  // IE only
   // NOTE: The following two events are not stable in cross-browser usage.
   //     WebKit and Opera implement DOMFocusIn/Out.
   //     IE implements focusin/out.
@@ -84,10 +87,11 @@ goog.events.EventType = {
 
   // Forms
   CHANGE: 'change',
+  RESET: 'reset',
   SELECT: 'select',
   SUBMIT: 'submit',
   INPUT: 'input',
-  PROPERTYCHANGE: 'propertychange', // IE only
+  PROPERTYCHANGE: 'propertychange',  // IE only
 
   // Drag and drop
   DRAGSTART: 'dragstart',
@@ -110,6 +114,7 @@ goog.events.EventType = {
   BEFOREUNLOAD: 'beforeunload',
   CONSOLEMESSAGE: 'consolemessage',
   CONTEXTMENU: 'contextmenu',
+  DEVICEORIENTATION: 'deviceorientation',
   DOMCONTENTLOADED: 'DOMContentLoaded',
   ERROR: 'error',
   HELP: 'help',
@@ -121,8 +126,28 @@ goog.events.EventType = {
   SCROLL: 'scroll',
   UNLOAD: 'unload',
 
+  // Media events
+  CANPLAY: 'canplay',
+  CANPLAYTHROUGH: 'canplaythrough',
+  DURATIONCHANGE: 'durationchange',
+  EMPTIED: 'emptied',
+  ENDED: 'ended',
+  LOADEDDATA: 'loadeddata',
+  LOADEDMETADATA: 'loadedmetadata',
+  PAUSE: 'pause',
+  PLAY: 'play',
+  PLAYING: 'playing',
+  RATECHANGE: 'ratechange',
+  SEEKED: 'seeked',
+  SEEKING: 'seeking',
+  STALLED: 'stalled',
+  SUSPEND: 'suspend',
+  TIMEUPDATE: 'timeupdate',
+  VOLUMECHANGE: 'volumechange',
+  WAITING: 'waiting',
+
   // HTML 5 History events
-  // See http://www.w3.org/TR/html5/history.html#event-definitions
+  // See http://www.w3.org/TR/html5/browsers.html#event-definitions-0
   HASHCHANGE: 'hashchange',
   PAGEHIDE: 'pagehide',
   PAGESHOW: 'pageshow',
@@ -228,5 +253,9 @@ goog.events.EventType = {
   DOMNODEREMOVEDFROMDOCUMENT: 'DOMNodeRemovedFromDocument',
   DOMNODEINSERTEDINTODOCUMENT: 'DOMNodeInsertedIntoDocument',
   DOMATTRMODIFIED: 'DOMAttrModified',
-  DOMCHARACTERDATAMODIFIED: 'DOMCharacterDataModified'
+  DOMCHARACTERDATAMODIFIED: 'DOMCharacterDataModified',
+
+  // Print events.
+  BEFOREPRINT: 'beforeprint',
+  AFTERPRINT: 'afterprint'
 };

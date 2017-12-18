@@ -308,6 +308,7 @@ QueuedWorkerPool::Sequence::Sequence(ThreadSystem* thread_system,
 }
 
 void QueuedWorkerPool::Sequence::Reset() {
+  ScopedMutex lock(sequence_mutex_.get());
   shutdown_ = false;
   active_ = false;
   DCHECK(work_queue_.empty());
@@ -376,8 +377,10 @@ void QueuedWorkerPool::Sequence::Add(Function* function) {
   {
     ScopedMutex lock(sequence_mutex_.get());
     if (shutdown_) {
+#ifndef NDEBUG
       LOG(WARNING) << "Adding function to sequence " << this
                    << " after shutdown";
+#endif
       cancel = true;
     } else {
       Function* function_to_add = function;

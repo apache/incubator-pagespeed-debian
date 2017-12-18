@@ -20,17 +20,16 @@
 
 #include <cstddef>
 
+#include "base/logging.h"
 #include "net/instaweb/http/public/async_fetch.h"
 #include "net/instaweb/http/public/mock_callback.h"
 #include "net/instaweb/http/public/mock_url_fetcher.h"
-#include "net/instaweb/http/public/request_context.h"
 #include "net/instaweb/rewriter/public/mock_critical_images_finder.h"
 #include "net/instaweb/rewriter/public/rewrite_driver.h"
 #include "net/instaweb/rewriter/public/rewrite_test_base.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/test_rewrite_driver_factory.h"
 #include "net/instaweb/util/public/cache_property_store.h"
-#include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/automatic/proxy_fetch.h"
 #include "pagespeed/automatic/proxy_interface.h"
 #include "pagespeed/kernel/base/basictypes.h"
@@ -52,6 +51,7 @@
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 #include "pagespeed/kernel/thread/thread_synchronizer.h"
 #include "pagespeed/kernel/thread/worker_test_base.h"
+#include "pagespeed/opt/logging/request_timing_info.h"
 
 namespace net_instaweb {
 
@@ -125,7 +125,6 @@ class AsyncExpectStringAsyncFetch : public ExpectStringAsyncFetch {
 const char ProxyUrlNamer::kProxyHost[] = "proxy_host.com";
 bool ProxyUrlNamer::Decode(const GoogleUrl& gurl,
                            const RewriteOptions* rewrite_options,
-                           GoogleUrl* domain,
                            GoogleString* decoded) const {
   if (gurl.Host() != kProxyHost) {
     return false;
@@ -134,9 +133,6 @@ bool ProxyUrlNamer::Decode(const GoogleUrl& gurl,
   SplitStringPieceToVector(gurl.PathAndLeaf(), "/", &path_vector, false);
   if (path_vector.size() < 3) {
     return false;
-  }
-  if (domain != NULL) {
-    domain->Reset(StrCat("http://", path_vector[1]));
   }
 
   // [0] is "" because PathAndLeaf returns a string with a leading slash
@@ -202,8 +198,10 @@ void MockFilter::EndDocument() {
 // ProxyInterfaceTestBase.
 ProxyInterfaceTestBase::ProxyInterfaceTestBase()
     : callback_done_value_(false),
+      header_latency_ms_(0),
       mock_critical_images_finder_(
-          new MockCriticalImagesFinder(statistics())) {}
+          new MockCriticalImagesFinder(statistics())) {
+}
 
 void ProxyInterfaceTestBase::TestHeadersSetupRace() {
   mock_url_fetcher()->SetResponseFailure(AbsolutifyUrl(kPageUrl));
@@ -215,9 +213,9 @@ void ProxyInterfaceTestBase::SetUp() {
   ThreadSynchronizer* sync = server_context()->thread_synchronizer();
   sync->EnableForPrefix(ProxyFetch::kCollectorFinish);
   sync->AllowSloppyTermination(ProxyFetch::kCollectorFinish);
-  ProxyInterface::InitStats(statistics());
-  proxy_interface_.reset(
-      new ProxyInterface("localhost", 80, server_context(), statistics()));
+  ProxyInterface::InitStats("test-", statistics());
+  proxy_interface_.reset(new ProxyInterface(
+      "test-", "localhost", 80, server_context(), statistics()));
   server_context()->set_critical_images_finder(
       mock_critical_images_finder_);
 }
@@ -297,11 +295,18 @@ void ProxyInterfaceTestBase::FetchFromProxyNoWait(
     ResponseHeaders* headers_out) {
   sync_.reset(new WorkerTestBase::SyncPoint(
       server_context()->thread_system()));
+  request_context_.reset(CreateRequestContext());
+  if (header_latency_ms_ != 0) {
+    RequestTimingInfo* timing_info = mutable_timing_info();
+    timing_info->FetchStarted();
+    AdvanceTimeMs(header_latency_ms_);
+    timing_info->FetchHeaderReceived();
+  }
   AsyncFetch* fetch = new AsyncExpectStringAsyncFetch(
       expect_success, log_flush, &callback_buffer_,
       &callback_response_headers_, &callback_done_value_, sync_.get(),
       server_context()->thread_synchronizer(),
-      rewrite_driver()->request_context());
+      request_context());
   fetch->set_response_headers(headers_out);
   fetch->request_headers()->CopyFrom(request_headers);
   proxy_interface_->Fetch(AbsolutifyUrl(url), message_handler(), fetch);
@@ -419,6 +424,11 @@ void ProxyInterfaceTestBase::TestPropertyCacheWithHeadersAndOutput(
     // UserAgentMatcher::DeviceType.
     EXPECT_EQ(2, lru_cache()->num_misses());
   }
+}
+
+RequestContextPtr ProxyInterfaceTestBase::request_context() {
+  CHECK(request_context_.get() != NULL);
+  return request_context_;
 }
 
 }  // namespace net_instaweb

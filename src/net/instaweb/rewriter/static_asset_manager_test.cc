@@ -27,6 +27,7 @@
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_filter.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_parse_test_base.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -67,6 +68,8 @@ class StaticAssetManagerTest : public RewriteTestBase {
       }
     }
     virtual const char* Name() const { return "AddStaticJsBeforeBr"; }
+    ScriptUsage GetScriptUsage() const override { return kWillInjectScripts; }
+
    private:
     DISALLOW_COPY_AND_ASSIGN(AddStaticJsBeforeBr);
   };
@@ -102,32 +105,6 @@ class StaticAssetManagerTest : public RewriteTestBase {
 
   scoped_ptr<StaticAssetManager> manager_;
 };
-
-TEST_F(StaticAssetManagerTest, TestBlinkHandler) {
-  const char blink_url[] = "http://proxy-domain/psajs/blink.0.js";
-  EXPECT_STREQ(blink_url, manager_->GetAssetUrl(StaticAssetEnum::BLINK_JS,
-                                                options_));
-}
-
-TEST_F(StaticAssetManagerTest, TestBlinkGstatic) {
-  manager_->set_static_asset_base("http://proxy-domain");
-  manager_->ServeAssetsFromGStatic(StaticAssetManager::kGStaticBase);
-  manager_->SetGStaticHashForTest(
-      StaticAssetEnum::BLINK_JS,  "1");
-  const char blink_url[] =
-      "//www.gstatic.com/psa/static/1-blink.js";
-  EXPECT_STREQ(blink_url, manager_->GetAssetUrl(StaticAssetEnum::BLINK_JS,
-                                                options_));
-}
-
-TEST_F(StaticAssetManagerTest, TestBlinkDebug) {
-  manager_->ServeAssetsFromGStatic(StaticAssetManager::kGStaticBase);
-  manager_->SetGStaticHashForTest(StaticAssetEnum::BLINK_JS, "1");
-  options_->EnableFilter(RewriteOptions::kDebug);
-  const char blink_url[] = "//www.gstatic.com/psa/static/1-blink.js";
-  EXPECT_STREQ(blink_url, manager_->GetAssetUrl(StaticAssetEnum::BLINK_JS,
-                                                options_));
-}
 
 TEST_F(StaticAssetManagerTest, TestDeferJsGstatic) {
   manager_->ServeAssetsFromGStatic(StaticAssetManager::kGStaticBase);
@@ -171,8 +148,7 @@ TEST_F(StaticAssetManagerTest, TestJsDebug) {
     // TODO(sligocki): This should generalize to all resources which don't have
     // kContentTypeJs. But no interface provides content types currently :/
     if (module != StaticAssetEnum::BLANK_GIF &&
-        module != StaticAssetEnum::MOBILIZE_CSS &&
-        module != StaticAssetEnum::MOBILIZE_LAYOUT_CSS) {
+        module != StaticAssetEnum::MOBILIZE_CSS) {
       GoogleString script(manager_->GetAsset(module, options_));
       // Debug code is also put through the closure compiler to resolve any uses
       // of goog.require. As part of this, comments also get stripped out.
@@ -189,8 +165,7 @@ TEST_F(StaticAssetManagerTest, TestJsOpt) {
     // TODO(sligocki): This should generalize to all resources which don't have
     // kContentTypeJs. But no interface provides content types currently :/
     if (module != StaticAssetEnum::BLANK_GIF &&
-        module != StaticAssetEnum::MOBILIZE_CSS &&
-        module != StaticAssetEnum::MOBILIZE_LAYOUT_CSS) {
+        module != StaticAssetEnum::MOBILIZE_CSS) {
       GoogleString script(manager_->GetAsset(module, options_));
       EXPECT_STREQ("", ExtractCommentSkippingWhitelist(script))
           << "Comment found in debug version of asset " << module;
@@ -229,6 +204,9 @@ TEST_F(StaticAssetManagerTest, TestHtml5InsertInlineJs) {
 
 TEST_F(StaticAssetManagerTest, TestEncodedUrls) {
   for (int i = 0; i < StaticAssetEnum::StaticAsset_ARRAYSIZE; ++i) {
+    if (!manager_->IsValidIndex(i)) {
+      continue;
+    }
     StaticAssetEnum::StaticAsset module =
         static_cast<StaticAssetEnum::StaticAsset>(i);
 

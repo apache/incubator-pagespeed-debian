@@ -19,13 +19,15 @@
 
 #include "pagespeed/kernel/base/stdio_file_system.h"
 
-#include "pagespeed/kernel/base/google_message_handler.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/file_system_test_base.h"
+#include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/gtest.h"
 #include "pagespeed/kernel/base/posix_timer.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/timer.h"
 
 namespace net_instaweb {
 
@@ -85,7 +87,7 @@ class StdioFileSystemTest : public FileSystemTest {
       StringVector files;
       stdio_file_system_.ListContents(filename, &files, &handler_);
       for (int i = 0; i < files.size(); ++i) {
-        ASSERT_TRUE(HasPrefixString(files[i], "/"));
+        ASSERT_TRUE(strings::StartsWith(files[i], "/"));
         DeleteRecursivelyImpl(files[i]);
       }
 
@@ -189,6 +191,10 @@ TEST_F(StdioFileSystemTest, TestLock) {
 
 TEST_F(StdioFileSystemTest, TestLockTimeout) {
   TestLockTimeout();
+}
+
+TEST_F(StdioFileSystemTest, TestLockBumping) {
+  TestLockBumping();
 }
 
 }  // namespace net_instaweb

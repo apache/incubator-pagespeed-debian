@@ -27,6 +27,10 @@
 // LRUGets               43501155   43400000        100
 // LRUFailedGets         16068878   16000000        100
 // LRUEvictions         143558421  143200000        100
+//
+// Disclaimer: comparing runs over time and across different machines
+// can be misleading.  When contemplating an algorithm change, always do
+// interleaved runs with the old & new algorithm.
 
 #include "pagespeed/kernel/cache/lru_cache.h"
 
@@ -103,7 +107,7 @@ class TestPayload {
 
   void DoPuts(int rotate_by) {
     for (int k = 0; k < num_keys_; ++k) {
-      lru_cache_.Put(keys_[(k + rotate_by) % num_keys_], &values_[k]);
+      lru_cache_.Put(keys_[(k + rotate_by) % num_keys_], values_[k]);
     }
   }
 

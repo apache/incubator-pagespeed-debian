@@ -31,18 +31,17 @@
 
 #include <map>
 
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/thread_system.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 
 namespace net_instaweb {
-
-class AbstractMutex;
-class SharedString;
-class ThreadSystem;
 
 // See file comment
 class DelayCache : public CacheInterface {
@@ -53,7 +52,7 @@ class DelayCache : public CacheInterface {
 
   // Reimplementations of CacheInterface methods.
   virtual void Get(const GoogleString& key, Callback* callback);
-  virtual void Put(const GoogleString& key, SharedString* value);
+  virtual void Put(const GoogleString& key, const SharedString& value);
   virtual void Delete(const GoogleString& key);
   virtual void MultiGet(MultiGetRequest* request);
 

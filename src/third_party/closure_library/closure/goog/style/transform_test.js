@@ -16,6 +16,7 @@ goog.provide('goog.style.transformTest');
 goog.setTestOnly('goog.style.transformTest');
 
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.style.transform');
 goog.require('goog.testing.jsunit');
 goog.require('goog.userAgent');
@@ -24,7 +25,7 @@ goog.require('goog.userAgent.product.isVersion');
 
 /**
  * Element being transformed.
- * @type {Element}
+ * @type {!Element}
  */
 var element;
 
@@ -80,7 +81,7 @@ var setAndAssertScale = function(x, y, z) {
 
 
 function setUp() {
-  element = goog.dom.createElement('div');
+  element = goog.dom.createElement(goog.dom.TagName.DIV);
   goog.dom.appendChild(goog.dom.getDocument().body, element);
 }
 

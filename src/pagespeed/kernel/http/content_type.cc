@@ -48,6 +48,11 @@ const ContentType kTypes[] = {
   // While the official MIME type is image/vnd.microsoft.icon, old IE browsers
   // will not accept that type, so we use portable image/x-icon as canonical.
   {"image/x-icon",                  ".ico",  ContentType::kIco},
+  // Always return the data with Content-Type: application/javascript;
+  // charset=utf-8 in the HTTP header (application/x-javascript is
+  // also fine; application/json, less so). Using the right MIME type
+  // and charset is critical; never use text/plain or text/html, and
+  // do not mistype utf-8 as utf8.
   {"application/javascript",        ".json", ContentType::kJson},
   {"application/javascript",        ".map",  ContentType::kSourceMap},
   {"application/pdf",               ".pdf",  ContentType::kPdf},  // RFC 3778
@@ -133,7 +138,7 @@ bool ContentType::IsCss() const {
   return type_ == kCss;
 }
 
-bool ContentType::IsJs() const {
+bool ContentType::IsJsLike() const {
   switch (type_) {
     case kJavascript:
     case kJson:
@@ -294,7 +299,7 @@ void MimeTypeListToContentTypeSet(
 
 bool ContentType::IsCompressible() const {
   // TODO(jcrowell): Investigate images with exif data as compressible.
-  return IsXmlLike() || IsHtmlLike() || IsJs() || IsCss() || type_ == kText;
+  return IsXmlLike() || IsHtmlLike() || IsJsLike() || IsCss() || type_ == kText;
 }
 
 bool ContentType::IsLikelyStaticResource() const {

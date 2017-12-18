@@ -1,3 +1,18 @@
+#!/bin/bash
+#
+# Copyright 2016 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 set -u
 set -e
 
@@ -48,8 +63,8 @@ function ipro_rewrite_image_and_verify_response() {
   # for accommodating image encoder version difference.
   local LENGTH="$(extract_headers $FETCH_UNTIL_OUTFILE | scrape_content_length)"
   if [ "$EXPECTED_CONTENT_LENGTH" != "$UNOPTIMIZED" ]; then
-    local MIN_LENGTH=`expr $EXPECTED_CONTENT_LENGTH - 30`
-    local MAX_LENGTH=`expr $EXPECTED_CONTENT_LENGTH + 30`
+    local MIN_LENGTH=`expr $EXPECTED_CONTENT_LENGTH - 80`
+    local MAX_LENGTH=`expr $EXPECTED_CONTENT_LENGTH + 80`
     check [ $LENGTH -ge $MIN_LENGTH ]
     check [ $LENGTH -le $MAX_LENGTH ]
   fi
@@ -169,7 +184,7 @@ ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_CUPPA" \
 # Animated GIF image, optimized for Chrome on Android.
 ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_ANIMATION" \
   "$CHROME_MOBILE" "$ACCEPT_WEBP_YES" "image/gif" "image/webp" \
-  "" "User-Agent,Save-Data" "$UNOPTIMIZED" 6490 "$UNOPTIMIZED" 4312
+  "" "User-Agent,Save-Data" "$UNOPTIMIZED" 6122 "$UNOPTIMIZED" 3036
 # Animated GIF image, optimized for Safari on iOS.
 ipro_rewrite_image "$HOST_ALLOW_AUTO" "$IMAGE_ANIMATION" \
   "$SAFARI_MOBILE" "$ACCEPT_WEBP_NO" "image/gif" "image/gif" \

@@ -42,7 +42,8 @@ class CacheInterface {
   class Callback {
    public:
     virtual ~Callback();
-    SharedString* value() { return &value_; }
+    void set_value(const SharedString& value) { value_ = value; }
+    const SharedString& value() const { return value_; }
 
     // These methods are meant for use of callback subclasses that wrap
     // around other callbacks. Normal cache implementations should
@@ -94,13 +95,13 @@ class CacheInterface {
 
     bool called() const { return called_; }
     KeyState state() const { return state_; }
-    // super.value() is used to get/set the value.
+    // super.value(), super.set_value() are used to get/set the value.
 
     void Reset() {
       called_ = false;
       state_ = CacheInterface::kNotFound;
       SharedString empty;
-      *value() = empty;
+      set_value(empty);
     }
 
     virtual void Done(CacheInterface::KeyState state) {
@@ -148,7 +149,7 @@ class CacheInterface {
   // Puts a value into the cache.  The value that is passed in is not modified,
   // but the SharedString is passed by non-const pointer because its reference
   // count is bumped.
-  virtual void Put(const GoogleString& key, SharedString* value) = 0;
+  virtual void Put(const GoogleString& key, const SharedString& value) = 0;
   virtual void Delete(const GoogleString& key) = 0;
 
   // Convenience method to do a Put from a GoogleString* value.  The
@@ -157,7 +158,7 @@ class CacheInterface {
   void PutSwappingString(const GoogleString& key, GoogleString* value) {
     SharedString shared_string;
     shared_string.SwapWithString(value);
-    Put(key, &shared_string);
+    Put(key, shared_string);
   }
 
   // The name of this CacheInterface -- used for logging and debugging.
@@ -176,12 +177,16 @@ class CacheInterface {
   // returning from Get and MultiGet.
   virtual bool IsBlocking() const = 0;
 
-  // Returns true if the cache is in a healthy state.  Memory and
-  // file-based caches can simply return 'true'.  But for server-based
-  // caches, it is handy to be able to query to see whether it is in a
-  // good state.  It should be safe to call this frequently -- the
-  // implementation shouldn't do much more than check a bool flag
-  // under mutex.
+  // IsHealthy() is a rough estimation of whether cache is available for any
+  // operations. If it's false, caller may reasonably expect that making calls
+  // right now is useless as they will fail or have high latency. If it's true,
+  // operations should succeed, but some still may fail occasionally. The
+  // primary goal is to avoid sending commands to 'unhealthy' caches, e.g. if
+  // cache is under heavy load, we do not want to send even more requests.
+  //
+  // Memory and file-based caches can simply return 'true'. It should be safe
+  // to call this frequently -- the implementation shouldn't do much more that
+  // check a bool flag under mutex.
   virtual bool IsHealthy() const = 0;
 
   // Stops all cache activity.  Further Put/Delete calls will be dropped, and
@@ -209,7 +214,7 @@ class CacheInterface {
   // encoded into the value with key_value_codec.  It is only valid
   // to call this when MustEncodeKeyInValueOnPut() returns true.
   virtual void PutWithKeyInValue(const GoogleString& key,
-                                 SharedString* key_and_value) {
+                                 const SharedString& key_and_value) {
     CHECK(false);
   }
 

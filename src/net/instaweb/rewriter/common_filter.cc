@@ -138,14 +138,15 @@ void CommonFilter::Characters(net_instaweb::HtmlCharactersNode* characters) {
 // Different browsers deal with such refs differently, but we shouldn't
 // change their behavior.
 bool CommonFilter::BaseUrlIsValid() const {
-  // If there are no href or src attributes before the base, it's
-  // always valid.
-  if (!driver_->refs_before_base()) {
+  // If there are no href or src attributes before the base, or a broken base,
+  // it's valid.
+  if (!driver_->refs_before_base() && !driver_->other_base_problem()) {
     return true;
   }
   // If the filter has already seen the base url, then it's now valid
-  // even if there were urls before it.
-  return seen_base_;
+  // even if there were urls before it --- unless something else was
+  // wrong.
+  return seen_base_ && !driver_->other_base_problem();
 }
 
 void CommonFilter::ResolveUrl(StringPiece input_url, GoogleUrl* out_url) {
@@ -159,7 +160,19 @@ void CommonFilter::ResolveUrl(StringPiece input_url, GoogleUrl* out_url) {
   }
 }
 
+bool CommonFilter::IsRelativeUrlLoadPermittedByCsp(
+    StringPiece url, CspDirective role) {
+  GoogleUrl abs_url;
+  ResolveUrl(url, &abs_url);
+  if (abs_url.IsWebValid()) {
+    return driver()->IsLoadPermittedByCsp(abs_url, role);
+  } else {
+    return false;
+  }
+}
+
 ResourcePtr CommonFilter::CreateInputResource(StringPiece input_url,
+                                              RewriteDriver::InputRole role,
                                               bool* is_authorized) {
   *is_authorized = true;  // Must be false iff input_url is not authorized.
   ResourcePtr resource;
@@ -172,19 +185,22 @@ ResourcePtr CommonFilter::CreateInputResource(StringPiece input_url,
         (IntendedForInlining()
          ? RewriteDriver::kIntendedForInlining
          : RewriteDriver::kIntendedForGeneral),
+        role,
         is_authorized);
   }
   return resource;
 }
 
 ResourcePtr CommonFilter::CreateInputResourceOrInsertDebugComment(
-    StringPiece input_url, HtmlElement* element) {
+    StringPiece input_url, RewriteDriver::InputRole role,
+    HtmlElement* element) {
   DCHECK(element != NULL);
   bool is_authorized;
-  ResourcePtr input_resource(CreateInputResource(input_url, &is_authorized));
+  ResourcePtr input_resource(
+      CreateInputResource(input_url, role, &is_authorized));
   if (input_resource.get() == NULL) {
     if (!is_authorized) {
-      driver()->InsertUnauthorizedDomainDebugComment(input_url, element);
+      driver()->InsertUnauthorizedDomainDebugComment(input_url, role, element);
     }
   }
   return input_resource;
@@ -295,7 +311,9 @@ void CommonFilter::AddJsToElement(StringPiece js, HtmlElement* script) {
     js = js_str;
   }
 
-  if (!driver_->doctype().IsVersion5()) {
+  // is pedantic filter only check sufficient for adding type attribute?
+  if (!driver_->doctype().IsVersion5() ||
+          driver_->options()->Enabled(RewriteOptions::kPedantic)) {
     driver_->AddAttribute(script, HtmlName::kType, "text/javascript");
   }
   HtmlCharactersNode* script_content = driver_->NewCharactersNode(script, js);

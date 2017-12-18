@@ -17,6 +17,7 @@
 #include "pagespeed/kernel/http/response_headers.h"
 
 #include <algorithm>                    // for min
+#include <cstddef>
 #include <cstdio>     // for fprintf, stderr, snprintf
 #include <map>
 #include <memory>
@@ -24,6 +25,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/escaping.h"
 #include "pagespeed/kernel/base/string.h"
@@ -196,7 +198,6 @@ void ResponseHeaders::CopyFrom(const ResponseHeaders& other) {
   cache_fields_dirty_ = other.cache_fields_dirty_;
   force_cache_ttl_ms_ = other.force_cache_ttl_ms_;
   force_cached_ = other.force_cached_;
-  min_cache_ttl_applied_ = other.min_cache_ttl_applied_;
   http_options_ = other.http_options_;
 }
 
@@ -217,7 +218,6 @@ void ResponseHeaders::Clear() {
   cache_fields_dirty_ = false;
   force_cache_ttl_ms_ = -1;
   force_cached_ = false;
-  min_cache_ttl_applied_ = false;
 
   // Note: http_options_ are not cleared here!
   // Those should only be set at construction time and never mutated.
@@ -245,6 +245,12 @@ const char* ResponseHeaders::reason_phrase() const {
 void ResponseHeaders::set_reason_phrase(const StringPiece& reason_phrase) {
   mutable_proto()->set_reason_phrase(reason_phrase.data(),
                                      reason_phrase.size());
+}
+
+bool ResponseHeaders::has_last_modified_time_ms() const {
+  DCHECK(!cache_fields_dirty_)
+      << "Call ComputeCaching() before last_modified_time_ms()";
+  return proto()->has_last_modified_time_ms();
 }
 
 int64 ResponseHeaders::last_modified_time_ms() const {
@@ -511,27 +517,110 @@ void ResponseHeaders::SetTimeHeader(const StringPiece& header, int64 time_ms) {
   }
 }
 
-void ResponseHeaders::SetOriginalContentLength(int64 content_length) {
-  // This does not impact caching headers, so avoid ComputeCaching()
-  // by restoring cache_fields_dirty_ after we set the header.
+void ResponseHeaders::SetContentLength(int64 content_length) {
+  // Setting the content-length to the same value as the
+  // x-original-content-length should clear any x-original-content-length.
+  // This happens when serving a cached gzipped value to a client that
+  // does not accept gzip.  However, only remove the original-content-length
+  // if it is the same as the new resulting content length, because the
+  // content may have been minified to a smaller value, and we want to
+  // retain evidence of the cost savings in that case.
   bool dirty = cache_fields_dirty_;
-  Replace(HttpAttributes::kXOriginalContentLength,
-          Integer64ToString(content_length));
+  GoogleString content_length_str = Integer64ToString(content_length);
+  Remove(HttpAttributes::kXOriginalContentLength, content_length_str);
+  Replace(HttpAttributes::kContentLength, content_length_str);
   cache_fields_dirty_ = dirty;
 }
 
+void ResponseHeaders::SetOriginalContentLength(int64 content_length) {
+  // This does not impact caching headers, so avoid ComputeCaching()
+  // by restoring cache_fields_dirty_ after we set the header.
+  if (!Has(HttpAttributes::kXOriginalContentLength)) {
+    bool dirty = cache_fields_dirty_;
+    Add(HttpAttributes::kXOriginalContentLength,
+        Integer64ToString(content_length));
+    cache_fields_dirty_ = dirty;
+  }
+}
+
 bool ResponseHeaders::Sanitize() {
-  // Remove cookies, which we will never store in a cache.
-  StringPieceVector names_to_sanitize = HttpAttributes::SortedHopByHopHeaders();
-  return RemoveAllFromSortedArray(&names_to_sanitize[0],
-                                  names_to_sanitize.size());
+  ConstStringStarVector v;
+  bool changed = false;
+
+  // Sanitize any fields marked as hop-by-hop via the Connection: header
+  if (Lookup(HttpAttributes::kConnection, &v)) {
+    for (int i = 0, n = v.size(); i < n; ++i) {
+      StringPiece val = *v[i];
+      if (!IsHopByHopIndication(val)) {
+        continue;
+      }
+
+      if (StringCaseEqual(val, HttpAttributes::kConnection)) {
+        // Don't want to remove it since we have pointers into it, and it's
+        // already hop-by-hop.
+        continue;
+      }
+
+      changed = RemoveAll(*v[i]) || changed;
+    }
+  }
+
+  // Remove cookies plus any well-known hop-by-hop headers, which we will never
+  // store in a cache.
+  const StringPieceVector& names_to_sanitize =
+      HttpAttributes::SortedHopByHopHeaders();
+  changed = RemoveAllFromSortedArray(
+      &names_to_sanitize[0], names_to_sanitize.size()) || changed;
+  return changed;
 }
 
 void ResponseHeaders::GetSanitizedProto(HttpResponseHeaders* proto) const {
   Headers<HttpResponseHeaders>::CopyToProto(proto);
   protobuf::RepeatedPtrField<NameValue>* headers = proto->mutable_header();
-  StringPieceVector names_to_sanitize = HttpAttributes::SortedHopByHopHeaders();
+
+  // Note that these need to be deep-copies as we are mutating the underlying
+  // data.
+  StringVector more_names;
+
+  // Mark all headers marked as hop-by-hop in "Connection: " for sanitization.
+  for (int i = 0, n = headers->size(); i < n; ++i) {
+    if (StringCaseEqual(headers->Get(i).name(), HttpAttributes::kConnection)) {
+      StringCompareInsensitive compare;
+      StringPieceVector split;
+      SplitStringPieceToVector(headers->Get(i).value(), ",", &split, true);
+      if (split.empty()) {
+        split.push_back(headers->Get(i).value());
+      }
+
+      // Check each value in Connection: val1, val2, ...
+      for (int j = 0, m = split.size(); j < m; ++j) {
+        StringPiece val = split[j];
+        TrimWhitespace(&val);
+        // Skip values that are connection-tokens, empty, or are defined
+        // as being end-to-end.
+        if (!IsHopByHopIndication(val)) {
+          continue;
+        }
+
+        // Find the position at which we should insert to keep the list sorted.
+        StringVector::iterator up = std::lower_bound(
+            more_names.begin(), more_names.end(), val, compare);
+
+        // Insert when the entry is not already contained.
+        if (up == more_names.end() || !StringCaseEqual(*up, val)) {
+          more_names.insert(up, val.as_string());
+        }
+      }
+    }
+  }
+
+  const StringPieceVector& names_to_sanitize =
+      HttpAttributes::SortedHopByHopHeaders();
   RemoveFromHeaders(&names_to_sanitize[0], names_to_sanitize.size(), headers);
+  // The common case will be that more_names is empty.
+  if (more_names.size() > 0) {
+    RemoveFromHeaders(&more_names[0], more_names.size(), headers);
+  }
 }
 
 namespace {
@@ -683,14 +772,6 @@ void ResponseHeaders::ComputeCaching() {
     if (computer.IsExplicitlyCacheable()) {
       // TODO(sligocki): Do we care about the return value.
       computer.GetFreshnessLifetimeMillis(&cache_ttl_ms);
-      // If min_cache_ttl_ms is set, this overrides cache TTL hints even if
-      // explicitly set in the header. Use the max of min_cache_ttl_ms and
-      // the cache_ttl computed so far. Do this only for non HTML.
-      if (type != NULL && !type->IsHtmlLike() &&
-          http_options_.min_cache_ttl_ms > cache_ttl_ms) {
-        cache_ttl_ms = http_options_.min_cache_ttl_ms;
-        min_cache_ttl_applied_ = true;
-      }
     }
     if (force_caching_enabled &&
         (force_cache_ttl_ms_ > cache_ttl_ms || !is_proxy_cacheable)) {
@@ -714,22 +795,16 @@ void ResponseHeaders::ComputeCaching() {
       proto->set_proxy_cacheable(false);
     }
 
-    if (proto->proxy_cacheable() && !force_cached_) {
-      if (!computer.IsExplicitlyCacheable()) {
-        // If the resource is proxy cacheable but it does not have explicit
-        // caching headers and is not force cached, explicitly set the caching
-        // headers.
-        DCHECK(has_date);
-        DCHECK(cache_ttl_ms == http_options_.implicit_cache_ttl_ms);
-        proto->set_is_implicitly_cacheable(true);
-        SetDateAndCaching(date_ms, cache_ttl_ms,
-                          CacheControlValuesToPreserve());
-      } else if (min_cache_ttl_applied_) {
-        DCHECK(has_date);
-        DCHECK(cache_ttl_ms == http_options_.min_cache_ttl_ms);
-        SetDateAndCaching(date_ms, cache_ttl_ms,
-                          CacheControlValuesToPreserve());
-      }
+    if (proto->proxy_cacheable() && !force_cached_ &&
+        !computer.IsExplicitlyCacheable()) {
+      // If the resource is proxy cacheable but it does not have explicit
+      // caching headers and is not force cached, explicitly set the caching
+      // headers.
+      DCHECK(has_date);
+      DCHECK(cache_ttl_ms == http_options_.implicit_cache_ttl_ms);
+      proto->set_is_implicitly_cacheable(true);
+      SetDateAndCaching(date_ms, cache_ttl_ms,
+                        CacheControlValuesToPreserve());
     }
   } else {
     proto->set_expiration_time_ms(0);
@@ -746,6 +821,15 @@ GoogleString ResponseHeaders::CacheControlValuesToPreserve() {
   if (HasValue(HttpAttributes::kCacheControl, "no-store")) {
     to_preserve += ", no-store";
   }
+
+  ConstStringStarVector cc_values;
+  Lookup(HttpAttributes::kCacheControl, &cc_values);
+  for (auto value : cc_values) {
+    if (StringCaseStartsWith(*value, "s-maxage=")) {
+      to_preserve += ", " + *value;
+    }
+  }
+
   return to_preserve;
 }
 
@@ -849,7 +933,7 @@ bool ResponseHeaders::ParseDateHeader(
 }
 
 void ResponseHeaders::ParseFirstLine(const StringPiece& first_line) {
-  if (first_line.starts_with("HTTP/")) {
+  if (strings::StartsWith(first_line, "HTTP/")) {
     ParseFirstLineHelper(first_line.substr(5));
   } else {
     LOG(WARNING) << "Could not parse first line: " << first_line;
@@ -913,10 +997,6 @@ void ResponseHeaders::DebugPrint() const {
   fputs(BoolToString(proto()->is_implicitly_cacheable()), stderr);
   fputs("\nhttp_options_.implicit_cache_ttl_ms = ", stderr);
   fputs(Integer64ToString(http_options_.implicit_cache_ttl_ms).c_str(), stderr);
-  fputs("\nhttp_options_.min_cache_ttl_ms = ", stderr);
-  fputs(Integer64ToString(http_options_.min_cache_ttl_ms).c_str(), stderr);
-  fputs("\nmin_cache_ttl_applied_ = ", stderr);
-  fputs(BoolToString(min_cache_ttl_applied_), stderr);
   if (!cache_fields_dirty_) {
     fputs("\nexpiration_time_ms_ = ", stderr);
     fputs(Integer64ToString(proto()->expiration_time_ms()).c_str(), stderr);
@@ -1117,6 +1197,148 @@ bool ResponseHeaders::ClearOptionCookies(
 
 void ResponseHeaders::UpdateHook() {
   cache_fields_dirty_ = true;
+}
+
+GoogleString ResponseHeaders::RelCanonicalHeaderValue(StringPiece url) {
+  return StrCat("<", GoogleUrl::Sanitize(url), ">; rel=\"canonical\"");
+}
+
+bool ResponseHeaders::HasLinkRelCanonical() const {
+  ConstStringStarVector links;
+  Lookup(HttpAttributes::kLink, &links);
+  for (int i = 0, n = links.size(); i < n; ++i) {
+    StringPiece cand(*links[i]);
+    stringpiece_ssize_type rel_pos = cand.find("rel");
+    stringpiece_ssize_type can_pos = cand.rfind("canonical");
+    if (rel_pos != StringPiece::npos &&
+        can_pos != StringPiece::npos &&
+        rel_pos < can_pos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ResponseHeaders::SetSMaxAge(int s_maxage_sec) {
+  GoogleString updated_cache_control;
+
+  ConstStringStarVector values;
+  GoogleString existing_cache_control = "";
+  if (Lookup(HttpAttributes::kCacheControl, &values)) {
+    // TODO(jefftk): since we've done the work to split it into a vector, it's
+    // inefficient to be joining it back to a string to give to ApplySMaxAge
+    // which will split to a vector.
+    existing_cache_control = JoinStringStar(values, ", ");
+  }
+
+  if (ApplySMaxAge(s_maxage_sec,
+                   existing_cache_control,
+                   &updated_cache_control)) {
+    Replace(HttpAttributes::kCacheControl, updated_cache_control);
+  }
+}
+
+// static
+bool ResponseHeaders::ApplySMaxAge(int s_maxage_sec,
+                                   StringPiece existing_cache_control,
+                                   GoogleString* updated_cache_control) {
+  TrimWhitespace(&existing_cache_control);
+  GoogleString s_maxage_str = StrCat("s-maxage=",
+                                     IntegerToString(s_maxage_sec));
+  if (existing_cache_control.empty()) {
+    *updated_cache_control = s_maxage_str;
+    return true;
+  }
+
+  StringPieceVector segments;
+  SplitStringPieceToVector(existing_cache_control, ",", &segments,
+                           true /* omit empty strings */);
+  for (StringPiece& segment : segments) {
+    TrimWhitespace(&segment);
+    if (StringCaseEqual(segment, "no-transform")) {
+      // We're not allowed to touch this, so don't.
+      return false;
+    }
+    if (StringCaseEqual(segment, "no-cache") ||
+        StringCaseEqual(segment, "no-store") ||
+        StringCaseEqual(segment, "private")) {
+      // Downstream shared caches shouldn't be caching these, and adding
+      // s-maxage might confuse one into thinking that it should actually go
+      // ahead and cache, so if any of these are present, don't add it.
+      return false;
+    }
+  }
+
+  // It's not clear from the RFC what we should do if there are multiple
+  // s-maxages with different values.  The most conservative thing is probably
+  // to update them individually, so let's do that.
+  bool found_existing_s_maxage = false;
+  bool updated_existing_s_maxage = false;
+  for (StringPiece& segment : segments) {
+    if (StringCaseStartsWith(segment, "s-maxage=")) {
+      // Found existing s-maxage.  If it's larger than s_maxage_sec update it.
+      found_existing_s_maxage = true;
+
+      StringPiece existing_value_s = segment;
+      existing_value_s.remove_prefix(STATIC_STRLEN("s-maxage="));
+      int existing_value;
+      if (!StringToInt(existing_value_s, &existing_value)) {
+        // Failed to parse existing s-maxage value; leave it alone.
+      } else if (existing_value <= s_maxage_sec) {
+        // It's already small enough, don't change this one.  But there might be
+        // additional ones that need to be lowered, so keep going.
+      } else {
+        segment = s_maxage_str;
+        updated_existing_s_maxage = true;
+      }
+    }
+  }
+  if (found_existing_s_maxage) {
+    if (updated_existing_s_maxage) {
+      *updated_cache_control = JoinCollection(segments, ", ");
+    }
+    return updated_existing_s_maxage;
+  }
+
+  // Didn't find s-maxage; look for max-age.
+
+  // It's not clear how to handle multiple max-ages either.  Since s-maxage
+  // overrides max-age if present, and we don't want to accidentally make
+  // something more cacheable, we only add s-maxage if it's lower than the
+  // lowest existing max-age header.
+  bool found_existing_maxage = false;
+  int lowest_existing_maxage_value = s_maxage_sec+1;
+  for (StringPiece& segment : segments) {
+    if (StringCaseStartsWith(segment, "max-age=")) {
+      found_existing_maxage = true;
+      StringPiece existing_value_s = segment;
+      existing_value_s.remove_prefix(STATIC_STRLEN("max-age="));
+      int existing_value;
+      if (!StringToInt(existing_value_s, &existing_value)) {
+        // Failed to parse existing max-age value; ignore it.
+      } else if (existing_value < lowest_existing_maxage_value) {
+        lowest_existing_maxage_value = existing_value;
+      }
+    }
+  }
+  if (found_existing_maxage && lowest_existing_maxage_value <= s_maxage_sec) {
+    return false;
+  }
+  *updated_cache_control = StrCat(existing_cache_control, ", ", s_maxage_str);
+  return true;
+}
+
+bool ResponseHeaders::IsHopByHopIndication(StringPiece val) {
+  StringCompareInsensitive compare;
+  const StringPieceVector& end_to_end = HttpAttributes::SortedEndToEndHeaders();
+
+  if (val.empty() || StringCaseEqual(val, "keep-alive") ||
+      StringCaseEqual(val, "close") || StringCaseStartsWith(val, "timeout=") ||
+      StringCaseStartsWith(val, "max=") ||
+      std::binary_search(end_to_end.begin(), end_to_end.end(), val, compare)) {
+    return false;
+  }
+  return true;
 }
 
 }  // namespace net_instaweb

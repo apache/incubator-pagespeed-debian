@@ -25,7 +25,6 @@
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/scoped_ptr.h"
 #include "testing/base/public/googletest.h"
 #include "testing/base/public/gunit.h"
 
@@ -844,6 +843,13 @@ TEST_F(ParserTest, numbers) {
   EXPECT_EQ(Value::NO_UNIT, v->GetDimension());
   EXPECT_EQ(';', *p->in_);
 
+  p.reset(new Parser("3vm;"));
+  v.reset(p->ParseNumber());
+  ASSERT_EQ(Value::NUMBER, v->GetLexicalUnitType());
+  EXPECT_EQ(3, v->GetIntegerValue());
+  EXPECT_EQ(Value::VM, v->GetDimension());
+  EXPECT_EQ(';', *p->in_);
+
   p.reset(new Parser("1em;"));
   v.reset(p->ParseNumber());
   ASSERT_EQ(Value::NUMBER, v->GetLexicalUnitType());
@@ -1116,8 +1122,7 @@ TEST_F(ParserTest, declarations) {
   a.reset(new Parser(
       "{font-size: #333; color:red"));
   t.reset(a->ParseDeclarations());
-  ASSERT_EQ(1, t->size());
-  EXPECT_EQ(Property::COLOR, t->get(0)->prop());
+  ASSERT_EQ(0, t->size());
 
   a.reset(new Parser(
       "{font-size: #333; color:red"));
@@ -1128,8 +1133,7 @@ TEST_F(ParserTest, declarations) {
   a.reset(new Parser(
       "font-size {background: #333; color:red"));
   t.reset(a->ParseDeclarations());
-  ASSERT_EQ(1, t->size());
-  EXPECT_EQ(Property::COLOR, t->get(0)->prop());
+  EXPECT_EQ(0, t->size());
 
   a.reset(new Parser(
       "font-size {background: #333; color:red"));
@@ -1151,9 +1155,8 @@ TEST_F(ParserTest, declarations) {
   a.reset(new Parser(
       "top:1px; {font-size: #333; color:red}"));
   t.reset(a->ParseDeclarations());
-  ASSERT_EQ(2, t->size());
+  ASSERT_EQ(1, t->size());
   EXPECT_EQ(Property::TOP, t->get(0)->prop());
-  EXPECT_EQ(Property::COLOR, t->get(1)->prop());
 
   a.reset(new Parser(
       "top:1px; {font-size: #333; color:red}"));
@@ -1161,6 +1164,25 @@ TEST_F(ParserTest, declarations) {
   t.reset(a->ParseDeclarations());
   ASSERT_EQ(1, t->size());
   EXPECT_EQ(Property::TOP, t->get(0)->prop());
+
+  // First, the unterminated string should be closed at the new line.
+  // A string at the start of a declaration is yet-another parse error,
+  // so the recovery should skip to the first ';' after the string end,
+  // which would be the one after height: (since the one after the width is
+  // inside the string).
+  a.reset(new Parser("display:block; 'width: 100%;\n height: 100%; color:red"));
+  t.reset(a->ParseDeclarations());
+  ASSERT_EQ(2, t->size());
+  EXPECT_EQ(Property::DISPLAY, t->get(0)->prop());
+  EXPECT_EQ(Property::COLOR, t->get(1)->prop());
+
+  // Make sure we count {} when doing recovery
+  a.reset(new Parser(
+      "display:block; 'width: 100%;\n {height: 100%; color:red}; top: 1px"));
+  t.reset(a->ParseDeclarations());
+  ASSERT_EQ(2, t->size());
+  EXPECT_EQ(Property::DISPLAY, t->get(0)->prop());
+  EXPECT_EQ(Property::TOP, t->get(1)->prop());
 }
 
 TEST_F(ParserTest, illegal_constructs) {
@@ -1913,7 +1935,7 @@ TEST_F(ParserTest, CharsetError) {
 }
 
 TEST_F(ParserTest, AcceptCorrectValues) {
-  // http://code.google.com/p/modpagespeed/issues/detail?id=128
+  // http://github.com/pagespeed/mod_pagespeed/issues/128
   Parser p("list-style-type: none");
   scoped_ptr<Declarations> declarations(p.ParseDeclarations());
   EXPECT_EQ(1, declarations->size());

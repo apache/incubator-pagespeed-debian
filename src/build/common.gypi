@@ -14,9 +14,6 @@
 
 {
   'variables': {
-    # This should normally be passed in by gclient's hooks
-    'chromium_revision%': 256281,
-
     # Make sure we link statically so everything gets linked into a
     # single shared object.
     'library': 'static_library',
@@ -43,6 +40,12 @@
     # unfortunately not supported on some common systems.
     'support_posix_shared_mem%': 0,
 
+    # Detect clang being configured via CXX envvar, which is the easiest
+    # way for our users to change the compiler (since gclient gets in
+    # the way of tweaking gyp flags directly).
+    'clang_version':
+      '<!(python <(DEPTH)/build/clang_version.py)',
+
     'conditions': [
       # TODO(morlovich): AIX, Solaris, FreeBSD10?
       ['OS == "linux"', {
@@ -67,6 +70,10 @@
     'pagespeed_overrides.gypi',
   ],
   'target_defaults': {
+    'variables': {
+      # Make this available here as well.
+      'use_system_libs%': 0,
+    },
     'conditions': [
       ['support_posix_shared_mem == 1', {
         'defines': [ 'PAGESPEED_SUPPORT_POSIX_SHARED_MEM', ],
@@ -80,27 +87,9 @@
            '<(gcc_version) != <(gcc_devel_version2)', {
           'cflags!': ['-Werror']
           }],
-          # Newer Chromium common.gypi adds -Wno-unused-but-set-variable
-          # (unconditionally). This is wrong for gcc < 4.6, since the flag
-          # was added in 4.6, but very much needed for >= 4.6 since
-          # otherwise ICU headers don't build with -Werror.
-          #
-          # At the moment, we need to support both building with gcc < 4.6
-          # and building with old Chromium --- so we remove the flag for
-          # < 4.6 gcc, and add it for newer versions.
-          # TODO(morlovich): Upstream, but how high?
-          ['<(gcc_version) < 46', {
-            'cflags!': ['-Wno-unused-but-set-variable']
-          }, {
-            'cflags+': ['-Wno-unused-but-set-variable']
-          }],
-          # Similarly, there is no -Wno-unused-result for gcc < 4.5
-          ['<(gcc_version) < 45', {
-            'cflags!': ['-Wno-unused-result']
-          }],
-          ['<(gcc_version) == 46', {
-            'cflags+': ['-Wno-sign-compare']
-          }],
+          ['<(gcc_version) < 48 and (clang_version == 0)', {
+            'cflags+': '<!(echo gcc \< 4.8 is too old and no longer supported; false)'
+          }]
         ],
         'cflags': [
           # Our dependency on OpenCV need us to turn on exceptions.
@@ -110,6 +99,10 @@
           '-fasynchronous-unwind-tables',
           # We'd like to add '-Wtype-limits', but this does not work on
           # earlier versions of g++ on supported operating systems.
+          #
+          # Use -DFORTIFY_SOURCE to add extra checks to functions like printf,
+          # and bounds checking to copies.
+          '-D_FORTIFY_SOURCE=2',
         ],
         'cflags_cc!': [
           # Newer Chromium build adds -Wsign-compare which we have some
@@ -119,6 +112,7 @@
         ],
         'cflags_cc': [
           '-frtti',  # Hardy's g++ 4.2 <trl/function> uses typeid
+          '-D_FORTIFY_SOURCE=2',
         ],
         'defines!': [
           # testing/gtest.gyp defines GTEST_HAS_RTTI=0 for itself and all deps.
@@ -151,16 +145,18 @@
           'OTHER_CFLAGS': ['-funsigned-char', '-Wno-error'],
         },
       }],
+      ['use_system_libs == 0', {
+        'ldflags+': [
+            '-static-libstdc++',
+            '-static-libgcc',
+        ]
+      }],
     ],
 
-    'defines': [ 'CHROMIUM_REVISION=<(chromium_revision)',
-                 # See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
-                 '_GLIBCXX_USE_CXX11_ABI=0',
-                 '__STDC_LIMIT_MACROS',],
+    'defines': [ # See https://gcc.gnu.org/onlinedocs/libstdc++/manual/using_dual_abi.html
+                 '_GLIBCXX_USE_CXX11_ABI=0' ],
 
-    # We don't want -std=gnu++0x (enabled by some versions of libpagespeed)
-    # since it can cause binary compatibility problems; see issue 453.
-    'cflags!': [
+    'cflags_cc+': [
       '-std=gnu++0x'
     ],
 

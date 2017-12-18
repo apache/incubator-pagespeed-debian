@@ -70,17 +70,10 @@
 #include "pagespeed/kernel/http/data_url.h"
 #include "pagespeed/kernel/http/google_url.h"
 #include "pagespeed/kernel/http/response_headers.h"
+#include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/kernel/util/simple_random.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 #include "webutil/css/parser.h"
-
-#include "base/at_exit.h"
-
-namespace {
-
-base::AtExitManager* at_exit_manager = NULL;
-
-}  // namespace
 
 namespace net_instaweb {
 
@@ -88,6 +81,9 @@ class CacheExtender;
 class ImageCombineFilter;
 
 namespace {
+
+const char kInlineCspMessage[] =
+    "Avoiding modifying inline style with CSP present";
 
 // A simple transformer that resolves URLs against a base. Unlike
 // RewriteDomainTransformer, does not do any mapping or trimming.
@@ -294,6 +290,10 @@ bool CssFilter::Context::SendFallbackResponse(
   return ret;
 }
 
+bool CssFilter::Context::PolicyPermitsRendering() const {
+  return AreOutputsAllowedByCsp(CspDirective::kStyleSrc);
+}
+
 void CssFilter::Context::Render() {
   if (num_output_partitions() == 0) {
     return;
@@ -444,7 +444,7 @@ bool CssFilter::Context::RewriteCssText(const GoogleUrl& css_base_gurl,
     // comment? There are often a lot and they can be quite long, so I'm not
     // sure it's the best idea. Perhaps better to ask users to use the command
     // line utility? Or is it better to give them all the info in one place?
-    output_partition(0)->add_debug_message(StrCat(
+    mutable_output_partition(0)->add_debug_message(StrCat(
         "CSS rewrite failed: Parse error in ", css_base_gurl.Spec()));
   } else {
     // Edit stylesheet.
@@ -551,13 +551,16 @@ bool CssFilter::Context::FallbackRewriteUrls(
       CHECK(url.IsAnyValid()) << it->first;
       // Add slot.
       bool is_authorized;
-      ResourcePtr resource = Driver()->CreateInputResource(url, &is_authorized);
+      // This can be both an image or CSS at very least, so have to be
+      // conservative wrt to policy.
+      ResourcePtr resource = Driver()->CreateInputResource(
+          url, RewriteDriver::InputRole::kUnknown, &is_authorized);
       if (resource.get()) {
         ResourceSlotPtr slot(new AssociationSlot(
             resource, fallback_transformer_->map(), url.Spec()));
         css_image_rewriter_->RewriteSlot(slot, ImageInlineMaxBytes(), this);
       } else if (!is_authorized) {
-        output_partition(0)->add_debug_message(
+        mutable_output_partition(0)->add_debug_message(
             StrCat("A resource was not rewritten because ", url.Host(),
                    " is not an authorized domain"));
       }
@@ -587,7 +590,7 @@ void CssFilter::Context::Harvest() {
       filter_->num_fallback_failures_->Add(1);
       GoogleUrl css_base_gurl;
       GetCssBaseUrlToUse(input_resource_, &css_base_gurl);
-      output_partition(0)->add_debug_message(StrCat(
+      mutable_output_partition(0)->add_debug_message(StrCat(
           "CSS rewrite failed: Fallback transformer error in ",
           css_base_gurl.Spec()));
     }
@@ -663,8 +666,8 @@ void CssFilter::Context::Harvest() {
       server_context->MergeNonCachingResponseHeaders(input_resource_,
                                                      output_resource_);
     } else {
-      output_partition(0)->set_inlined_data(out_text);
-      output_partition(0)->set_is_inline_output_resource(true);
+      mutable_output_partition(0)->set_inlined_data(out_text);
+      mutable_output_partition(0)->set_is_inline_output_resource(true);
     }
     ok = Driver()->Write(ResourceVector(1, input_resource_),
                          out_text,
@@ -674,7 +677,7 @@ void CssFilter::Context::Harvest() {
   }
 
   if (!hierarchy_.flattening_failure_reason().empty()) {
-    output_partition(0)->add_debug_message(
+    mutable_output_partition(0)->add_debug_message(
         hierarchy_.flattening_failure_reason());
   }
 
@@ -717,11 +720,13 @@ bool CssFilter::Context::SerializeCss(int64 in_text_size,
     // Don't rewrite if we didn't edit it or make it any smaller.
     if (!previously_optimized && bytes_saved <= 0) {
       ret = false;
-      Driver()->InfoAt(this, "CSS parser increased size of CSS file %s by %s "
-                      "bytes.", css_base_gurl.spec_c_str(),
-                      Integer64ToString(-bytes_saved).c_str());
+      if (bytes_saved != 0) {
+        Driver()->InfoAt(this, "CSS parser increased size of CSS file %s by %s "
+                         "bytes.", css_base_gurl.spec_c_str(),
+                         Integer64ToString(-bytes_saved).c_str());
+      }
       filter_->num_rewrites_dropped_->Add(1);
-      output_partition(0)->add_debug_message(StrCat(
+      mutable_output_partition(0)->add_debug_message(StrCat(
           "CSS rewrite failed: Cannot improve ", css_base_gurl.Spec()));
     }
   }
@@ -893,8 +898,6 @@ T* MergeArrays(const T* a, int a_size, const T* b, int b_size, int* out_size) {
 }  // namespace
 
 void CssFilter::Initialize() {
-  InitializeAtExitManager();
-
   CHECK(merged_filters_ == NULL);
 #ifndef NDEBUG
   for (int i = 1; i < kRelatedFiltersSize; ++i) {
@@ -916,12 +919,6 @@ void CssFilter::Initialize() {
 }
 
 void CssFilter::Terminate() {
-  // Note: This is not thread-safe, but I don't believe we need it to be.
-  if (at_exit_manager != NULL) {
-    delete at_exit_manager;
-    at_exit_manager = NULL;
-  }
-
   CHECK(merged_filters_ != NULL);
   delete [] merged_filters_;
   merged_filters_ = NULL;
@@ -933,13 +930,6 @@ void CssFilter::Terminate() {
 void CssFilter::AddRelatedOptions(StringPieceVector* target) {
   for (int i = 0, n = arraysize(kRelatedOptions); i < n; ++i) {
     target->push_back(kRelatedOptions[i]);
-  }
-}
-
-void CssFilter::InitializeAtExitManager() {
-  // Note: This is not thread-safe, but I don't believe we need it to be.
-  if (at_exit_manager == NULL) {
-    at_exit_manager = new base::AtExitManager;
   }
 }
 
@@ -989,7 +979,7 @@ void CssFilter::Characters(HtmlCharactersNode* characters_node) {
     // Note: HtmlParse should guarantee that we only get one CharactersNode
     // per <style> block even if it is split by a flush. However, this code
     // will still mostly work if we somehow got multiple CharacterNodes.
-    StartInlineRewrite(characters_node);
+    StartInlineRewrite(characters_node, style_element_);
   }
 }
 
@@ -1003,10 +993,9 @@ void CssFilter::EndElementImpl(HtmlElement* element) {
     resource_tag_scanner::UrlCategoryVector attributes;
     resource_tag_scanner::ScanElement(
         element, driver()->options(), &attributes);
-    resource_tag_scanner::UrlCategoryVector::iterator uc;
-    for (uc = attributes.begin(); uc != attributes.end(); uc++) {
-      if (uc->category == semantic_type::kStylesheet) {
-        StartExternalRewrite(element, uc->url);
+    for (resource_tag_scanner::UrlCategoryPair uc : attributes) {
+      if (uc.category == semantic_type::kStylesheet) {
+        StartExternalRewrite(element, uc.url);
       }
     }
   }
@@ -1019,7 +1008,14 @@ void CssFilter::EndElementImpl(HtmlElement* element) {
   }
 }
 
-void CssFilter::StartInlineRewrite(HtmlCharactersNode* char_node) {
+void CssFilter::StartInlineRewrite(HtmlCharactersNode* char_node,
+                                   HtmlElement* parent_element) {
+  if (driver()->content_security_policy().HasDirectiveOrDefaultSrc(
+        CspDirective::kStyleSrc)) {
+    driver()->InsertDebugComment(kInlineCspMessage, parent_element);
+    return;
+  }
+
   ResourcePtr input_resource(MakeInlineResource(char_node->contents()));
   ResourceSlotPtr slot(driver()->GetInlineSlot(input_resource, char_node));
 
@@ -1050,6 +1046,11 @@ void CssFilter::StartInlineRewrite(HtmlCharactersNode* char_node) {
 void CssFilter::StartAttributeRewrite(HtmlElement* element,
                                       HtmlElement::Attribute* style,
                                       InlineCssKind inline_css_kind) {
+  if (driver()->content_security_policy().HasDirectiveOrDefaultSrc(
+        CspDirective::kStyleSrc)) {
+    driver()->InsertDebugComment(kInlineCspMessage, element);
+    return;
+  }
   ResourcePtr input_resource(MakeInlineResource(style->DecodedValueOrNull()));
   ResourceSlotPtr slot(
       driver()->GetInlineAttributeSlot(input_resource, element, style));
@@ -1074,7 +1075,7 @@ void CssFilter::StartExternalRewrite(HtmlElement* link,
   }
   // Create the input resource for the slot.
   ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
-      src->DecodedValueOrNull(), link));
+      src->DecodedValueOrNull(), RewriteDriver::InputRole::kStyle, link));
   if (input_resource.get() == NULL) {
     return;
   }

@@ -1,4 +1,17 @@
-// Copyright 2010-2011 and onwards Google Inc.
+// Copyright 2010-2011 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 // Author: jmarantz@google.com (Joshua Marantz)
 
 // Unit-test StringMultiMap.
@@ -23,7 +36,7 @@ class StringMultiMapTest : public testing::Test {
 
   virtual void SetUp() {
     string_map_.Add("a", "1");
-    string_map_.Add("b", NULL);
+    string_map_.Add("b", StringPiece());
     string_map_.Add("C", "2");
     string_map_.Add("d", "");
     string_map_.Add("A", "3");

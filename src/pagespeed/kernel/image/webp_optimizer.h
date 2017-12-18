@@ -19,10 +19,9 @@
 #ifndef PAGESPEED_KERNEL_IMAGE_WEBP_OPTIMIZER_H_
 #define PAGESPEED_KERNEL_IMAGE_WEBP_OPTIMIZER_H_
 
-// For libwebp, encode.h must be included before gif2webp_util.h.
 #include <cstddef>
 #include "third_party/libwebp/src/webp/encode.h"
-#include "third_party/libwebp/examples/gif2webp_util.h"
+#include "third_party/libwebp/src/webp/mux.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
@@ -41,7 +40,7 @@ namespace image_compression {
 
 using net_instaweb::MessageHandler;
 
-struct WebpConfiguration {
+struct WebpConfiguration : public ScanlineWriterConfig {
   // This contains a subset of the options in WebPConfig and
   // WebPPicture.
 
@@ -51,6 +50,9 @@ struct WebpConfiguration {
       : lossless(true), quality(75), method(3), target_size(0),
         alpha_compression(1), alpha_filtering(1), alpha_quality(100),
         kmin(0), kmax(0), progress_hook(NULL), user_data(NULL) {}
+
+  ~WebpConfiguration() override;
+
   void CopyTo(WebPConfig* webp_config) const;
 
   int lossless;           // Lossless encoding (0=lossy(default), 1=lossless).
@@ -145,17 +147,29 @@ class WebpFrameWriter : public MultipleFrameWriter {
   size_px frame_stride_px_;
 
   // Pointer to the next pixel to be written via WriteNextScanline().
+  // If the frame is offset (top or left != 0), this pointer is also offset.
   uint32_t* frame_position_px_;
 
   // The number of bytes per pixel in the current frame.
   uint32_t frame_bytes_per_pixel_;
 
   // libwebp objects for the WebP generation.
-  WebPPicture* webp_image_;
-  WebPPicture webp_frame_;
-  WebPFrameCache* webp_frame_cache_;
-  WebPMux* webp_mux_;
+  WebPPicture webp_image_;
+
+  // Last frame image when DISPOSAL_RESTORE is in-use.
+  WebPPicture* webp_image_restore_;
+
+  // FrameSpec of previous frame.
+  FrameSpec previous_frame_spec_;
+
+  // Encodes to WebP for animated images. Null for static images.
+  WebPAnimEncoder* webp_encoder_;
+
+  // Configuration for webp encoder.
   WebPConfig libwebp_config_;
+
+  // Timestamp for the current animation frame.
+  int timestamp_;
 
 #ifndef NDEBUG
   WebPAuxStats stats_;

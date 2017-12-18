@@ -18,6 +18,7 @@ goog.setTestOnly('goog.ui.MenuButtonRendererTest');
 goog.require('goog.a11y.aria');
 goog.require('goog.a11y.aria.State');
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.dom.classlist');
 goog.require('goog.testing.jsunit');
 goog.require('goog.testing.ui.rendererasserts');
@@ -64,7 +65,7 @@ function testRendererWithTextContent() {
 
 function testRendererWithNodeContent() {
   renderedButton = new goog.ui.MenuButton(
-      goog.dom.createDom('div', null, 'Foo'));
+      goog.dom.createDom(goog.dom.TagName.DIV, null, 'Foo'));
   renderOnParent(renderedButton);
 
   var contentEl = renderedButton.getContentElement();
@@ -88,7 +89,8 @@ function testSetContent() {
   assertHTMLEquals('Foo', contentEl.innerHTML);
   assertTrue(hasInlineBlock(contentEl));
 
-  renderedButton.setContent(goog.dom.createDom('div', null, 'Bar'));
+  renderedButton.setContent(
+      goog.dom.createDom(goog.dom.TagName.DIV, null, 'Bar'));
   contentEl = renderedButton.getContentElement();
   assertHTMLEquals('<div>Bar</div>', contentEl.innerHTML);
 
@@ -152,10 +154,11 @@ function checkAriaState(button) {
       goog.a11y.aria.getState(
           button.getElement(), goog.a11y.aria.State.EXPANDED));
   button.setOpen(true);
-  assertEquals('menu buttons should not aria-expanded == true after ' +
-      'opening', 'true',
-      goog.a11y.aria.getState(
-          button.getElement(), goog.a11y.aria.State.EXPANDED));
+  assertEquals(
+      'menu buttons should not aria-expanded == true after ' +
+          'opening',
+      'true', goog.a11y.aria.getState(
+                  button.getElement(), goog.a11y.aria.State.EXPANDED));
 }
 
 function hasInlineBlock(el) {
@@ -163,6 +166,6 @@ function hasInlineBlock(el) {
 }
 
 function testDoesntCallGetCssClassInConstructor() {
-  goog.testing.ui.rendererasserts.
-      assertNoGetCssClassCallsInConstructor(goog.ui.MenuButtonRenderer);
+  goog.testing.ui.rendererasserts.assertNoGetCssClassCallsInConstructor(
+      goog.ui.MenuButtonRenderer);
 }

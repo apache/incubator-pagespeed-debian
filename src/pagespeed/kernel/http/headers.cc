@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -273,6 +274,8 @@ bool IsCommaSeparatedField(const StringPiece& name) {
   if (StringCaseEqual(name, HttpAttributes::kAccept) ||
       StringCaseEqual(name, HttpAttributes::kCacheControl) ||
       StringCaseEqual(name, HttpAttributes::kContentEncoding) ||
+      StringCaseEqual(name, HttpAttributes::kConnection) ||
+      StringCaseEqual(name, HttpAttributes::kAcceptEncoding) ||
       StringCaseEqual(name, HttpAttributes::kVary)) {
     return true;
   } else {
@@ -361,16 +364,15 @@ template<class Proto> bool Headers<Proto>::Remove(const StringPiece& name,
   ConstStringStarVector values;
   bool found = map_->Lookup(name, &values);
   if (found) {
-    int val_index = -1;
+    std::set<int> indexes;
     for (int i = values.size() - 1; i >= 0; --i) {
       if (values[i] != NULL) {
         if (StringCaseEqual(*values[i], value)) {
-          val_index = i;
-          break;
+          indexes.insert(i);
         }
       }
     }
-    if (val_index != -1) {
+    if (!indexes.empty()) {
       StringVector new_vals;
       bool concat = IsCommaSeparatedField(name);
       GoogleString combined;
@@ -378,7 +380,7 @@ template<class Proto> bool Headers<Proto>::Remove(const StringPiece& name,
       for (int i = 0, n = values.size(); i < n; ++i) {
         if (values[i] != NULL) {
           StringPiece val(*values[i]);
-          if (i != val_index && !val.empty()) {
+          if ((indexes.find(i) == indexes.end()) && !val.empty()) {
             if (concat) {
               StrAppend(&combined, separator, val);
               separator = ", ";
@@ -444,8 +446,9 @@ template<class Proto> bool Headers<Proto>::RemoveAllFromSortedArray(
   return removed_anything;
 }
 
-template<class Proto> bool Headers<Proto>::RemoveFromHeaders(
-    const StringPiece* names, int names_size,
+template<class Proto> template<class StringType>
+bool Headers<Proto>::RemoveFromHeaders(
+    const StringType* names, int names_size,
     protobuf::RepeatedPtrField<NameValue>* headers) {
   // Remove all headers that are slated for removal.
   std::vector<bool> to_keep;
@@ -667,7 +670,18 @@ template<class Proto> GoogleString Headers<Proto>::LookupJoined(
 
 // Explicit template class instantiation.
 // See http://www.cplusplus.com/forum/articles/14272/
+template bool Headers<HttpResponseHeaders>::RemoveFromHeaders<StringPiece>(
+    const StringPiece* names,
+    int names_size,
+    protobuf::RepeatedPtrField<NameValue>* headers);
+
+template bool Headers<HttpResponseHeaders>::RemoveFromHeaders<GoogleString>(
+    const GoogleString* names,
+    int names_size,
+    protobuf::RepeatedPtrField<NameValue>* headers);
+
 template class Headers<HttpResponseHeaders>;
 template class Headers<HttpRequestHeaders>;
+
 
 }  // namespace net_instaweb

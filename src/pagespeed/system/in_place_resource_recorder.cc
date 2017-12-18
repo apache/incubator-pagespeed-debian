@@ -20,7 +20,9 @@
 
 #include "base/logging.h"
 #include "net/instaweb/http/public/http_cache.h"
+#include "net/instaweb/http/public/http_cache_failure.h"
 #include "net/instaweb/http/public/http_value.h"
+#include "net/instaweb/http/public/inflating_fetch.h"
 #include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/content_type.h"
@@ -67,7 +69,8 @@ InPlaceResourceRecorder::InPlaceResourceRecorder(
       status_code_(-1),
       failure_(false),
       full_response_headers_considered_(false),
-      consider_response_headers_called_(false) {
+      consider_response_headers_called_(false),
+      cache_control_set_(false) {
   num_resources_->Add(1);
   if (limit_active_recordings() &&
       active_recordings_.BarrierIncrement(1) > max_concurrent_recordings_) {
@@ -126,7 +129,7 @@ bool InPlaceResourceRecorder::Write(const StringPiece& contents,
 void InPlaceResourceRecorder::ConsiderResponseHeaders(
     HeadersKind headers_kind,
     ResponseHeaders* response_headers) {
-  CHECK(response_headers != NULL) << "Response headers cannot be NULL";
+  CHECK(response_headers != nullptr);
   DCHECK(!full_response_headers_considered_);
 
   if (!consider_response_headers_called_) {
@@ -138,6 +141,8 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
     write_to_resource_value_.response_headers()->set_status_code(
         HttpStatus::kOK);
   }
+
+  status_code_ = response_headers->status_code();
 
   // Shortcut for bailing out early when the response will be too large.
   int64 content_length;
@@ -151,12 +156,49 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
     return;
   }
 
+  // Check if IPRO applies considering the content type, if we have one at
+  // this point.  Depending on the server, we may only know the content type
+  // after the we are called with kFullHeaders.
+  //
+  // Note: in a proxy setup it might be desirable to cache HTML and
+  // non-rewritable Content-Types to avoid re-fetching from the origin server.
+  //
+  // If we have the full-headers, then we demand to have a good content type
+  // now.
+  if (response_headers->Has(HttpAttributes::kContentType) ||
+      (headers_kind == kFullHeaders)) {
+    const ContentType* content_type = response_headers->DetermineContentType();
+
+    // Bail if not an image, css, or JS.
+    if ((content_type == nullptr) ||
+        !(content_type->IsImage() ||
+          content_type->IsCss() ||
+          content_type->IsJsLike())) {
+      // DroppedAsUncacheable().  If at some point we decide to go this
+      // way, we must also change the expected cache_inserts count in
+      // "Blocking rewrite enabled." in apache/system_test.sh from 3 to
+      // 2.
+      if (headers_kind == kFullHeaders) {
+        // If we have to wait till we have recorded all the bytes to learn
+        // that this content-type is uninteresting, then we should cache
+        // that so we don't have to re-record.
+        DroppedAsUncacheable();
+      } else {
+        // If we were able to learn the content-type early then the added
+        // caching pressure is not worth short-circuiting the filter, and we can
+        // simply bail here on every request.
+        // scripts/siege_html_high_entropy.sh saw a 16% benefit with this
+        // strategy.
+        failure_ = true;
+      }
+      return;
+    }
+  }
+
   if (headers_kind != kFullHeaders) {
     return;
   }
   full_response_headers_considered_ = true;
-
-  status_code_ = response_headers->status_code();
 
   // For 4xx and 5xx we can't IPRO, but we can also cache the failure so we
   // don't retry recording for a bit.
@@ -179,20 +221,6 @@ void InPlaceResourceRecorder::ConsiderResponseHeaders(
     return;
   }
 
-  // First, check if IPRO applies considering the content type.
-  // Note: in a proxy setup it might be desirable to cache HTML and
-  // non-rewritable Content-Types to avoid re-fetching from the origin server.
-  const ContentType* content_type =
-      response_headers->DetermineContentType();
-  if (content_type == NULL ||
-      !(content_type->IsImage() ||
-        content_type->IsCss() ||
-        content_type->IsJs())) {
-    // We remember wrong mimetypes as uncacheable. This is slightly goofy,
-    // and is inconsistent with how they are treated on normal rewrite path...
-    DroppedAsUncacheable();
-    return;
-  }
   bool is_cacheable = response_headers->IsProxyCacheable(
       request_properties_,
       ResponseHeaders::GetVaryOption(http_options_.respect_vary),
@@ -211,12 +239,21 @@ void InPlaceResourceRecorder::DroppedDueToSize() {
 }
 
 void InPlaceResourceRecorder::DroppedAsUncacheable() {
-  cache_->RememberFailure(
-      url_, fragment_,
-      status_code_ == 200 ? kFetchStatusUncacheable200
-                          : kFetchStatusUncacheableError,
-      handler_);
-  failure_ = true;
+  if (!failure_) {
+    cache_->RememberFailure(
+        url_, fragment_,
+        status_code_ == 200 ? kFetchStatusUncacheable200
+        : kFetchStatusUncacheableError,
+        handler_);
+    failure_ = true;
+  }
+}
+
+void InPlaceResourceRecorder::SaveCacheControl(const char* cache_control) {
+  cache_control_set_ = true;
+  if (cache_control != nullptr) {
+    cache_control_ = cache_control;
+  }
 }
 
 void InPlaceResourceRecorder::DoneAndSetHeaders(
@@ -234,7 +271,9 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
   if (status_code_ == HttpStatus::kOK && resource_value_.contents_size() == 0) {
     // Ignore Empty 200 responses.
     // https://github.com/pagespeed/mod_pagespeed/issues/1050
-    cache_->RememberFailure(url_, fragment_, kFetchStatusEmpty, handler_);
+    if (!failure_) {
+      cache_->RememberFailure(url_, fragment_, kFetchStatusEmpty, handler_);
+    }
     failure_ = true;
   }
 
@@ -256,6 +295,16 @@ void InPlaceResourceRecorder::DoneAndSetHeaders(
       response_headers->RemoveAll(HttpAttributes::kContentEncoding);
     }
     response_headers->RemoveAll(HttpAttributes::kContentLength);
+
+    if (cache_control_set_) {
+      // Use the cache control value from SaveCacheControl instead of the one in
+      // the response.
+      response_headers->RemoveAll(HttpAttributes::kCacheControl);
+      if (!cache_control_.empty()) {
+        response_headers->Add(HttpAttributes::kCacheControl, cache_control_);
+      }
+    }
+
     resource_value_.SetHeaders(response_headers);
     cache_->Put(url_, fragment_, request_properties_, http_options_,
                 &resource_value_, handler_);

@@ -17,8 +17,8 @@
   if (!d) {
     return !1;
   }
-  var g = -1 == a.indexOf("?") ? "?" : "&";
-  a = a + g + "url=" + encodeURIComponent(b);
+  var f = -1 == a.indexOf("?") ? "?" : "&";
+  a = a + f + "url=" + encodeURIComponent(b);
   d.open("POST", a);
   d.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
   d.send(c);
@@ -84,7 +84,7 @@ pagespeed.LocalStorageCache.prototype.inlineCss = pagespeed.LocalStorageCache.pr
 pagespeed.LocalStorageCache.prototype.inlineImg = function(a, b) {
   var c = window.localStorage.getItem("pagespeed_lsc_url:" + a + " pagespeed_lsc_hash:" + b), d = document.createElement("img");
   c && !this.hasExpired(c) ? d.src = this.getData(c) : (d.src = a, this.regenerate_cookie_ = !0);
-  for (var c = 2, g = arguments.length;c < g;++c) {
+  for (var c = 2, f = arguments.length;c < f;++c) {
     var e = arguments[c].indexOf("=");
     d.setAttribute(arguments[c].substring(0, e), arguments[c].substring(e + 1));
   }
@@ -93,17 +93,17 @@ pagespeed.LocalStorageCache.prototype.inlineImg = function(a, b) {
 pagespeed.LocalStorageCache.prototype.inlineImg = pagespeed.LocalStorageCache.prototype.inlineImg;
 pagespeed.LocalStorageCache.prototype.processTags_ = function(a, b, c) {
   a = document.getElementsByTagName(a);
-  for (var d = 0, g = a.length;d < g;++d) {
-    var e = a[d], h = e.getAttribute("data-pagespeed-lsc-hash"), f = e.getAttribute("data-pagespeed-lsc-url");
-    if (h && f) {
-      f = "pagespeed_lsc_url:" + f;
-      b && (f += " pagespeed_lsc_hash:" + h);
+  for (var d = 0, f = a.length;d < f;++d) {
+    var e = a[d], h = e.getAttribute("data-pagespeed-lsc-hash"), g = e.getAttribute("data-pagespeed-lsc-url");
+    if (h && g) {
+      g = "pagespeed_lsc_url:" + g;
+      b && (g += " pagespeed_lsc_hash:" + h);
       var k = e.getAttribute("data-pagespeed-lsc-expiry"), k = k ? (new Date(k)).getTime() : "", e = c(e);
       if (!e) {
-        var l = window.localStorage.getItem(f);
+        var l = window.localStorage.getItem(g);
         l && (e = this.getData(l));
       }
-      e && (window.localStorage.setItem(f, k + " " + h + " " + e), this.regenerate_cookie_ = !0);
+      e && (window.localStorage.setItem(g, k + " " + h + " " + e), this.regenerate_cookie_ = !0);
     }
   }
 };
@@ -117,10 +117,10 @@ pagespeed.LocalStorageCache.prototype.saveInlinedData_ = function() {
 };
 pagespeed.LocalStorageCache.prototype.generateCookie_ = function() {
   if (this.regenerate_cookie_) {
-    for (var a = [], b = [], c = 0, d = pagespeedutils.now(), g = 0, e = window.localStorage.length;g < e;++g) {
-      var h = window.localStorage.key(g);
+    for (var a = [], b = [], c = 0, d = pagespeedutils.now(), f = 0, e = window.localStorage.length;f < e;++f) {
+      var h = window.localStorage.key(f);
       if (!h.indexOf("pagespeed_lsc_url:")) {
-        var f = window.localStorage.getItem(h), k = f.indexOf(" "), l = parseInt(f.substring(0, k), 10);
+        var g = window.localStorage.getItem(h), k = g.indexOf(" "), l = parseInt(g.substring(0, k), 10);
         if (!isNaN(l)) {
           if (l <= d) {
             a.push(h);
@@ -131,17 +131,17 @@ pagespeed.LocalStorageCache.prototype.generateCookie_ = function() {
             }
           }
         }
-        h = f.indexOf(" ", k + 1);
-        f = f.substring(k + 1, h);
-        b.push(f);
+        h = g.indexOf(" ", k + 1);
+        g = g.substring(k + 1, h);
+        b.push(g);
       }
     }
     d = "";
     c && (d = "; expires=" + (new Date(c)).toUTCString());
     document.cookie = "_GPSLSC=" + b.join("!") + d;
-    g = 0;
-    for (e = a.length;g < e;++g) {
-      window.localStorage.removeItem(a[g]);
+    f = 0;
+    for (e = a.length;f < e;++f) {
+      window.localStorage.removeItem(a[f]);
     }
     this.regenerate_cookie_ = !1;
   }

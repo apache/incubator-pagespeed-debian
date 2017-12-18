@@ -29,6 +29,7 @@
 #include "pagespeed/kernel/base/null_message_handler.h"
 #include "pagespeed/kernel/base/ref_counted_ptr.h"
 #include "pagespeed/kernel/base/statistics.h"
+#include "pagespeed/kernel/html/amp_document_filter.h"
 #include "pagespeed/kernel/html/html_keywords.h"
 #include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/html/html_parse_test_base.h"
@@ -198,6 +199,13 @@ TEST_F(AddInstrumentationFilterTest, TestHeadersFetchTimingReporting) {
               != GoogleString::npos) << output_buffer_;
 }
 
+TEST_F(AddInstrumentationFilterTest, Quoting) {
+  AddFilters();
+  GoogleString url = "http://example.com/?');alert('foo)";
+  ParseUrl(url, "<head></head><body></body>");
+  EXPECT_EQ(GoogleString::npos,
+            output_buffer_.find("?');alert('foo)"));
+}
 
 // Test that head script is inserted after title and meta tags.
 TEST_F(AddInstrumentationFilterTest, TestScriptAfterTitleAndMeta) {
@@ -257,6 +265,105 @@ TEST_F(AddInstrumentationFilterTest, TestDisableForBots) {
   AddFiltersWithUserAgent(UserAgentMatcherTestBase::kGooglebotUserAgent);
   ValidateNoChanges(GetTestUrl(),
                     "<head></head><head></head><body></body><body></body>");
+}
+
+// Test script tag and type attribute without pedantic filter
+TEST_F(AddInstrumentationFilterTest, TestScriptTagTypeAttribute) {
+  options()->EnableFilter(RewriteOptions::kAddInstrumentation);
+  AddFilters();
+
+  SetupWriter();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!DOCTYPE html><html><head></head><body>"
+                              "<img src='Puzzle.jpg'/></body></html>");
+  rewrite_driver()->FinishParse();
+
+  // check html without type attribute in head
+  EXPECT_TRUE(output_buffer_.find(
+      "<script>window.mod_pagespeed_start") !=
+          StringPiece::npos);
+
+  // check html without type attribute in data-pagespeed-no-defer tag
+  EXPECT_TRUE(output_buffer_.find(
+      "<script data-pagespeed-no-defer>") !=
+          StringPiece::npos);
+}
+
+// Test script tag and type attribute with pedantic filter
+TEST_F(AddInstrumentationFilterTest, TestScriptTagTypeAttributePedantic) {
+  options()->EnableFilter(RewriteOptions::kAddInstrumentation);
+  options()->EnableFilter(RewriteOptions::kPedantic);
+  AddFilters();
+
+  SetupWriter();
+  rewrite_driver()->StartParse(kTestDomain);
+  rewrite_driver()->ParseText("<!DOCTYPE html><html><head></head><body>"
+                              "<img src='Puzzle.jpg'/></body></html>");
+  rewrite_driver()->FinishParse();
+
+  // check html with type attribute in head
+  EXPECT_TRUE(output_buffer_.find(
+      "<script type='text/javascript'>window.mod_pagespeed_start") !=
+          StringPiece::npos);
+
+  // check html with type attribute in data-pagespeed-no-defer tag
+  EXPECT_TRUE(output_buffer_.find(
+      "<script data-pagespeed-no-defer type=\"text/javascript\">")!=
+          StringPiece::npos);
+}
+
+const char kBeaconUrl[] = "http://example.com/beacon?org=xxx";
+
+class AddInstrumentationAmpTest : public AddInstrumentationFilterTest {
+ protected:
+  void SetUp() override {
+    AddInstrumentationFilterTest::SetUp();
+    SetCurrentUserAgent(UserAgentMatcherTestBase::kIPhone4Safari);
+    options()->EnableFilter(RewriteOptions::kAddInstrumentation);
+    options()->set_beacon_url(kBeaconUrl);
+    options()->set_report_unload_time(true);
+    AddFilters();
+  }
+
+  void CheckInstrumentation(StringPiece html, bool expect_has_beacon) {
+    for (int i = 0, n = html.size(); i < n; ++i) {
+      if (rewrite_driver_->request_headers() == nullptr) {
+        SetDriverRequestHeaders();
+      }
+      SetupWriter();
+      rewrite_driver_->StartParse(
+          StringPrintf("http://example.com/amp_doc_%d.html", i));
+      rewrite_driver_->ParseText(html.substr(0, i));
+      rewrite_driver_->Flush();
+      rewrite_driver_->ParseText(html.substr(i));
+      rewrite_driver_->FinishParse();
+      EXPECT_EQ(expect_has_beacon,
+                output_buffer_.find(kBeaconUrl) != GoogleString::npos);
+    }
+  }
+
+  bool AddBody() const override { return false; }
+  bool AddHtmlTags() const override { return false; }
+};
+
+TEST_F(AddInstrumentationAmpTest, IsAmpHtml) {
+  CheckInstrumentation("<!doctype foo>  <html amp><head/><body></body></html>",
+                       false);
+  EXPECT_TRUE(rewrite_driver_->is_amp_document());
+}
+
+TEST_F(AddInstrumentationAmpTest, IsAmpLightningBolt) {
+  CheckInstrumentation(StrCat("<!doctype foo>  <html ",
+                              AmpDocumentFilter::kUtf8LightningBolt,
+                              "><head/><body></body></html>"),
+                       false);
+  EXPECT_TRUE(rewrite_driver_->is_amp_document());
+}
+
+TEST_F(AddInstrumentationAmpTest, IsNotAmp) {
+  CheckInstrumentation("<!doctype foo>  <html><head/><body></body></html>",
+                       true);
+  EXPECT_FALSE(rewrite_driver_->is_amp_document());
 }
 
 }  // namespace net_instaweb

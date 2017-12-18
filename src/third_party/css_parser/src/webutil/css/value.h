@@ -27,7 +27,6 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/scoped_ptr.h"
 #include "strings/stringpiece.h"
 #include "util/utf8/public/unicodetext.h"
 #include "webutil/css/identifier.h"
@@ -57,8 +56,8 @@ class Value {
   enum ValueType { NUMBER, URI, FUNCTION, RECT, COLOR, STRING, IDENT, COMMA,
                    UNKNOWN, DEFAULT };
   enum Unit { EM, EX, PX, CM, MM, IN, PT, PC,
-              DEG, RAD, GRAD, MS, S, HZ, KHZ, PERCENT, OTHER, NO_UNIT,
-              NUM_UNITS };
+              DEG, RAD, GRAD, MS, S, HZ, KHZ, PERCENT, VH, VM, VW, OTHER,
+              NO_UNIT, NUM_UNITS };
 
   // These constructors generate Values of various types.
 

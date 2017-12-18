@@ -17,6 +17,7 @@ goog.setTestOnly('goog.editor.ClickToEditWrapperTest');
 
 goog.require('goog.dom');
 goog.require('goog.dom.Range');
+goog.require('goog.dom.TagName');
 goog.require('goog.editor.ClickToEditWrapper');
 goog.require('goog.editor.SeamlessField');
 goog.require('goog.testing.MockClock');
@@ -45,7 +46,7 @@ function setUp() {
 
 function setUpField(opt_isBlended) {
   FIELD = opt_isBlended ? new goog.editor.SeamlessField('testField') :
-      new goog.editor.SeamlessField('testField');
+                          new goog.editor.SeamlessField('testField');
 
   (new goog.editor.ClickToEditWrapper(FIELD));
 
@@ -70,7 +71,8 @@ function testClickToEdit(opt_isBlended) {
 
   goog.testing.events.fireClickSequence(text.parentNode);
 
-  assertFalse('Field should not be made editable immediately after clicking',
+  assertFalse(
+      'Field should not be made editable immediately after clicking',
       FIELD.isLoaded());
   CLOCK.tick(1);
   assertTrue('Field should be editable', FIELD.isLoaded());
@@ -115,17 +117,22 @@ function testClickToEditWithAnchor(opt_isBlended) {
   // See b/15678403.
   var body = FIELD.getElement();
   var text = body.firstChild;
-  var link = dom.getElementsByTagNameAndClass('A', null, body)[0].firstChild;
+  var link = dom.getElementsByTagNameAndClass(goog.dom.TagName.A, null, body)[0]
+                 .firstChild;
   var isIELessThan9OrWebkit = goog.userAgent.WEBKIT ||
       (goog.userAgent.IE && !goog.userAgent.isVersionOrHigher(9));
-  assertEquals('Wrong start node',
-      isIELessThan9OrWebkit ? text : link, selection.getStartNode());
-  assertEquals('Wrong start offset',
-      isIELessThan9OrWebkit ? 17 : 0, selection.getStartOffset());
-  assertEquals('Wrong end node',
-      isIELessThan9OrWebkit ? text : link, selection.getEndNode());
-  assertEquals('Wrong end offset',
-      isIELessThan9OrWebkit ? 17 : 0, selection.getEndOffset());
+  assertEquals(
+      'Wrong start node', isIELessThan9OrWebkit ? text : link,
+      selection.getStartNode());
+  assertEquals(
+      'Wrong start offset', isIELessThan9OrWebkit ? 17 : 0,
+      selection.getStartOffset());
+  assertEquals(
+      'Wrong end node', isIELessThan9OrWebkit ? text : link,
+      selection.getEndNode());
+  assertEquals(
+      'Wrong end offset', isIELessThan9OrWebkit ? 17 : 0,
+      selection.getEndOffset());
 }
 
 function testBlendedClickToEditWithAnchor() {

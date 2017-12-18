@@ -53,6 +53,7 @@ class ResourceSlotTest : public RewriteTestBase {
 
     // Set up 4 slots for testing.
     RewriteDriver* driver = rewrite_driver();
+    driver->AddFilters();
     ASSERT_TRUE(driver->StartParseId(kHtmlUrl, "resource_slot_test",
                                      kContentTypeHtml));
     elements_[0] = driver->NewElement(NULL, HtmlName::kLink);
@@ -168,7 +169,8 @@ TEST_F(ResourceSlotTest, RenderUpdate) {
 
   GoogleUrl gurl("http://html.parse.test/new_css.css");
   bool unused;
-  ResourcePtr updated(rewrite_driver()->CreateInputResource(gurl, &unused));
+  ResourcePtr updated(rewrite_driver()->CreateInputResource(
+      gurl, RewriteDriver::InputRole::kStyle, &unused));
   slot(0)->SetResource(updated);
   slot(0)->Render();
 

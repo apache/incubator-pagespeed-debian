@@ -107,7 +107,7 @@ void UnicodeText::Repr::reserve(int new_capacity) {
   if (capacity_ >= new_capacity && ours_) return;
 
   // Otherwise, allocate a new buffer.
-  capacity_ = max(new_capacity, (3 * capacity_) / 2 + 20);
+  capacity_ = std::max(new_capacity, (3 * capacity_) / 2 + 20);
   char* new_data = new char[capacity_];
 
   // If there is an old buffer, copy it into the new buffer.
@@ -136,7 +136,7 @@ void UnicodeText::Repr::resize(int new_size) {
 // That's not strictly necessary; we could just set size_ to 0.
 void UnicodeText::Repr::clear() {
   if (ours_) delete[] data_;
-  data_ = NULL;
+  data_ = nullptr;
   size_ = capacity_ = 0;
   ours_ = true;
 }
@@ -391,18 +391,7 @@ string UnicodeText::DebugString() const {
 // inherited from boost::iterator_facade
 // (http://boost.org/libs/iterator/doc/iterator_facade.html).
 
-UnicodeText::const_iterator::const_iterator() : it_(0) {}
-
-UnicodeText::const_iterator::const_iterator(const const_iterator& other)
-    : it_(other.it_) {
-}
-
-UnicodeText::const_iterator&
-UnicodeText::const_iterator::operator=(const const_iterator& other) {
-  if (&other != this)
-    it_ = other.it_;
-  return *this;
-}
+UnicodeText::const_iterator::const_iterator() : it_(nullptr) {}
 
 UnicodeText::const_iterator UnicodeText::begin() const {
   return const_iterator(repr_.data_);
@@ -481,7 +470,7 @@ int UnicodeText::const_iterator::utf8_length() const {
 }
 
 UnicodeText::const_iterator UnicodeText::MakeIterator(const char* p) const {
-  CHECK(p != NULL);
+  CHECK(p != nullptr);
   const char* start = utf8_data();
   int len = utf8_length();
   const char* end = start + len;

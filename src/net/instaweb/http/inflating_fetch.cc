@@ -21,6 +21,7 @@
 #include "base/logging.h"
 #include "pagespeed/kernel/base/message_handler.h"
 #include "pagespeed/kernel/base/stack_buffer.h"
+#include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/http/http_names.h"
 #include "pagespeed/kernel/http/request_headers.h"
@@ -112,12 +113,14 @@ bool InflatingFetch::UnGzipValueIfCompressed(const HTTPValue& src,
     StringPiece content;
     src.ExtractContents(&content);
     if (GzipInflater::Inflate(content, GzipInflater::kGzip, &inflate_writer)) {
+      if (!headers->HasValue(HttpAttributes::HttpAttributes::kVary,
+                             HttpAttributes::kAcceptEncoding)) {
+        headers->Add(HttpAttributes::HttpAttributes::kVary,
+                     HttpAttributes::kAcceptEncoding);
+      }
       headers->RemoveAll(HttpAttributes::kTransferEncoding);
-      headers->Add(HttpAttributes::HttpAttributes::kVary,
-                   HttpAttributes::kAcceptEncoding);
       headers->Remove(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
-      headers->Replace(HttpAttributes::kContentLength,
-                       Integer64ToString(inflated.length()));
+      headers->SetContentLength(inflated.length());
       content.set(inflated.c_str(), inflated.length());
       dest->Clear();
       dest->Write(content, handler);
@@ -141,16 +144,18 @@ bool InflatingFetch::GzipValue(int compression_level,
   if (!headers->IsGzipped() &&
       GzipInflater::Deflate(content, GzipInflater::kGzip, compression_level,
                             &deflate_writer)) {
+    if (!headers->HasValue(HttpAttributes::HttpAttributes::kVary,
+                           HttpAttributes::kAcceptEncoding)) {
+      headers->Add(HttpAttributes::HttpAttributes::kVary,
+                   HttpAttributes::kAcceptEncoding);
+    }
     if (!headers->FindContentLength(&content_length)) {
       content_length = content.size();
     }
     headers->RemoveAll(HttpAttributes::kTransferEncoding);
     headers->SetOriginalContentLength(content_length);
     headers->Add(HttpAttributes::kContentEncoding, HttpAttributes::kGzip);
-    headers->Replace(HttpAttributes::kContentLength,
-                     Integer64ToString(deflated.length()));
-    headers->Add(HttpAttributes::HttpAttributes::kVary,
-                 HttpAttributes::kAcceptEncoding);
+    headers->SetContentLength(deflated.length());
     compressed_value->SetHeaders(headers);
     compressed_value->Write(deflated, NULL);
     return true;
@@ -191,6 +196,7 @@ void InflatingFetch::HandleHeadersComplete() {
 void InflatingFetch::InitInflater(GzipInflater::InflateType type,
                                   const StringPiece& value) {
   response_headers()->Remove(HttpAttributes::kContentEncoding, value);
+  response_headers()->RemoveAll(HttpAttributes::kContentLength);
   response_headers()->ComputeCaching();
 
   // TODO(jmarantz): Consider integrating with a free-store of Inflater

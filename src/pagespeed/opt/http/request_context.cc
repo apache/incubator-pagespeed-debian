@@ -33,7 +33,6 @@ RequestContext::RequestContext(const HttpOptions& options,
     : log_record_(new LogRecord(logging_mutex)),
       // TODO(gee): Move ownership of mutex to TimingInfo.
       timing_info_(timer, logging_mutex),
-      split_request_type_(SPLIT_FULL),
       request_id_(0),
       options_set_(true),
       options_(options) {
@@ -44,7 +43,6 @@ RequestContext::RequestContext(AbstractMutex* logging_mutex, Timer* timer)
     : log_record_(new LogRecord(logging_mutex)),
       // TODO(gee): Move ownership of mutex to TimingInfo.
       timing_info_(timer, logging_mutex),
-      split_request_type_(SPLIT_FULL),
       request_id_(0),
       options_set_(false),
       // Note: We use default here, just in case, even though we expect
@@ -60,14 +58,13 @@ RequestContext::RequestContext(const HttpOptions& options,
     : log_record_(log_record),
       // TODO(gee): Move ownership of mutex to TimingInfo.
       timing_info_(timer, mutex),
-      split_request_type_(SPLIT_FULL),
       options_set_(true),
       options_(options) {
   Init();
 }
 
 void RequestContext::Init() {
-  using_spdy_ = false;
+  using_http2_ = false;
   accepts_webp_ = false;
   accepts_gzip_ = false;
   frozen_ = false;
@@ -121,13 +118,20 @@ void RequestContext::WriteBackgroundRewriteLog() {
 
 void RequestContext::SetAcceptsGzip(bool x) {
   if (x != accepts_gzip_) {
-    CHECK(!frozen_);
+    // TODO(jmarantz): Rather than recalculating the RequestContext
+    // bits multiple times and making sure they don't change,
+    // calculate them once, e.g. before putting them into a
+    // RewriteDriver.
+    DCHECK(!frozen_);
     accepts_gzip_ = x;
   }
 }
 
 void RequestContext::SetAcceptsWebp(bool x) {
+  if (x != accepts_webp_) {
+    DCHECK(!frozen_);
     accepts_webp_ = x;
+  }
 }
 
 AbstractLogRecord* RequestContext::GetBackgroundRewriteLog(
@@ -152,6 +156,27 @@ AbstractLogRecord* RequestContext::GetBackgroundRewriteLog(
 void RequestContext::ReleaseDependentTraceContext(RequestTrace* t) {
   if (t != NULL) {
     delete t;
+  }
+}
+
+void RequestContext::SetHttp2SupportFromViaHeader(StringPiece header) {
+  // The header (in it's combined form) is a comma-separated list of proxies,
+  // with the later proxies closer to the end.
+  // We only look at the first one, since that's the one the user talks to.
+
+  // Strip leading whitespace. Not using ready-built methods for this since
+  // they use HTML whitespace rather than HTTP whitespace.
+  while (!header.empty() && (header[0] == ' ' || header[0] == '\t')) {
+    header.remove_prefix(1);
+  }
+
+  size_t sep_pos = header.find_first_of(" \t");
+  if (sep_pos != StringPiece::npos) {
+    header = header.substr(0, sep_pos);
+  }
+
+  if (header == "2" || StringCaseEqual(header, "http/2")) {
+    set_using_http2(true);
   }
 }
 

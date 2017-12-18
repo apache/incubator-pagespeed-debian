@@ -19,17 +19,16 @@
 #ifndef PAGESPEED_KERNEL_CACHE_THREADSAFE_CACHE_H_
 #define PAGESPEED_KERNEL_CACHE_THREADSAFE_CACHE_H_
 
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
+#include "pagespeed/kernel/base/shared_string.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/base/thread_annotations.h"
 #include "pagespeed/kernel/cache/cache_interface.h"
 
 namespace net_instaweb {
-
-class AbstractMutex;
-class SharedString;
 
 // Composes a cache with a Mutex to form a threadsafe cache.  Note
 // that cache callbacks will be run in a thread that is dependent
@@ -49,7 +48,7 @@ class ThreadsafeCache : public CacheInterface {
   virtual ~ThreadsafeCache();
 
   virtual void Get(const GoogleString& key, Callback* callback);
-  virtual void Put(const GoogleString& key, SharedString* value)
+  virtual void Put(const GoogleString& key, const SharedString& value)
       LOCKS_EXCLUDED(mutex_);
   virtual void Delete(const GoogleString& key) LOCKS_EXCLUDED(mutex_);
   virtual CacheInterface* Backend() { return cache_; }

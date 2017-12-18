@@ -22,7 +22,9 @@
 #include "net/instaweb/rewriter/public/rewrite_driver_factory.h"
 #include "net/instaweb/rewriter/public/rewrite_gflags.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/statistics.h"
 #include "pagespeed/kernel/base/string_util.h"
+#include "pagespeed/kernel/base/writer.h"
 #include "pagespeed/kernel/util/simple_stats.h"
 
 namespace net_instaweb {
@@ -30,11 +32,11 @@ namespace net_instaweb {
 class FileSystem;
 class Hasher;
 class MessageHandler;
+class NamedLockManager;
 class ProcessContext;
+class RewriteOptions;
 class ServerContext;
-class Statistics;
 class UrlAsyncFetcher;
-class Writer;
 
 // Implements a baseline RewriteDriverFactory with the simplest possible
 // options for cache, fetchers, & system interface.
@@ -48,6 +50,8 @@ class FileRewriter : public RewriteDriverFactory {
                const RewriteGflags* gflags,
                bool echo_errors_to_stdout);
   virtual ~FileRewriter();
+  virtual NamedLockManager* DefaultLockManager();
+  virtual RewriteOptions* NewRewriteOptions();
   virtual Hasher* NewHasher();
   virtual UrlAsyncFetcher* DefaultAsyncUrlFetcher();
   virtual MessageHandler* DefaultHtmlParseMessageHandler();

@@ -19,6 +19,7 @@
 #include "pagespeed/kernel/html/html_parse.h"
 
 #include <list>
+#include <new>
 #include <vector>
 
 #include "base/logging.h"
@@ -59,6 +60,7 @@ HtmlParse::HtmlParse(MessageHandler* message_handler)
       url_valid_(false),
       log_rewrite_timing_(false),
       running_filters_(false),
+      buffer_events_(false),
       parse_start_time_us_(0),
       timer_(NULL),
       current_filter_(NULL),
@@ -208,6 +210,16 @@ void HtmlParse::InsertScriptAfterCurrent(StringPiece text, bool external) {
 }
 
 HtmlElement* HtmlParse::NewElement(HtmlElement* parent, const HtmlName& name) {
+#ifndef NDEBUG
+  if ((name.keyword() == HtmlName::kScript) && (current_filter_ != NULL)) {
+    HtmlFilter::ScriptUsage script_usage = current_filter_->GetScriptUsage();
+    if (HtmlFilter::kNeverInjectsScripts == script_usage) {
+      LOG(DFATAL)
+          << current_filter_->Name()
+          << "::GetScriptUsage() returns kNeverInjectsScripts, and is lying";
+    }
+  }
+#endif
   HtmlElement* element =
       new (&nodes_) HtmlElement(parent, name, queue_.end(), queue_.end());
   if (IsOptionallyClosedTag(name.keyword())) {
@@ -231,6 +243,7 @@ bool HtmlParse::StartParseId(const StringPiece& url, const StringPiece& id,
                              const ContentType& content_type) {
   delayed_start_literal_.reset();
   determine_filter_behavior_called_ = false;
+  buffer_events_ = false;
 
   // Paranoid debug-checking and unconditional clearing of state variables.
   DCHECK(!skip_increment_);
@@ -337,6 +350,19 @@ void HtmlParse::CheckFilterBehavior(HtmlFilter* filter) {
   } else {
     // Only enabled filters will be aggregated.
     can_modify_urls_ = can_modify_urls_ || filter->CanModifyUrls();
+  }
+}
+
+void HtmlParse::DisableFiltersInjectingScripts() {
+  DisableFiltersInjectingScripts(filters_);
+}
+
+void HtmlParse::DisableFiltersInjectingScripts(const FilterList& filters) {
+  for (HtmlFilter* filter : filters) {
+    if (filter->is_enabled() &&
+        (filter->GetScriptUsage() == HtmlFilter::kWillInjectScripts)) {
+      filter->set_is_enabled(false);
+    }
   }
 }
 
@@ -532,8 +558,8 @@ void HtmlParse::Flush() {
     (*it)->Flush();
   }
 
-  DCHECK(url_valid_) << "Invalid to call FinishParse with invalid url";
-  if (url_valid_) {
+  DCHECK(url_valid_) << "Invalid to call Flush with invalid url";
+  if (url_valid_ && !buffer_events_) {
     ShowProgress("Flush");
 
     for (FilterList::iterator i = filters_.begin(); i != filters_.end(); ++i) {

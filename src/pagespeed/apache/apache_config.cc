@@ -26,10 +26,13 @@ namespace {
 
 const char kModPagespeedStatisticsHandlerPath[] = "/mod_pagespeed_statistics";
 const char kProxyAuth[] = "ProxyAuth";
+const char kForceBuffering[] = "ForceBuffering";
+const char kProxyAllRequests[] = "ExperimentalProxyAllRequests";
+const char kMeasurementProxy[] = "ExperimentalMeasurementProxy";
 
 }  // namespace
 
-RewriteOptions::Properties* ApacheConfig::apache_properties_ = NULL;
+RewriteOptions::Properties* ApacheConfig::apache_properties_ = nullptr;
 
 void ApacheConfig::Initialize() {
   if (Properties::Initialize(&apache_properties_)) {
@@ -66,12 +69,6 @@ void ApacheConfig::Init() {
 
 void ApacheConfig::AddProperties() {
   AddApacheProperty(
-      false, &ApacheConfig::fetch_from_mod_spdy_, "ffms",
-      RewriteOptions::kFetchFromModSpdy,
-      "Fetch SSL resources with help of recent mod_spdy",
-      true /* safe_to_print */);
-
-  AddApacheProperty(
       "", &ApacheConfig::proxy_auth_, "prxa",
       kProxyAuth,
       "CookieName[=Value][:RedirectUrl] -- checks proxy requests for "
@@ -79,6 +76,39 @@ void ApacheConfig::AddProperties() {
       "Redirect is specified, a failure results in a redirection to that URL "
       "otherwise a 403 is generated.",
       false /* safe_to_print */);
+
+  AddApacheProperty(
+      false, &ApacheConfig::force_buffering_, "afb",
+      kForceBuffering,
+      "Force buffering of non-html fetch responses rather than streaming",
+      true /* safe_to_print */);
+
+  AddApacheProperty(
+      false, &ApacheConfig::proxy_all_requests_mode_, "aparx",
+      kProxyAllRequests,
+      "Experimental mode where mod_pagespeed acts entirely as a proxy, and "
+      "doesn't attempt to work with any local serving. ",
+      false /* safe_to_print*/);
+
+  // Register deprecated options.
+  AddDeprecatedProperty("CollectRefererStatistics",
+                        RewriteOptions::kDirectoryScope);
+  AddDeprecatedProperty("HashRefererStatistics",
+                        RewriteOptions::kDirectoryScope);
+  AddDeprecatedProperty("RefererStatisticsOutputLevel",
+                        RewriteOptions::kDirectoryScope);
+  AddDeprecatedProperty("StatisticsLoggingFile",
+                        RewriteOptions::kDirectoryScope);
+  AddDeprecatedProperty("DisableForBots",
+                        RewriteOptions::kDirectoryScope);
+  AddDeprecatedProperty("GeneratedFilePrefix",
+                        RewriteOptions::kServerScope);
+  AddDeprecatedProperty("InheritVHostConfig",
+                        RewriteOptions::kServerScope);
+  AddDeprecatedProperty("FetchFromModSpdy",
+                        RewriteOptions::kServerScope);
+  AddDeprecatedProperty("NumShards", RewriteOptions::kServerScope);
+  AddDeprecatedProperty("UrlPrefix", RewriteOptions::kServerScope);
 
   MergeSubclassProperties(apache_properties_);
 
@@ -119,6 +149,37 @@ ApacheConfig* ApacheConfig::DynamicCast(RewriteOptions* instance) {
   return config;
 }
 
+void ApacheConfig::Merge(const RewriteOptions& src) {
+  SystemRewriteOptions::Merge(src);
+  const ApacheConfig* asrc = DynamicCast(&src);
+  CHECK(asrc != NULL);
+
+  // Can't use Merge() since we don't have names here.
+  measurement_proxy_root_.MergeHelper(&asrc->measurement_proxy_root_);
+  measurement_proxy_password_.MergeHelper(&asrc->measurement_proxy_password_);
+}
+
+RewriteOptions::OptionSettingResult ApacheConfig::ParseAndSetOptionFromName2(
+    StringPiece name, StringPiece arg1, StringPiece arg2,
+    GoogleString* msg, MessageHandler* handler) {
+  OptionSettingResult result = SystemRewriteOptions::ParseAndSetOptionFromName2(
+      name, arg1, arg2, msg, handler);
+  if (result == RewriteOptions::kOptionNameUnknown) {
+    if (name == kMeasurementProxy) {
+      arg1.CopyToString(&measurement_proxy_root_.mutable_value());
+      arg2.CopyToString(&measurement_proxy_password_.mutable_value());
+      result = RewriteOptions::kOptionOk;
+    }
+  }
+  return result;
+}
+
+GoogleString ApacheConfig::SubclassSignatureLockHeld() {
+  return StrCat(SystemRewriteOptions::SubclassSignatureLockHeld(),
+                "_MPR:", measurement_proxy_root_.value(),
+                "_MPP:", measurement_proxy_password_.value());
+}
+
 bool ApacheConfig::GetProxyAuth(StringPiece* name, StringPiece* value,
                                 StringPiece* redirect) const {
   StringPiece auth = proxy_auth_.value();
@@ -132,7 +193,7 @@ bool ApacheConfig::GetProxyAuth(StringPiece* name, StringPiece* value,
   // so it's no problem.
   stringpiece_ssize_type colon = auth.find(':');
   if (colon == StringPiece::npos) {
-    redirect->clear();
+    *redirect = StringPiece();
   } else {
     *redirect = auth.substr(colon + 1);
     auth = auth.substr(0, colon);
@@ -142,7 +203,7 @@ bool ApacheConfig::GetProxyAuth(StringPiece* name, StringPiece* value,
   stringpiece_ssize_type equals = auth.find('=');
   if (equals == StringPiece::npos) {
     *name = auth;
-    value->clear();
+    *value = StringPiece();
   } else {
     *name = auth.substr(0, equals);
     *value = auth.substr(equals + 1);

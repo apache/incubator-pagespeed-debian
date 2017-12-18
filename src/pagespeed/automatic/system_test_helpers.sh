@@ -1,6 +1,19 @@
 #!/bin/bash
 #
-# Copyright 2012 Google Inc. All Rights Reserved.
+# Copyright 2012 Google Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 # Author: jefftk@google.com (Jeff Kaufman)
 #
 # Set up variables and functions for use by various system tests.
@@ -20,10 +33,14 @@
 # If command line args are wrong, exit with status code 2.
 # If no tests fail, it will exit the shell-script with status 0.
 # If a test fails:
-#  - If it's listed in PAGESPEED_EXPECTED_FAILURES, log the name of the failing
-#    test, to display when check_failures_and_exit is called, at which point
-#    exit with status code 1.
+#  - If it's listed in PAGESPEED_EXPECTED_FAILURES or CONTINUE_AFTER_FAILURE is
+#    "true", log the name of the failing test to display when
+#    check_failures_and_exit is called, at which point exit with status code 3
+#    if the failure was expected or 1 otherwise.
 #  - Otherwise, exit immediately with status code 1.
+# TODO(jefftk): After all tests are converted to use run_test, rework expected
+#               failures so that it applies to run_test names and not start_test
+#               names.
 #
 # The format of PAGESPEED_EXPECTED_FAILURES is '~' separated test names.
 # For example:
@@ -33,11 +50,6 @@
 #       ~compression is enabled for rewritten JS.~
 #       ~convert_meta_tags~
 #       ~regression test with same filtered input twice in combination"
-#
-#
-# By default tests that are in separate files and run with run_test are run
-# asynchronously.  To disable this, for more predictable debugging, set the
-# environment variable RUN_TESTS_ASYNC to "off".
 #
 # Callers need to set SERVER_NAME, and not run this more than once
 # simultaneously with the same SERVER_NAME value.
@@ -58,16 +70,6 @@ if [ $# -lt 1 -o $# -gt 3 ]; then
   exit 2
 fi;
 
-if [ "${RUN_TESTS_ASYNC:-on}" = "on" ]; then
-  RUN_TESTS_IN_BACKGROUND=true
-else
-  RUN_TESTS_IN_BACKGROUND=false
-fi
-# TODO(jefftk): get this less flaky and turn background testing back on.
-RUN_TESTS_IN_BACKGROUND=false
-
-PARALLEL_MAX=20  # How many tests should be allowed to run in parallel.
-
 if [ -z "${TEMPDIR:-}" ]; then
   TEMPDIR="/tmp/mod_pagespeed_test.$USER/$SERVER_NAME"
   # If someone else is supplying a TEMPDIR then it's their responsibility to
@@ -82,7 +84,12 @@ if [ -z "${TEMPDIR:-}" ]; then
   mkdir -p "$TEMPDIR"
 fi
 
-FAILURES="${TEMPDIR}/failures"
+# EXPECTED_FAILURES acts on "start_test" tests, while UNEXPECTED_FAILURES acts
+# on "run_test" tests.
+# TODO(jefftk): after we've converted everything to use run_test, including
+# nginx_system_test.sh, switch EXPECTED_FAILURES to work on run_test instead.
+EXPECTED_FAILURES="${TEMPDIR}/expected_failures"
+UNEXPECTED_FAILURES="${TEMPDIR}/unexpected_failures"
 
 # Make this easier to process so we're always looking for '~target~'.
 PAGESPEED_EXPECTED_FAILURES="~${PAGESPEED_EXPECTED_FAILURES=}~"
@@ -124,6 +131,14 @@ cat > $WGETRC <<EOF
 user_agent = Mozilla/5.0 (X11; U; Linux x86_64; en-US) AppleWebKit/534.0 (KHTML, like Gecko) Chrome/6.0.408.1 Safari/534.0
 EOF
 
+# You can pass in TEST_TO_RUN=test-name to run only a specific test.  This is
+# intended for debugging, where you want to iterate on a single failing test.
+# It only works with tests that are set up to use run_test, which is currently
+# only the ones in automatic/.  Tests that haven't been converted to use
+# run_test currently always run.
+# TODO(jefftk): convert all system tests to use run_test and separate files.
+TEST_TO_RUN="${TEST_TO_RUN:-}"
+
 # Individual tests should use $TESTTMP if they need to store something
 # temporarily.  Infrastructure can use $ORIGINAL_TEMPDIR if it's ok with
 # parallel use.
@@ -131,6 +146,7 @@ TESTTMP="$TEMPDIR"
 ORIGINAL_TEMPDIR="$TEMPDIR"
 unset TEMPDIR
 
+HELPERS_LOADED=1
 HOSTNAME=$1
 PRIMARY_SERVER=http://$HOSTNAME
 EXAMPLE_ROOT=$PRIMARY_SERVER/mod_pagespeed_example
@@ -138,6 +154,8 @@ EXAMPLE_ROOT=$PRIMARY_SERVER/mod_pagespeed_example
 # Currently we are, so disable that so that it doesn't spoil our stats.
 DEFAULT_STATISTICS_URL=$PRIMARY_SERVER/mod_pagespeed_statistics?PageSpeed=off
 STATISTICS_URL=${STATISTICS_URL:-$DEFAULT_STATISTICS_URL}
+DEFAULT_GLOBAL_STATISTICS_URL="$PRIMARY_SERVER/pagespeed_global_admin/statistics?PageSpeed=off"
+GLOBAL_STATISTICS_URL=${GLOBAL_STATISTICS_URL:-$DEFAULT_GLOBAL_STATISTICS_URL}
 BAD_RESOURCE_URL=$PRIMARY_SERVER/mod_pagespeed/W.bad.pagespeed.cf.hash.css
 MESSAGE_URL=$PRIMARY_SERVER/pagespeed_admin/message_history
 CONSOLE_URL=$PRIMARY_SERVER/pagespeed_admin/console
@@ -177,9 +195,13 @@ if ! var_defined PROXY_DOMAIN; then
 fi
 
 # Setup wget proxy information
-export http_proxy=${3:-}
-export https_proxy=${3:-}
-export ftp_proxy=${3:-}
+if [ -n "${3:-}" ]; then
+  export http_proxy=http://$3
+else
+  export http_proxy=""
+fi
+export https_proxy=${http_proxy}
+export ftp_proxy=${http_proxy}
 export no_proxy=""
 
 # Version timestamped with nanoseconds, making it extremely unlikely to hit.
@@ -193,52 +215,41 @@ OUTDIR=$TESTTMP/fetched_directory
 rm -rf $OUTDIR
 mkdir -p $OUTDIR
 
-# Lots of tests clear OUTDIR or otherwise expect to have full control over it.
-# When running tests in parallel this would have them stomping all over each
-# other, so give each its own OUTDIR.
-#
-# This should always be run in its own subshell.
-RUNNING_TEST_IN_BACKGROUND=false
-function set_outdir_and_run_test {
-  local test_name=$1
-  RUNNING_TEST_IN_BACKGROUND=true
-
-  FAIL_LOG="$ORIGINAL_TEMPDIR/$test_name.log"
-  OUTDIR="$OUTDIR/outdir-$test_name"
-  mkdir -p "$OUTDIR"
-  TESTTMP="$TESTTMP/testtmp-$test_name"
-  mkdir -p "$TESTTMP"
-  define_fetch_variables
-  source $this_dir/system_tests/$test_name.sh &> "$FAIL_LOG"
-
-  # If any tests fail they'll call exit, so if we get here the tests all passed.
-  # Exit with a success error code.
-  return 0
+# Run a single test, and exit if it does.  Use this for tests that are fast and
+# should never flake, in order to make sure the system is up before we start
+# continuing after failures.
+function run_critical_test() {
+  run_test_helper "$@"
 }
 
-# Individual tests are in separate files under system_tests/ and are safe to run
-# simultaneously in the background.  If one test must be run after another, the
-# best solution is to put them in the same file.
-BACKGROUND_TEST_PIDS=()  # array of pids
-BACKGROUND_TEST_NAMES=() # hash from pid to name of test
 function run_test() {
+  if ! run_test_helper "$@"; then
+    if "${CONTINUE_AFTER_FAILURE:-false}"; then
+      echo "$@" >> "$UNEXPECTED_FAILURES"
+    else
+      exit 1
+    fi
+  fi
+}
+
+# Individual tests are in separate files under system_tests/ and may be run
+# individually or reordered.  If one test must be run after another, put them in
+# the same file.
+SYSTEM_TEST_DIR="DEFINE_THIS_BEFORE_USING_RUN_TEST"
+function run_test_helper() {
   local test_name=$1
 
-  if $RUN_TESTS_IN_BACKGROUND; then
-    while [ $(jobs | wc -l) -gt $PARALLEL_MAX ]; do
-      sleep .1  # Wait for background tasks to complete.
-    done
-
-    echo "Running $test_name in the background."
-    set_outdir_and_run_test $test_name &
-    local test_pid=$!
-    BACKGROUND_TEST_PIDS+=($test_pid)
-    BACKGROUND_TEST_NAMES[$test_pid]=$test_name
-  else
-    # Use a subshell to keep modifications tests make to the test environment
-    # from interfering with eachother.
-    (source "$this_dir/system_tests/${test_name}.sh")
+  if [ -n "$TEST_TO_RUN" ] && [ "$TEST_TO_RUN" != "$test_name" ]; then
+    return  # By default TEST_TO_RUN="" so normally we don't skip tests here.
   fi
+
+  # Use a subshell to keep modifications tests make to the test environment
+  # from interfering with eachother.
+  previous_time_ms=0
+  if ! (source "$SYSTEM_TEST_DIR/${test_name}.sh"); then
+    return 1
+  fi
+  update_elapsed_time
 }
 
 # This function expects to be run in the background and then killed when we know
@@ -254,52 +265,26 @@ function tail_while_waiting() {
   tail -f "$test_log"
 }
 
-function wait_for_async_tests {
-  if ! $RUN_TESTS_IN_BACKGROUND; then
-    return # Nothing to do.
+# Returns the unix system time in milliseconds.
+function now_ms() {
+  # Note: the '%N' probably won't work on FreeBSD, and another solution will be
+  # needed to the current time in milliseconds.
+  date +%s%N | cut -b1-13
+}
+
+# Prints the elapsed time since the last time update_elapsed_time was called.
+previous_time_ms=0
+function update_elapsed_time() {
+  current_time_ms=$(now_ms)
+  if [ "$previous_time_ms" != 0 ]; then
+    echo 'ELAPSED TIME:' $((current_time_ms - previous_time_ms))"ms"
   fi
-
-  # Loop over the running/finished tests, examine their exit codes, and include
-  # the logs of any failing tests in our output.
-  local failed_pids=()
-  for pid in "${BACKGROUND_TEST_PIDS[@]}"; do
-    # We can't just use the 0-arg version of wait because it won't aggregate the
-    # exit codes.
-
-    local test_name="${BACKGROUND_TEST_NAMES[$pid]}"
-    local test_log="$ORIGINAL_TEMPDIR/${BACKGROUND_TEST_NAMES[$pid]}.log"
-
-    tail_while_waiting "$test_name" "$test_log" &
-    local tail_pid=$!
-
-    if ! wait $pid; then
-      echo
-      echo "Test ${BACKGROUND_TEST_NAMES[$pid]} (PID $pid) failed:"
-      cat "$ORIGINAL_TEMPDIR/${BACKGROUND_TEST_NAMES[$pid]}.log"
-      failed_pids+=($pid)
-    fi
-
-    kill $tail_pid
-    wait $! 2> /dev/null || true  # Suppress "terminated" message from bash.
-  done
-
-  # If any failed, print the names of the log files that have more details.
-  if [ ${#failed_pids[@]} -gt 0 ]; then
-    echo "Test log output in:"
-    for pid in "${failed_pids[@]}"; do
-      echo "  $ORIGINAL_TEMPDIR/${BACKGROUND_TEST_NAMES[$pid]}.log"
-    done
-    echo "FAIL"
-    exit 1
-  fi
-
-  # Clear the pid array so we can run more background tests followed by another
-  # round of wait_for_async_tests.
-  BACKGROUND_TEST_PIDS=()
+  previous_time_ms="$current_time_ms"
 }
 
 CURRENT_TEST="pre tests"
 function start_test() {
+  update_elapsed_time
   WGET_ARGS=""
   CURRENT_TEST="$@"
   echo "TEST: $CURRENT_TEST"
@@ -336,9 +321,6 @@ function start_test() {
 #                  so this fetch isn't recursive. Clean this up.
 
 function define_fetch_variables {
-  # Many of these variables need to be computed relative to OUTDIR, so we need
-  # to set them after set_outdir_and_run_test() redefines OUTDIR.
-
   WGET_OUTPUT=$OUTDIR/wget_output.txt
   # We use a separate directory so that it can be rm'd without disturbing other
   # data in $OUTDIR.
@@ -366,9 +348,15 @@ function run_wget_with_args() {
 #   Status 1: fail
 #   Status 3: only expected failures
 function check_failures_and_exit() {
-  if [ -e $FAILURES ] ; then
+  update_elapsed_time
+  if [ -e "$UNEXPECTED_FAILURES" ] ; then
+    echo "Failing Tests:"
+    sed 's/^/  /' "$UNEXPECTED_FAILURES"
+    echo "FAIL."
+    exit 1
+  elif [ -e "$EXPECTED_FAILURES" ] ; then
     echo Expected Failing Tests:
-    sed 's/^/  /' $FAILURES
+    sed 's/^/  /' "$EXPECTED_FAILURES"
     echo "MOSTLY PASS.  Expected failures only."
     exit 3
   fi
@@ -387,7 +375,7 @@ function is_expected_failure() {
 #   failure at line 374
 #   FAIL
 # and then exit with return value 1.  If we expected this test to fail, log to
-# $FAILURES and return without exiting.
+# $EXPECTED_FAILURES and return without exiting.
 #
 # If the shell does not support the 'caller' builtin, skip the line number info.
 #
@@ -423,12 +411,7 @@ function handle_failure() {
   fi
   echo "in '$CURRENT_TEST'"
   if is_expected_failure ; then
-    # This is probably atomic, but depending on the filesystem isn't guaranteed
-    # to be.  Which would be bad, because with parallel system tests we could be
-    # calling this from multiple processes simultaneously.  On the other hand,
-    # test failures are rare enough compared to the amount of time the tests run
-    # for that this shouldn't actually be a problem.
-    echo $CURRENT_TEST >> $FAILURES
+    echo "$CURRENT_TEST" >> "$EXPECTED_FAILURES"
     echo "Continuing after expected failure..."
   else
     echo FAIL.
@@ -446,29 +429,38 @@ function check() {
 # Like check, but the first argument is text to pipe into the command given in
 # the remaining arguments.
 function check_from() {
+  local quiet=0
+  if [ "$1" = "-q" ]; then
+    quiet=1
+    shift
+  fi
   local text="$1"
+  local msg="$text"
   shift
-  echo "     check_from" "$@"
-  echo "$text" | "$@" || handle_failure "$text"
+  if [ "$quiet" -ne 0 ];then
+    msg="(check_from -q $@): $text"
+  else
+    echo "     check_from" "$@"
+  fi
+  echo "$text" | "$@" || handle_failure "$msg"
 }
 
 # Same as check(), but expects command to fail.
 function check_not() {
   echo "     check_not" "$@"
-  # We use "|| true" here to avoid having the script exit if it was being run
-  # under 'set -e'
-  ("$@" && handle_failure || true)
+  if "$@"; then
+    handle_failure
+  fi
 }
 
 # Runs a command and verifies that it exits with an expected error code.
 function check_error_code() {
-  local expected_error_code=$1
+  local expected_error_code="$1"
   shift
   echo "     check_error_code $expected_error_code $@"
-  # We use "|| true" here to avoid having the script exit if it was being run
-  # under 'set -e'
-  local error_code=$("$@" || echo $? || true)
-  check [ $error_code = $expected_error_code ]
+  local error_code=0
+  "$@" || error_code="$?"
+  check [ "$error_code" = "$expected_error_code" ]
 }
 
 # Like check_not, but the first argument is text to pipe into the
@@ -477,9 +469,9 @@ function check_not_from() {
   local text="$1"
   shift
   echo "     check_not_from" "$@"
-  # We use "|| true" here to avoid having the script exit if it was being run
-  # under 'set -e'
-  echo "$text" | ("$@" && handle_failure "$text" || true)
+  if echo "$text" | "$@"; then
+    handle_failure "$text"
+  fi
 }
 
 function check_200_http_response() {
@@ -614,14 +606,7 @@ function fetch_until() {
   fi
 
   # TIMEOUT is how long to keep trying, in seconds.
-  if $RUNNING_TEST_IN_BACKGROUND; then
-    # This is longer than PageSpeed should normally ever take to rewrite
-    # resources, but if it's running under Valgrind it might occasionally take a
-    # really long time.  Especially with parallel tests.
-    #
-    # Give this long period even to expected failures.
-    TIMEOUT=180
-  elif is_expected_failure ; then
+  if is_expected_failure ; then
     # For tests that we expect to fail, don't wait long hoping for the right
     # result.
     TIMEOUT=10
@@ -668,6 +653,20 @@ function fetch_until() {
       if [ $expect_time_out -eq 1 ]; then
         echo "TIMEOUT: expected"
       else
+        local file_size=$(cat "$FETCH_FILE" | wc -c)
+        local file_mime=$(file -ib "$FETCH_FILE")
+
+        if echo "$file_mime" | grep -q "^text/"; then
+          # Dump the beginning of the file, if it's text.
+          echo "Fetched file: $file_size bytes ("
+          cat "$FETCH_FILE" | head -n 100
+          echo ")"
+        else
+          # Otherwise dump the beginning of the file as hex.
+          echo "Fetched file: $file_size bytes, $file_mime begins ("
+          xxd -l 256 "$FETCH_FILE"
+          echo ")"
+        fi
         echo "TIMEOUT: $WGET_HERE $REQUESTURL output in $FETCH_FILE"
         handle_failure
       fi
@@ -773,26 +772,9 @@ function generate_url {
     RESULT="http://$DOMAIN$PATH"
   else
     RESULT="--header X-Google-Pagespeed-Config-Domain:$DOMAIN"
-    RESULT+=" $STATIC_DOMAIN$PATH"
+    RESULT+=" http://$STATIC_DOMAIN$PATH"
   fi
   echo $RESULT
-}
-
-# Kills the process listening on port passed in.
-function kill_port {
-  PID="$(lsof -i:$1 -t)" || true
-  if [ $PID != "" ]; then
-    kill -9 $PID
-  fi
-}
-
-# Kills the process listening on a port if the name matches the first argument.
-# usage:
-# kill_listener_port program_name port
-function kill_listener_port {
-  CMDLINE="$1"
-  PORT="$2"
-  kill -9 $(lsof -t -i TCP:${PORT} -s TCP:LISTEN -a -c "/^${CMDLINE}$/") || true
 }
 
 # Performs timed reads on the output from a command passed via $1. The stream
@@ -800,25 +782,28 @@ function kill_listener_port {
 # at most threshold_sec ($2) seconds to be read or the function will fail. When
 # the stream is fully read, the funcion will compare the total number of http
 # chunks read with expect_chunk_count ($3) and fail on mismatch.
-# Usage:
-# check_flushing "curl -N --raw --silent --proxy $SECONDARY_HOSTNAME $URL" 5 1
+# Usage: check_flushing 5 1
 # This will check if the curl command resulted in single chunk which was read
 # within one second or less.
 function check_flushing() {
-  local command="$1"
+  local hostname="$1"
   local threshold_sec="$2"
   local expect_chunk_count="$3"
   local output=""
   local start=$(date +%s%N)
   local chunk_count=0
 
-  echo "Command: $command"
+  local base_url="http://$hostname.example.com/mod_pagespeed_test"
+  local command="$CURL -f -N --raw -sS --proxy $SECONDARY_HOSTNAME"
 
   if [ "${USE_VALGRIND:-}" = true ]; then
     # We can't say much about correctness of timings under valgrind, so relax
     # the test for that.
     threshold_sec=$(echo "scale=2; $threshold_sec*10" | bc)
   fi
+
+  # First make sure php is working and we can actually fetch this page.
+  check $command "$base_url/php_withoutflush.php" -o /dev/null
 
   while true; do
     start=$(date +%s%N)
@@ -841,8 +826,10 @@ function check_flushing() {
     echo "Chunk data: $line"
     # Read the trailing \r\n - should be fast.
     check read -N 2 line
-  done < <($command)
-  check 0
+  done < <($command "$base_url/slow_flushing_html_response.php")
+  # Only reached if we finish the stream without a chunk of 0, which is an HTTP
+  # protocol violation.
+  fail
 }
 
 # Given the output of a page with ?PageSpeedFilters=+debug, print the section of
@@ -853,8 +840,168 @@ function extract_filters_from_debug_html() {
   # Pull out the non-blank lines between "Filters:" and Options:".  First
   # convert newlines to % so sed can operate on the whole file, then put them
   # back again.
-  check_from "$debug_output" grep -q "^Filters:$"
-  check_from "$debug_output" grep -q "^Options:$"
+  check_from -q "$debug_output" grep -q "^Filters:$"
+  check_from -q "$debug_output" grep -q "^Options:$"
   echo "$debug_output" | tr '\n' '%' | sed 's~.*%Filters:%~~' \
                        | sed "s~%Options:.*~~" | tr '%' '\n'
+}
+
+# The prioritize_critical_css test is split into two functions so
+# nginx_system_test.sh can verify that beacon data is preserved across restarts
+# via shm-cache checkpointing.  Specifically, the nginx system test first does a
+# run of test_prioritize_critical_css, restarts nginx, and then runs
+# test_prioritize_critical_css_final.  Because beacon responses are saved in the
+# metadata cache this can only pass if the metadata cache is being persisted
+# across restarts.
+#
+# That means this test is run twice when testing, both here and then again later
+# on either side of a restart, but it's pretty fast so that's not a problem.
+function test_prioritize_critical_css() {
+  if [ "$SECONDARY_HOSTNAME" != "" ]; then
+    # Test critical CSS beacon injection, beacon return, and computation.  This
+    # requires UseBeaconResultsInFilters() to be true in rewrite_driver_factory.
+    # NOTE: must occur after cache flush, which is why it's in this embedded
+    # block.  The flush removes pre-existing beacon results from the pcache.
+    test_filter prioritize_critical_css
+    fetch_until -save $URL 'fgrep -c pagespeed.criticalCssBeaconInit' 1
+    check [ $(fgrep -o ".very_large_class_name_" $FETCH_FILE | wc -l) -eq 36 ]
+    CALL_PAT=".*criticalCssBeaconInit("
+    SKIP_ARG="[^,]*,"
+    CAPTURE_ARG="'\([^']*\)'.*"
+    BEACON_PATH=$(sed -n "s/${CALL_PAT}${CAPTURE_ARG}/\1/p" $FETCH_FILE)
+    ESCAPED_URL=$(sed -n \
+      "s/${CALL_PAT}${SKIP_ARG}${CAPTURE_ARG}/\1/p" $FETCH_FILE)
+    OPTIONS_HASH=$(sed -n \
+      "s/${CALL_PAT}${SKIP_ARG}${SKIP_ARG}${CAPTURE_ARG}/\1/p" $FETCH_FILE)
+    NONCE=$(sed -n \
+      "s/${CALL_PAT}${SKIP_ARG}${SKIP_ARG}${SKIP_ARG}${CAPTURE_ARG}/\1/p" \
+      $FETCH_FILE)
+    BEACON_URL="http://${HOSTNAME}${BEACON_PATH}?url=${ESCAPED_URL}"
+    BEACON_DATA="oh=${OPTIONS_HASH}&n=${NONCE}&cs=.big,.blue,.bold,.foo"
+
+    OUT=$($CURL -sSi -d "$BEACON_DATA" "$BEACON_URL")
+    check_from "$OUT" grep '^HTTP/1.1 204'
+
+    test_prioritize_critical_css_final
+  fi
+}
+
+function test_prioritize_critical_css_final() {
+  if [ "$SECONDARY_HOSTNAME" != "" ]; then
+    # Now make sure we see the correct critical css rules.
+    fetch_until $URL \
+      'grep -c <style>[.]blue{[^}]*}</style>' 1
+    fetch_until $URL \
+      'grep -c <style>[.]big{[^}]*}</style>' 1
+    fetch_until $URL \
+      'grep -c <style>[.]blue{[^}]*}[.]bold{[^}]*}</style>' 1
+    fetch_until -save $URL \
+      'grep -c <style>[.]foo{[^}]*}</style>' 1
+    # The last one should also have the other 3, too.
+    check [ `grep -c '<style>[.]blue{[^}]*}</style>' $FETCH_UNTIL_OUTFILE` = 1 ]
+    check [ `grep -c '<style>[.]big{[^}]*}</style>' $FETCH_UNTIL_OUTFILE` = 1 ]
+    check [ `grep -c '<style>[.]blue{[^}]*}[.]bold{[^}]*}</style>' \
+      $FETCH_UNTIL_OUTFILE` = 1 ]
+  fi
+}
+
+function cache_purge_test() {
+  # Tests for individual URL purging, and for global cache purging via
+  # GET pagespeed_admin/cache?purge=URL, and PURGE URL methods.
+  PURGE_ROOT="$1"
+  PURGE_STATS_URL="$PURGE_ROOT/pagespeed_admin/statistics"
+  function cache_purge() {
+    local purge_method="$1"
+    local purge_path="$2"
+    if [ "$purge_method" = "GET" ]; then
+      echo http_proxy=$SECONDARY_HOSTNAME $WGET -q -O - \
+          "$PURGE_ROOT/pagespeed_admin/cache?purge=$purge_path"
+      http_proxy=$SECONDARY_HOSTNAME $WGET -q -O - \
+          "$PURGE_ROOT/pagespeed_admin/cache?purge=$purge_path"
+    else
+      PURGE_URL="$PURGE_ROOT/$purge_path"
+      echo $CURL --request PURGE --proxy $SECONDARY_HOSTNAME "$PURGE_URL"
+      check $CURL --request PURGE --proxy $SECONDARY_HOSTNAME "$PURGE_URL"
+    fi
+    echo ""
+    if [ $statistics_enabled -eq "0" ]; then
+      # Without statistics, we have no mechanism to transmit state-changes
+      # from one Apache child process to another, and so each process must
+      # independently poll the cache.purge file, which happens every 5 seconds.
+      echo sleep 6
+      sleep 6
+    fi
+  }
+
+  # Checks to see whether a .pagespeed URL is present in the metadata cache.
+  # A response including "cache_ok:true" or "cache_ok:false" is send to stdout.
+  function read_metadata_cache() {
+    path="$PURGE_ROOT/$1"
+    http_proxy=$SECONDARY_HOSTNAME $WGET -q -O - \
+          "$PURGE_ROOT/pagespeed_admin/cache?url=$path"
+  }
+
+  # Find the full .pagespeed. URL of yellow.css
+  PURGE_COMBINE_CSS="$PURGE_ROOT/combine_css.html"
+  http_proxy=$SECONDARY_HOSTNAME fetch_until -save "$PURGE_COMBINE_CSS" \
+      "grep -c pagespeed.cf" 4
+  yellow_css=$(grep yellow.css $FETCH_UNTIL_OUTFILE | cut -d\" -f6)
+  blue_css=$(grep blue.css $FETCH_UNTIL_OUTFILE | cut -d\" -f6)
+
+  purple_path="styles/$$"
+  purple_url="$PURGE_ROOT/$purple_path/purple.css"
+  purple_dir="$APACHE_DOC_ROOT/purge/$purple_path"
+  ls -ld $APACHE_DOC_ROOT $APACHE_DOC_ROOT/purge
+  echo $SUDO mkdir -p "$purple_dir"
+  $SUDO mkdir -p "$purple_dir"
+  purple_file="$purple_dir/purple.css"
+
+  for method in $CACHE_PURGE_METHODS; do
+    echo Individual URL Cache Purging with $method
+    check_from "$(read_metadata_cache $yellow_css)" fgrep -q cache_ok:true
+    check_from "$(read_metadata_cache $blue_css)" fgrep -q cache_ok:true
+    echo 'body { background: MediumPurple; }' > "/tmp/purple.$$"
+    $SUDO cp "/tmp/purple.$$" "$purple_file"
+    http_proxy=$SECONDARY_HOSTNAME fetch_until "$purple_url" 'fgrep -c 9370db' 1
+    echo 'body { background: black; }' > "/tmp/purple.$$"
+    $SUDO cp "/tmp/purple.$$" "$purple_file"
+
+    cache_purge $method "*"
+
+    check_from "$(read_metadata_cache $yellow_css)" fgrep -q cache_ok:false
+    check_from "$(read_metadata_cache $blue_css)" fgrep -q cache_ok:false
+    http_proxy=$SECONDARY_HOSTNAME fetch_until "$purple_url" 'fgrep -c #000' 1
+    cache_purge "$method" "$purple_path/purple.css"
+
+    sleep 1
+    STATS=$OUTDIR/purge.stats
+    http_proxy=$SECONDARY_HOSTNAME $WGET_DUMP $PURGE_STATS_URL > $STATS.0
+    http_proxy=$SECONDARY_HOSTNAME fetch_until "$PURGE_COMBINE_CSS" \
+      "grep -c pagespeed.cf" 4
+    http_proxy=$SECONDARY_HOSTNAME $WGET_DUMP $PURGE_STATS_URL > $STATS.1
+
+    # Having rewritten 4 CSS files, we will have done 4 resources fetches.
+    check_stat $STATS.0 $STATS.1 num_resource_fetch_successes 4
+
+    # Sanity check: rewriting the same CSS file results in no new fetches.
+    http_proxy=$SECONDARY_HOSTNAME fetch_until "$PURGE_COMBINE_CSS" \
+      "grep -c pagespeed.cf" 4
+    http_proxy=$SECONDARY_HOSTNAME $WGET_DUMP $PURGE_STATS_URL > $STATS.2
+    check_stat $STATS.1 $STATS.2 num_resource_fetch_successes 0
+
+    # Now flush one of the files, and it should be the only one that
+    # needs to be refetched after we get the combine_css file again.
+    check_from "$(read_metadata_cache $yellow_css)" fgrep -q cache_ok:true
+    check_from "$(read_metadata_cache $blue_css)" fgrep -q cache_ok:true
+    cache_purge $method styles/yellow.css
+    check_from "$(read_metadata_cache $yellow_css)" fgrep -q cache_ok:false
+    check_from "$(read_metadata_cache $blue_css)" fgrep -q cache_ok:true
+
+    sleep 1
+    http_proxy=$SECONDARY_HOSTNAME fetch_until "$PURGE_COMBINE_CSS" \
+      "grep -c pagespeed.cf" 4
+    http_proxy=$SECONDARY_HOSTNAME $WGET_DUMP $PURGE_STATS_URL > $STATS.3
+    check_stat $STATS.2 $STATS.3 num_resource_fetch_successes 1
+  done
+  $SUDO rm -rf "$purple_dir" "/tmp/purple.$$"
 }

@@ -57,8 +57,6 @@ class DeviceProperties {
   bool SupportsWebpLosslessAlpha() const;
   bool SupportsWebpAnimated() const;
   bool IsBot() const;
-  bool SupportsSplitHtml(bool enable_mobile) const;
-  bool CanPreloadResources() const;
   bool AcceptsGzip() const;
   UserAgentMatcher::DeviceType GetDeviceType() const;
   bool IsMobile() const {

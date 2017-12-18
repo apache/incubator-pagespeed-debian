@@ -50,13 +50,6 @@ typedef RefCountedPtr<RequestContext> RequestContextPtr;
 // explicit transfer of ownership in these cases.
 class RequestContext : public RefCounted<RequestContext> {
  public:
-  // Types of split html request.
-  enum SplitRequestType {
-    SPLIT_FULL,
-    SPLIT_ABOVE_THE_FOLD,
-    SPLIT_BELOW_THE_FOLD,
-  };
-
   // |logging_mutex| will be passed to the request context's AbstractLogRecord,
   // which will take ownership of it. If you will be doing logging in a real
   // (threaded) environment, pass in a real mutex. If not, a NullMutex is fine.
@@ -121,9 +114,18 @@ class RequestContext : public RefCounted<RequestContext> {
   // The log record for the this request, created when the request context is.
   virtual AbstractLogRecord* log_record();
 
-  // Determines whether this request is using the SPDY protocol.
-  bool using_spdy() const { return using_spdy_; }
-  void set_using_spdy(bool x) { using_spdy_ = x; }
+  // Determines whether this request is using the HTTP2 protocol.
+  bool using_http2() const { return using_http2_; }
+  void set_using_http2(bool x) { using_http2_ = x; }
+
+  // Checks to see if the passed in Via: header indicates this connection
+  // was terminated by an HTTP/2 proxy, and if so, sets the using_http2 bit.
+  // (If there are multiple proxies, this looks only at the one closest to the
+  //  user)
+  //
+  // This assumes that all the Via: headers are combined here, with the usual
+  // comma separation.
+  void SetHttp2SupportFromViaHeader(StringPiece header);
 
   // The minimal private suffix for the hostname specified in this request.
   // This should be calculated from the hostname by considering the list of
@@ -153,14 +155,6 @@ class RequestContext : public RefCounted<RequestContext> {
   // gzip compressed data.
   void SetAcceptsGzip(bool x);
   bool accepts_gzip() const { return accepts_gzip_; }
-
-  // Indicates the type of split html request.
-  SplitRequestType split_request_type() const {
-    return split_request_type_;
-  }
-  void set_split_request_type(SplitRequestType type) {
-    split_request_type_ = type;
-  }
 
   int64 request_id() const {
     return request_id_;
@@ -244,7 +238,6 @@ class RequestContext : public RefCounted<RequestContext> {
   REFCOUNT_FRIEND_DECLARATION(RequestContext);
 
  private:
-  // Set default values of accepts webp, accepts gzip, and uses spdy.
   void Init();
 
   // Always non-NULL.
@@ -260,13 +253,12 @@ class RequestContext : public RefCounted<RequestContext> {
 
   StringSet session_authorized_fetch_origins_;
 
-  bool using_spdy_;
+  bool using_http2_;
   bool accepts_webp_;
   bool accepts_gzip_;
   bool frozen_;
   GoogleString minimal_private_suffix_;
 
-  SplitRequestType split_request_type_;
   int64 request_id_;
 
   // The token specified by query parameter or header that must match the

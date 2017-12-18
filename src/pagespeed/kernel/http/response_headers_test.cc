@@ -716,16 +716,26 @@ TEST_F(ResponseHeadersTest, GetSanitizedProto) {
                       "Vary: User-Agent\r\n"
                       "Set-Cookie2: LA=1275937193\r\n"
                       "Vary: Accept-Encoding\r\n"
+                      "Connection: Foo, bar, Connection, Keep-Alive, "
+                      "Cache-Control,, foo\r\n"
+                      "foo: bar\r\n"
+                      "bar: foo\r\n"
+                      "ShouldRemain: foo\r\n"
                       "\r\n"));
   HttpResponseHeaders proto;
   response_headers_.GetSanitizedProto(&proto);
-  ASSERT_EQ(proto.header_size(), 4);
+  ASSERT_EQ(proto.header_size(), 5);
   EXPECT_EQ(proto.header(0).name(), HttpAttributes::kDate);
+  // Cache-Control is an end-to-end header, and should not be sanitized even
+  // though it is referenced in the Connection: header.
   EXPECT_EQ(proto.header(1).name(), HttpAttributes::kCacheControl);
   EXPECT_EQ(proto.header(1).value(), "max-age=100");
   EXPECT_EQ(proto.header(2).name(), HttpAttributes::kVary);
   EXPECT_EQ(proto.header(2).value(), "User-Agent");
   EXPECT_EQ(proto.header(3).name(), HttpAttributes::kVary);
+  EXPECT_EQ(proto.header(3).value(), "Accept-Encoding");
+  EXPECT_EQ(proto.header(4).name(), "ShouldRemain");
+  EXPECT_EQ(proto.header(4).value(), "foo");
   EXPECT_EQ(proto.status_code(), 200);
 }
 
@@ -1457,7 +1467,7 @@ TEST_F(ResponseHeadersTest, TestRemove) {
       "Date: ", start_time_string_, "\r\n"
       "Expires: ", start_time_plus_6_minutes_string_, "\r\n"
       "Cache-Control: max-age=360\r\n"
-      "Content-Encoding: chunked, deflate, gzip\r\n"
+      "Content-Encoding: deflate, gzip\r\n"
       "\r\n");
   response_headers_.Clear();
   ParseHeaders(headers);
@@ -1623,12 +1633,14 @@ TEST_F(ResponseHeadersTest, FixupMissingDate) {
 
 TEST_F(ResponseHeadersTest, LastModifiedAsInt64) {
   response_headers_.Clear();
+  EXPECT_FALSE(response_headers_.has_last_modified_time_ms());
   response_headers_.SetLastModified(MockTimer::kApr_5_2010_ms);
   response_headers_.ComputeCaching();
   EXPECT_STREQ("Mon, 05 Apr 2010 18:51:26 GMT", response_headers_.Lookup1(
       HttpAttributes::kLastModified));
   EXPECT_EQ(MockTimer::kApr_5_2010_ms,
             response_headers_.last_modified_time_ms());
+  EXPECT_TRUE(response_headers_.has_last_modified_time_ms());
 }
 
 TEST_F(ResponseHeadersTest, DoNotCorrectValidDate) {
@@ -1900,84 +1912,6 @@ TEST_F(ResponseHeadersTest, ForceCachingForAlreadyPublic) {
   EXPECT_STREQ("max-age=3456", *(values[1]));
 }
 
-TEST_F(ResponseHeadersTest, MinCacheTtlWithMaxAge) {
-  response_headers_.SetStatusAndReason(HttpStatus::kOK);
-  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
-  response_headers_.MergeContentType("text/css");
-  response_headers_.Add(HttpAttributes::kCacheControl, "max-age=250");
-  response_headers_.set_min_cache_ttl_ms(500 * 1000);
-  response_headers_.ComputeCaching();
-
-  // min-caching ttl overrides the explicit max age and changes the cache
-  // headers accordingly for down stream caching.
-  EXPECT_TRUE(response_headers_.IsProxyCacheable());
-  EXPECT_EQ(500 * 1000, response_headers_.cache_ttl_ms());
-  EXPECT_EQ(300 * 1000, response_headers_.implicit_cache_ttl_ms());
-  EXPECT_TRUE(response_headers_.Has(HttpAttributes::kExpires));
-  ConstStringStarVector values;
-  response_headers_.Lookup(HttpAttributes::kCacheControl, &values);
-  EXPECT_EQ(1, values.size());
-  EXPECT_STREQ("max-age=500", *(values[0]));
-}
-
-TEST_F(ResponseHeadersTest, MinCacheTtlWithMaxAgeZero) {
-  response_headers_.SetStatusAndReason(HttpStatus::kOK);
-  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
-  response_headers_.MergeContentType("text/css");
-  response_headers_.Add(HttpAttributes::kCacheControl, "max-age=0");
-  response_headers_.set_min_cache_ttl_ms(500 * 1000);
-  response_headers_.ComputeCaching();
-
-  // min_cache_ttl_ms does not apply here as the max-age is 0 and hence
-  // considered not cacheable.
-  EXPECT_FALSE(response_headers_.IsProxyCacheable());
-  EXPECT_EQ(0, response_headers_.cache_ttl_ms());
-  EXPECT_EQ(500 * 1000, response_headers_.min_cache_ttl_ms());
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kExpires));
-  ConstStringStarVector values;
-  response_headers_.Lookup(HttpAttributes::kCacheControl, &values);
-  EXPECT_EQ(1, values.size());
-  EXPECT_STREQ("max-age=0", *(values[0]));
-}
-
-TEST_F(ResponseHeadersTest, MinCacheTtlWithHtml) {
-  response_headers_.SetStatusAndReason(HttpStatus::kOK);
-  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
-  response_headers_.MergeContentType("text/html");
-  response_headers_.Add(HttpAttributes::kCacheControl, "max-age=250");
-  response_headers_.set_min_cache_ttl_ms(500 * 1000);
-  response_headers_.ComputeCaching();
-
-  // Since the content type is html, min caching will not override the original
-  // header values.
-  EXPECT_TRUE(response_headers_.IsProxyCacheable());
-  EXPECT_EQ(250 * 1000, response_headers_.cache_ttl_ms());
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kExpires));
-  ConstStringStarVector values;
-  response_headers_.Lookup(HttpAttributes::kCacheControl, &values);
-  EXPECT_EQ(1, values.size());
-  EXPECT_STREQ("max-age=250", *(values[0]));
-}
-
-TEST_F(ResponseHeadersTest, MinCacheTtlWithForceCaching) {
-  response_headers_.SetStatusAndReason(HttpStatus::kOK);
-  response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
-  response_headers_.Add(HttpAttributes::kCacheControl, "max-age=250");
-  response_headers_.set_min_cache_ttl_ms(400 * 1000);
-  response_headers_.ForceCaching(500 * 1000);
-  response_headers_.ComputeCaching();
-
-  EXPECT_TRUE(response_headers_.IsProxyCacheable());
-  EXPECT_EQ(500 * 1000, response_headers_.cache_ttl_ms());
-  EXPECT_EQ(400 * 1000, response_headers_.min_cache_ttl_ms());
-  EXPECT_EQ(300 * 1000, response_headers_.implicit_cache_ttl_ms());
-  EXPECT_FALSE(response_headers_.Has(HttpAttributes::kExpires));
-  ConstStringStarVector values;
-  response_headers_.Lookup(HttpAttributes::kCacheControl, &values);
-  EXPECT_EQ(1, values.size());
-  EXPECT_STREQ("max-age=250", *(values[0]));
-}
-
 TEST_F(ResponseHeadersTest, GetCookieString) {
   response_headers_.SetStatusAndReason(HttpStatus::kOK);
   response_headers_.SetDate(MockTimer::kApr_5_2010_ms);
@@ -2116,38 +2050,152 @@ TEST_F(ResponseHeadersTest, ClearOptionCookies) {
   EXPECT_EQ(kBaseHeaders, headers.ToString());
 }
 
+TEST_F(ResponseHeadersTest, RelCanonicalHeaderValue) {
+  EXPECT_EQ("<http://www.example.com>; rel=\"canonical\"",
+            ResponseHeaders::RelCanonicalHeaderValue("http://www.example.com"));
+
+  EXPECT_EQ(
+      "<http://www.example.com/foo%3Cbar%3E>; rel=\"canonical\"",
+      ResponseHeaders::RelCanonicalHeaderValue(
+          "http://www.example.com/foo<bar>"));
+}
+
+TEST_F(ResponseHeadersTest, HasLinkRelCanonical) {
+  ResponseHeaders h1;
+  EXPECT_FALSE(h1.HasLinkRelCanonical());
+
+  h1.Add(HttpAttributes::kLink,
+         "<http://www.example.com/canonical>; rel=\"next\"");
+  EXPECT_FALSE(h1.HasLinkRelCanonical());
+
+  h1.Add(HttpAttributes::kLink,
+         "<http://www.example.com/foo>; rel= \"canonical\"; foo=bar");
+  EXPECT_TRUE(h1.HasLinkRelCanonical());
+
+  // This one is an expected false positive.
+  ResponseHeaders h2;
+  h2.Add(HttpAttributes::kLink,
+         "<http://www.example.com/foo>; rel= \"next\"; icon=\"canonical.ico\"");
+  EXPECT_TRUE(h2.HasLinkRelCanonical());
+}
+
+TEST_F(ResponseHeadersTest, ContentLength) {
+  ResponseHeaders headers;
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.SetContentLength(25);
+  headers.SetOriginalContentLength(50);
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "Content-Length: 25\r\n"
+               "X-Original-Content-Length: 50\r\n"
+               "\r\n",
+               headers.ToString());
+
+  // Setting original-content-length again is ignored (first one wins).
+  headers.SetOriginalContentLength(75);  // ignored.
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "Content-Length: 25\r\n"
+               "X-Original-Content-Length: 50\r\n"
+               "\r\n",
+               headers.ToString());
+
+  // Setting the content-length smaller yet again is fine.  e.g. minification
+  // first, then compression.
+  headers.SetContentLength(20);
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "X-Original-Content-Length: 50\r\n"
+               "Content-Length: 20\r\n"
+               "\r\n",
+               headers.ToString());
+
+  // Setting the content-length back to the original-content-length erases
+  // the original-content-length.
+  headers.SetContentLength(50);
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "Content-Length: 50\r\n"
+               "\r\n",
+               headers.ToString());
+}
+
+TEST_F(ResponseHeadersTest, MultipleOriginalContentLengths) {
+  ResponseHeaders headers;
+  headers.SetStatusAndReason(HttpStatus::kOK);
+  headers.SetContentLength(25);
+  headers.SetOriginalContentLength(50);
+
+  // To get more X-Original-Content-Length attributes we can add them
+  // directly without going through the SetOriginalContentLength API.
+  headers.Add(HttpAttributes::kXOriginalContentLength, "51");
+  headers.Add(HttpAttributes::kXOriginalContentLength, "50");  // duplicate
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "Content-Length: 25\r\n"
+               "X-Original-Content-Length: 50\r\n"
+               "X-Original-Content-Length: 51\r\n"
+               "X-Original-Content-Length: 50\r\n"
+               "\r\n",
+               headers.ToString());
+
+  // Now setting content-length to 50, we are still left with
+  // the "X-Original-Content-Length: 51".
+  headers.SetContentLength(50);
+  EXPECT_STREQ("HTTP/1.0 200 OK\r\n"
+               "X-Original-Content-Length: 51\r\n"
+               "Content-Length: 50\r\n"
+               "\r\n",
+               headers.ToString());
+}
+
 TEST_F(ResponseHeadersTest, CacheControlPublic) {
-  StringVector strvec;
-  EXPECT_STREQ("public", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("max-age=100");
-  EXPECT_STREQ("max-age=100, public", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("public, max-age=100");
-  EXPECT_STREQ("public, max-age=100", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("public");
-  strvec.push_back("max-age=100");
-  EXPECT_STREQ("public, max-age=100", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("max-age=100,private");
-  EXPECT_STREQ("max-age=100, private", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("max-age=100");
-  strvec.push_back("private");
-  EXPECT_STREQ("max-age=100, private", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("no-store");
-  EXPECT_STREQ("no-store", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("no-cache");
-  EXPECT_STREQ("no-cache", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("No-Store");
-  EXPECT_STREQ("No-Store", AddPublicToCacheControl(strvec));
-  strvec.clear();
-  strvec.push_back("No-Cache");
-  EXPECT_STREQ("No-Cache", AddPublicToCacheControl(strvec));
+  EXPECT_STREQ("public", AddPublicToCacheControl({}));
+  EXPECT_STREQ("max-age=100, public", AddPublicToCacheControl({"max-age=100"}));
+  EXPECT_STREQ("public, max-age=100",
+               AddPublicToCacheControl({"public, max-age=100"}));
+  EXPECT_STREQ("public, max-age=100",
+               AddPublicToCacheControl({"public", "max-age=100"}));
+  EXPECT_STREQ("max-age=100, private",
+               AddPublicToCacheControl({"max-age=100,private"}));
+  EXPECT_STREQ("max-age=100, private",
+               AddPublicToCacheControl({"max-age=100", "private"}));
+  EXPECT_STREQ("no-store", AddPublicToCacheControl({"no-store"}));
+  EXPECT_STREQ("no-cache", AddPublicToCacheControl({"no-cache"}));
+  EXPECT_STREQ("No-Store", AddPublicToCacheControl({"No-Store"}));
+  EXPECT_STREQ("No-Cache", AddPublicToCacheControl({"No-Cache"}));
+}
+
+TEST_F(ResponseHeadersTest, TestHopByHopSanitization) {
+  // RFC hop-by-hop list: http://tools.ietf.org/html/rfc7230#section-6.1
+  ResponseHeaders headers;
+
+  headers.Add(HttpAttributes::kConnection,
+              "Keep-Alive, Foo,, , bar, Cache-Control");
+  headers.Add(HttpAttributes::kKeepAlive, "foo");
+  headers.Add(HttpAttributes::kProxyAuthenticate, "foo");
+  headers.Add(HttpAttributes::kProxyAuthorization, "foo");
+  headers.Add(HttpAttributes::kTE, "foo");
+  headers.Add(HttpAttributes::kTrailers, "foo");
+  headers.Add(HttpAttributes::kTransferEncoding, "foo");
+  headers.Add(HttpAttributes::kUpgrade, "foo");
+  headers.Add(HttpAttributes::kAlternateProtocol, "foo");
+  headers.Add(HttpAttributes::kCacheControl, "foo");
+  // foo: foo is be referenced in "Connection: Foo", and therefore is marked
+  // as hop-by-hop and as such candidate for sanitization.
+  headers.Add("foo", "foo");
+
+  EXPECT_TRUE(headers.Sanitize());
+
+  // After sanitization, only end-to-end header Cache-Control should remain.
+  EXPECT_EQ("HTTP/1.0 0 (null)\r\nCache-Control: foo\r\n\r\n",
+            headers.ToString());
+
+  // Test to make sure we don't screw up if Connection: marks itself as
+  // explicitly hop-by-hop.
+  ResponseHeaders headers2;
+  headers2.Add(HttpAttributes::kConnection,
+               "Connection, Foo");
+  headers2.Add("foo", "foo");
+  headers2.Add("bar", "baz");
+
+  EXPECT_TRUE(headers2.Sanitize());
+  EXPECT_EQ("HTTP/1.0 0 (null)\r\nbar: baz\r\n\r\n", headers2.ToString());
 }
 
 }  // namespace net_instaweb

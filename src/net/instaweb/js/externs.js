@@ -20,11 +20,6 @@
  */
 
 
-// Globals used by critical_line_xpath.js
-/** @type {boolean} */
-var is_mobile;
-
-
 /** @type {string} */
 var blocked_resource_url_pattern;
 
@@ -46,7 +41,6 @@ window.pagespeed.deferJs;
 window.pagespeed.deferJs.registerScriptTags;
 window.pagespeed.deferJs.run;
 window.pagespeed.getResourceTimingData;
-window.pagespeed.lastScriptIndexBeforePanelStub;
 window.pagespeed.shouldAllowResource;
 window.performance.getEntries;
 window.performance.webkitGetEntries;

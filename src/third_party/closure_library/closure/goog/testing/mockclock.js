@@ -21,6 +21,7 @@
  *
  */
 
+goog.setTestOnly('goog.testing.MockClock');
 goog.provide('goog.testing.MockClock');
 
 goog.require('goog.Disposable');
@@ -28,7 +29,6 @@ goog.require('goog.async.run');
 goog.require('goog.testing.PropertyReplacer');
 goog.require('goog.testing.events');
 goog.require('goog.testing.events.Event');
-goog.require('goog.testing.watchers');
 
 
 
@@ -79,8 +79,7 @@ goog.testing.MockClock = function(opt_autoInstall) {
    * turn comes up.  The keys are the timeout keys that are cancelled, each
    * mapping to true.
    *
-   * @type {Object}
-   * @private
+   * @private {Object<number, boolean>}
    */
   this.deletedKeys_ = {};
 
@@ -101,11 +100,29 @@ goog.testing.MockClock.REQUEST_ANIMATION_FRAME_TIMEOUT = 20;
 
 
 /**
- * Count of the number of timeouts made.
+ * ID to use for next timeout.  Timeout IDs must never be reused, even across
+ * MockClock instances.
+ * @public {number}
+ */
+goog.testing.MockClock.nextId = Math.round(Math.random() * 10000);
+
+
+/**
+ * Count of the number of setTimeout/setInterval/etc. calls received by this
+ * instance.
  * @type {number}
  * @private
  */
 goog.testing.MockClock.prototype.timeoutsMade_ = 0;
+
+
+/**
+ * Count of the number of timeout/interval/etc. callbacks triggered by this
+ * instance.
+ * @type {number}
+ * @private
+ */
+goog.testing.MockClock.prototype.callbacksTriggered_ = 0;
 
 
 /**
@@ -115,15 +132,6 @@ goog.testing.MockClock.prototype.timeoutsMade_ = 0;
  * @private
  */
 goog.testing.MockClock.prototype.replacer_ = null;
-
-
-/**
- * Map of deleted keys.  These keys represents keys that were deleted in a
- * clearInterval, timeoutid -> object.
- * @type {Object}
- * @private
- */
-goog.testing.MockClock.prototype.deletedKeys_ = null;
 
 
 /**
@@ -146,11 +154,28 @@ goog.testing.MockClock.prototype.timeoutDelay_ = 0;
 
 
 /**
+ * The real set timeout for reference.
+ * @const @private {!Function}
+ */
+goog.testing.MockClock.REAL_SETTIMEOUT_ = goog.global.setTimeout;
+
+
+/**
  * Installs the MockClock by overriding the global object's implementation of
  * setTimeout, setInterval, clearTimeout and clearInterval.
  */
 goog.testing.MockClock.prototype.install = function() {
   if (!this.replacer_) {
+    if (goog.testing.MockClock.REAL_SETTIMEOUT_ !== goog.global.setTimeout) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn(
+            'Non default setTimeout detected. ' +
+            'Use of multiple MockClock instances or other clock mocking ' +
+            'should be avoided due to unspecified behavior and ' +
+            'the resulting fragility.');
+      }
+    }
+
     var r = this.replacer_ = new goog.testing.PropertyReplacer();
     r.set(goog.global, 'setTimeout', goog.bind(this.setTimeout_, this));
     r.set(goog.global, 'setInterval', goog.bind(this.setInterval_, this));
@@ -163,7 +188,8 @@ goog.testing.MockClock.prototype.install = function() {
     // default to setImmediate, which is replaced above. Note that we test for
     // the presence of goog.async.run.forceNextTick to be resilient to the case
     // where tests replace goog.async.run directly.
-    goog.async.run.forceNextTick && goog.async.run.forceNextTick();
+    goog.async.run.forceNextTick &&
+        goog.async.run.forceNextTick(goog.testing.MockClock.REAL_SETTIMEOUT_);
 
     // Replace the requestAnimationFrame functions.
     this.replaceRequestAnimationFrame_();
@@ -181,29 +207,30 @@ goog.testing.MockClock.prototype.install = function() {
  */
 goog.testing.MockClock.prototype.replaceRequestAnimationFrame_ = function() {
   var r = this.replacer_;
-  var requestFuncs = ['requestAnimationFrame',
-                      'webkitRequestAnimationFrame',
-                      'mozRequestAnimationFrame',
-                      'oRequestAnimationFrame',
-                      'msRequestAnimationFrame'];
+  var requestFuncs = [
+    'requestAnimationFrame', 'webkitRequestAnimationFrame',
+    'mozRequestAnimationFrame', 'oRequestAnimationFrame',
+    'msRequestAnimationFrame'
+  ];
 
-  var cancelFuncs = ['cancelAnimationFrame',
-                     'cancelRequestAnimationFrame',
-                     'webkitCancelRequestAnimationFrame',
-                     'mozCancelRequestAnimationFrame',
-                     'oCancelRequestAnimationFrame',
-                     'msCancelRequestAnimationFrame'];
+  var cancelFuncs = [
+    'cancelAnimationFrame', 'cancelRequestAnimationFrame',
+    'webkitCancelRequestAnimationFrame', 'mozCancelRequestAnimationFrame',
+    'oCancelRequestAnimationFrame', 'msCancelRequestAnimationFrame'
+  ];
 
   for (var i = 0; i < requestFuncs.length; ++i) {
     if (goog.global && goog.global[requestFuncs[i]]) {
-      r.set(goog.global, requestFuncs[i],
+      r.set(
+          goog.global, requestFuncs[i],
           goog.bind(this.requestAnimationFrame_, this));
     }
   }
 
   for (var i = 0; i < cancelFuncs.length; ++i) {
     if (goog.global && goog.global[cancelFuncs[i]]) {
-      r.set(goog.global, cancelFuncs[i],
+      r.set(
+          goog.global, cancelFuncs[i],
           goog.bind(this.cancelRequestAnimationFrame_, this));
     }
   }
@@ -221,7 +248,7 @@ goog.testing.MockClock.prototype.uninstall = function() {
     goog.now = this.oldGoogNow_;
   }
 
-  this.fireResetEvent();
+  this.resetAsyncQueue_();
 };
 
 
@@ -243,18 +270,19 @@ goog.testing.MockClock.prototype.reset = function() {
   this.deletedKeys_ = {};
   this.nowMillis_ = 0;
   this.timeoutsMade_ = 0;
+  this.callbacksTriggered_ = 0;
   this.timeoutDelay_ = 0;
 
-  this.fireResetEvent();
+  this.resetAsyncQueue_();
 };
 
 
 /**
- * Signals that the mock clock has been reset, allowing objects that
- * maintain their own internal state to reset.
+ * Resets the async queue when this clock resets.
+ * @private
  */
-goog.testing.MockClock.prototype.fireResetEvent = function() {
-  goog.testing.watchers.signalClockReset();
+goog.testing.MockClock.prototype.resetAsyncQueue_ = function() {
+  goog.async.run.resetQueue();
 };
 
 
@@ -314,13 +342,15 @@ goog.testing.MockClock.prototype.tickPromise = function(promise, opt_millis) {
   var value;
   var error;
   var resolved = false;
-  promise.then(function(v) {
-    value = v;
-    resolved = true;
-  }, function(e) {
-    error = e;
-    resolved = true;
-  });
+  promise.then(
+      function(v) {
+        value = v;
+        resolved = true;
+      },
+      function(e) {
+        error = e;
+        resolved = true;
+      });
   this.tick(opt_millis);
   if (!resolved) {
     throw new Error(
@@ -334,10 +364,20 @@ goog.testing.MockClock.prototype.tickPromise = function(promise, opt_millis) {
 
 
 /**
- * @return {number} The number of timeouts that have been scheduled.
+ * @return {number} The number of timeouts or intervals that have been
+ * scheduled. A setInterval call is only counted once.
  */
 goog.testing.MockClock.prototype.getTimeoutsMade = function() {
   return this.timeoutsMade_;
+};
+
+
+/**
+ * @return {number} The number of timeout or interval callbacks that have been
+ * triggered. For setInterval, each callback is counted separately.
+ */
+goog.testing.MockClock.prototype.getCallbacksTriggered = function() {
+  return this.callbacksTriggered_;
 };
 
 
@@ -359,7 +399,9 @@ goog.testing.MockClock.prototype.getCurrentTime = function() {
  *     cleared.
  */
 goog.testing.MockClock.prototype.isTimeoutSet = function(timeoutKey) {
-  return timeoutKey <= this.timeoutsMade_ && !this.deletedKeys_[timeoutKey];
+  return timeoutKey < goog.testing.MockClock.nextId &&
+      timeoutKey >= goog.testing.MockClock.nextId - this.timeoutsMade_ &&
+      !this.deletedKeys_[timeoutKey];
 };
 
 
@@ -369,20 +411,20 @@ goog.testing.MockClock.prototype.isTimeoutSet = function(timeoutKey) {
  * @param {number} endTime The latest time in the range, in milliseconds.
  * @private
  */
-goog.testing.MockClock.prototype.runFunctionsWithinRange_ = function(
-    endTime) {
+goog.testing.MockClock.prototype.runFunctionsWithinRange_ = function(endTime) {
   var adjustedEndTime = endTime - this.timeoutDelay_;
 
   // Repeatedly pop off the last item since the queue is always sorted.
   while (this.queue_ && this.queue_.length &&
-      this.queue_[this.queue_.length - 1].runAtMillis <= adjustedEndTime) {
+         this.queue_[this.queue_.length - 1].runAtMillis <= adjustedEndTime) {
     var timeout = this.queue_.pop();
 
     if (!(timeout.timeoutKey in this.deletedKeys_)) {
       // Only move time forwards.
-      this.nowMillis_ = Math.max(this.nowMillis_,
-          timeout.runAtMillis + this.timeoutDelay_);
+      this.nowMillis_ =
+          Math.max(this.nowMillis_, timeout.runAtMillis + this.timeoutDelay_);
       // Call timeout in global scope and pass the timeout key as the argument.
+      this.callbacksTriggered_++;
       timeout.funcToCall.call(goog.global, timeout.timeoutKey);
       // In case the interval was cleared in the funcToCall
       if (timeout.recurring) {
@@ -406,8 +448,8 @@ goog.testing.MockClock.prototype.scheduleFunction_ = function(
     timeoutKey, funcToCall, millis, recurring) {
   if (!goog.isFunction(funcToCall)) {
     // Early error for debuggability rather than dying in the next .tick()
-    throw new TypeError('The provided callback must be a function, not a ' +
-        typeof funcToCall);
+    throw new TypeError(
+        'The provided callback must be a function, not a ' + typeof funcToCall);
   }
 
   var timeout = {
@@ -485,9 +527,10 @@ goog.testing.MockClock.prototype.setTimeout_ = function(
         '(24.8 days) cause timeouts to be fired ' +
         'immediately in most browsers, except for IE.');
   }
-  this.timeoutsMade_ = this.timeoutsMade_ + 1;
-  this.scheduleFunction_(this.timeoutsMade_, funcToCall, millis, false);
-  return this.timeoutsMade_;
+  this.timeoutsMade_++;
+  this.scheduleFunction_(
+      goog.testing.MockClock.nextId, funcToCall, millis, false);
+  return goog.testing.MockClock.nextId++;
 };
 
 
@@ -499,12 +542,13 @@ goog.testing.MockClock.prototype.setTimeout_ = function(
  * @return {number} The number of timeouts created.
  * @private
  */
-goog.testing.MockClock.prototype.setInterval_ =
-    function(funcToCall, opt_millis) {
+goog.testing.MockClock.prototype.setInterval_ = function(
+    funcToCall, opt_millis) {
   var millis = opt_millis || 0;
-  this.timeoutsMade_ = this.timeoutsMade_ + 1;
-  this.scheduleFunction_(this.timeoutsMade_, funcToCall, millis, true);
-  return this.timeoutsMade_;
+  this.timeoutsMade_++;
+  this.scheduleFunction_(
+      goog.testing.MockClock.nextId, funcToCall, millis, true);
+  return goog.testing.MockClock.nextId++;
 };
 
 
@@ -559,9 +603,6 @@ goog.testing.MockClock.prototype.clearTimeout_ = function(timeoutKey) {
   // For now, we just hackily fail silently if someone tries to clear a timeout
   // key before we've allocated it.
   // Ideally, we should throw an exception if we see this happening.
-  //
-  // TODO(chrishenry): We might also try allocating timeout ids from a global
-  // pool rather than a local pool.
   if (this.isTimeoutSet(timeoutKey)) {
     this.deletedKeys_[timeoutKey] = true;
   }
@@ -585,7 +626,7 @@ goog.testing.MockClock.prototype.clearInterval_ = function(timeoutKey) {
  * @param {number} timeoutKey The requestAnimationFrame key to clear.
  * @private
  */
-goog.testing.MockClock.prototype.cancelRequestAnimationFrame_ =
-    function(timeoutKey) {
+goog.testing.MockClock.prototype.cancelRequestAnimationFrame_ = function(
+    timeoutKey) {
   this.clearTimeout_(timeoutKey);
 };

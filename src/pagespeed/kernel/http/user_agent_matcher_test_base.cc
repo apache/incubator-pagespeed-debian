@@ -48,6 +48,13 @@ const char UserAgentMatcherTestBase::kAndroidHCUserAgent[] =
 const char UserAgentMatcherTestBase::kAndroidICSUserAgent[] =
     "Mozilla/5.0 (Linux; U; Android 4.0.1; en-us; Galaxy Nexus Build/ICL27) "
     "AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30";
+const char UserAgentMatcherTestBase::kPagespeedInsightsMobileUserAgent[] =
+    "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) "
+    "AppleWebKit/537.36 (KHTML, like Gecko; Google Page Speed Insights) "
+    "Chrome/27.0.1453 Mobile Safari/537.36";
+const char UserAgentMatcherTestBase::kPagespeedInsightsDesktopUserAgent[] =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko; "
+    "Google Page Speed Insights) Chrome/27.0.1453 Safari/537.36";
 const char UserAgentMatcherTestBase::kAndroidNexusSUserAgent[] =
     "Mozilla/5.0 (Linux; U; Android 2.3.3; en-gb; Nexus S Build/GRI20)"
     "AppleWebKit/533.1 (KHTML, like Gecko) Version/4.0 Mobile Safari/533.1";
@@ -459,30 +466,6 @@ UserAgentMatcherTestBase::kImageInliningSupportedUserAgents[] = {
   UserAgentMatcherTestBase::kGoogleAdsBotMobileUserAgent,
 };
 
-const char* const UserAgentMatcherTestBase::kSplitHtmlSupportedUserAgents[] = {
-  UserAgentMatcherTestBase::kChromeUserAgent,
-  UserAgentMatcherTestBase::kFirefoxUserAgent,
-  UserAgentMatcherTestBase::kIe10UserAgent,
-  UserAgentMatcherTestBase::kSafariUserAgent,
-};
-
-const char* const
-UserAgentMatcherTestBase::kSplitHtmlUnSupportedUserAgents[] = {
-  UserAgentMatcherTestBase::kAndroidChrome21UserAgent,
-  UserAgentMatcherTestBase::kFirefox1UserAgent,
-  UserAgentMatcherTestBase::kFirefox3UserAgent,
-  UserAgentMatcherTestBase::kIe6UserAgent,
-  UserAgentMatcherTestBase::kIe8UserAgent,
-  UserAgentMatcherTestBase::kIe9UserAgent,
-  UserAgentMatcherTestBase::kIe11UserAgents[0],
-  UserAgentMatcherTestBase::kIe11UserAgents[1],
-  UserAgentMatcherTestBase::kIe11UserAgents[2],
-  UserAgentMatcherTestBase::kIe11UserAgents[3],
-  UserAgentMatcherTestBase::kNokiaUserAgent,
-  UserAgentMatcherTestBase::kOpera5UserAgent,
-  UserAgentMatcherTestBase::kPSPUserAgent,
-};
-
 const int UserAgentMatcherTestBase::kIe11UserAgentsArraySize =
     arraysize(kIe11UserAgents);
 const int UserAgentMatcherTestBase::kMobileUserAgentsArraySize =
@@ -493,10 +476,6 @@ const int UserAgentMatcherTestBase::kTabletUserAgentsArraySize =
     arraysize(kTabletUserAgents);
 const int UserAgentMatcherTestBase::kImageInliningSupportedUserAgentsArraySize =
     arraysize(kImageInliningSupportedUserAgents);
-const int UserAgentMatcherTestBase::kSplitHtmlSupportedUserAgentsArraySize =
-    arraysize(kSplitHtmlSupportedUserAgents);
-const int UserAgentMatcherTestBase::kSplitHtmlUnSupportedUserAgentsArraySize =
-    arraysize(kSplitHtmlUnSupportedUserAgents);
 
 UserAgentMatcherTestBase::UserAgentMatcherTestBase() {
   user_agent_matcher_.reset(new UserAgentMatcher());
@@ -551,30 +530,6 @@ void UserAgentMatcherTestBase::VerifyImageInliningSupport() {
   }
   EXPECT_FALSE(user_agent_matcher_->SupportsImageInlining(
       "random user agent"));
-}
-
-void UserAgentMatcherTestBase::VerifySplitHtmlSupport() {
-  for (int i = 0;
-       i < kSplitHtmlSupportedUserAgentsArraySize;
-       ++i) {
-    EXPECT_TRUE(user_agent_matcher_->SupportsSplitHtml(
-                    kSplitHtmlSupportedUserAgents[i],
-                    false))
-        << "\"" << kSplitHtmlSupportedUserAgents[i]
-        << "\"" << " not detected as a user agent that supports split-html";
-  }
-  // Allow-mobile case.
-  EXPECT_TRUE(user_agent_matcher_->SupportsSplitHtml(
-      kAndroidChrome21UserAgent, true));
-  for (int i = 0;
-       i < kSplitHtmlUnSupportedUserAgentsArraySize;
-       ++i) {
-    EXPECT_FALSE(user_agent_matcher_->SupportsSplitHtml(
-                    kSplitHtmlUnSupportedUserAgents[i],
-                    false))
-        << "\"" << kSplitHtmlUnSupportedUserAgents[i]
-        << "\" detected incorrectly as a user agent that supports split-html";
-  }
 }
 
 void UserAgentMatcherTestBase::VerifyMobilizationSupport() {

@@ -32,27 +32,27 @@
 #include "net/instaweb/util/public/fallback_property_page.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "pagespeed/automatic/html_detector.h"
+#include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
+#include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/gtest_prod.h"
 #include "pagespeed/kernel/base/scoped_ptr.h"
 #include "pagespeed/kernel/base/string.h"
 #include "pagespeed/kernel/base/string_util.h"
 #include "pagespeed/kernel/http/http_names.h"
+#include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/user_agent_matcher.h"
 #include "pagespeed/kernel/thread/queued_worker_pool.h"
 
 namespace net_instaweb {
 
-class AbstractMutex;
 class CacheUrlAsyncFetcher;
-class Function;
 class GoogleUrl;
 class MessageHandler;
 class ProxyFetch;
 class ProxyFetchPropertyCallbackCollector;
 class QueuedAlarm;
 class ServerContext;
-class ResponseHeaders;
 class RewriteDriver;
 class RewriteOptions;
 class Timer;
@@ -96,8 +96,7 @@ class ProxyFetchFactory {
       const GoogleUrl& request_url,
       ServerContext* server_context,
       RewriteOptions* options,
-      AsyncFetch* async_fetch,
-      const bool requires_blink_cohort);
+      AsyncFetch* async_fetch);
 
   MessageHandler* message_handler() const { return handler_; }
 
@@ -358,6 +357,7 @@ class ProxyFetch : public SharedAsyncFetch {
   friend class ProxyFetchPropertyCallbackCollector;
   friend class MockProxyFetch;
   FRIEND_TEST(ProxyFetchTest, TestInhibitParsing);
+  FRIEND_TEST(ProxyFetchTest, TestFollowFlushes);
 
   // Called by ProxyFetchPropertyCallbackCollector when all property-cache
   // fetches are complete.  This function takes ownership of collector.
@@ -512,9 +512,6 @@ class ProxyFetch : public SharedAsyncFetch {
   QueuedAlarm* idle_alarm_;
 
   ProxyFetchFactory* factory_;
-
-  // Set to true if this proxy_fetch is the result of a distributed fetch.
-  bool distributed_fetch_;
 
   // Set to true if this proxy_fetch is actually operating on trusted
   // (non-proxied) content.

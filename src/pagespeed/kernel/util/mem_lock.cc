@@ -18,6 +18,9 @@
 
 #include "pagespeed/kernel/util/mem_lock.h"
 
+#include <algorithm>
+
+#include "base/logging.h"
 #include "pagespeed/kernel/base/function.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/util/mem_lock_manager.h"
@@ -103,7 +106,7 @@ void MemLock::Unlock() {
   // is not held.
   if (Held()) {
     lock_state_->Unlock();
-    Clear();
+    // "this" may have been freed by this point.
   }
 }
 

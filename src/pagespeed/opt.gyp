@@ -28,9 +28,12 @@
         '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)instaweb_data2c<(EXECUTABLE_SUFFIX)',
     # See comment in instaweb.gyp.
     'include_closure_library':
-        '<!(echo --only_closure_dependencies'
-        '    $(find <(instaweb_root)/third_party/closure_library -name "*.js"'
-        '           | sort | sed "s/^/--js /"))',
+        '<!(echo --dependency_mode=STRICT'
+        '    $(find <(instaweb_root)/third_party/closure_library/closure '
+        '           <(instaweb_root)/third_party/closure_library/third_party '
+        '           -name "*.js"'
+        '           | grep -v _test.js | sort | sed "s/^/--js /"))',
+
   },
   'targets': [
     {
@@ -149,174 +152,6 @@
         'pagespeed_property_cache_pb',
       ],
     },
-
-    {
-      'target_name': 'mobilize_js_dbg',
-      'variables': {
-        'js_dir': 'opt/mobilize',
-        'closure_build_type': 'dbg',
-        'extra_closure_flags': [
-          '--closure_entry_point=mob',
-          '<@(include_closure_library)',
-          '--externs=opt/mobilize/externs.js',
-          '--externs=opt/mobilize/externs_wkh.js',
-        ],
-        'js_includes' : [
-          'opt/mobilize/button/abstractbutton.js',
-          'opt/mobilize/button/dialer.js',
-          'opt/mobilize/button/map.js',
-          'opt/mobilize/button/menu.js',
-          'opt/mobilize/color.js',
-          'opt/mobilize/layout.js',
-          'opt/mobilize/layout_constants.js',
-          'opt/mobilize/layout_util.js',
-          'opt/mobilize/logo.js',
-          'opt/mobilize/nav.js',
-          'opt/mobilize/nav_panel.js',
-          'opt/mobilize/theme_picker.js',
-          'opt/mobilize/util.js',
-        ],
-      },
-      'sources': [ 'opt/mobilize/mobilize.js' ],
-      'includes': ['../net/instaweb/closure.gypi',],
-    },
-    {
-      'target_name': 'mobilize_js_opt',
-      'variables': {
-        'js_dir': 'opt/mobilize',
-        'extra_closure_flags': [
-          '--closure_entry_point=mob',
-          '<@(include_closure_library)',
-          '--externs=opt/mobilize/externs.js',
-          '--externs=opt/mobilize/externs_wkh.js',
-        ],
-        'js_includes' : [
-          'opt/mobilize/button/abstractbutton.js',
-          'opt/mobilize/button/dialer.js',
-          'opt/mobilize/button/map.js',
-          'opt/mobilize/button/menu.js',
-          'opt/mobilize/color.js',
-          'opt/mobilize/layout.js',
-          'opt/mobilize/layout_constants.js',
-          'opt/mobilize/layout_util.js',
-          'opt/mobilize/logo.js',
-          'opt/mobilize/nav.js',
-          'opt/mobilize/nav_panel.js',
-          'opt/mobilize/theme_picker.js',
-          'opt/mobilize/util.js',
-        ],
-      },
-      'sources': [ 'opt/mobilize/mobilize.js' ],
-      'includes': ['../net/instaweb/closure.gypi'],
-    },
-
-    {
-      'target_name': 'instaweb_mobilize_js_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': '<(compiled_js_dir)/opt/mobilize',
-        'var_name': 'mobilize_js',
-      },
-      'sources': [
-        '<(compiled_js_dir)/opt/mobilize/mobilize_dbg.js',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-    {
-      'target_name': 'instaweb_mobilize_js_opt_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': '<(compiled_js_dir)/opt/mobilize',
-        'var_name': 'mobilize_js_opt',
-      },
-      'sources': [
-        '<(compiled_js_dir)/opt/mobilize/mobilize_opt.js',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-
-
-    # TODO(jmarantz): Figure out how to factor out this boilerplate from
-    # the similar lines above for mobilize.
-    {
-      'target_name': 'mobilize_xhr_js_dbg',
-      'variables': {
-        'js_dir': 'opt/mobilize',
-        'closure_build_type': 'dbg',
-        'extra_closure_flags': [
-          '--closure_entry_point=mob.XhrHijack',
-          '<@(include_closure_library)',
-          '--externs=opt/mobilize/externs.js',
-        ],
-      },
-      'sources': ['opt/mobilize/xhr.js'],
-      'includes': ['../net/instaweb/closure.gypi',],
-    },
-    {
-      'target_name': 'mobilize_xhr_js_opt',
-      'variables': {
-        'js_dir': 'opt/mobilize',
-        'extra_closure_flags': [
-          '--closure_entry_point=mob.XhrHijack',
-          '<@(include_closure_library)',
-          '--externs=opt/mobilize/externs.js',
-        ],
-      },
-      'sources': ['opt/mobilize/xhr.js'],
-      'includes': ['../net/instaweb/closure.gypi'],
-    },
-
-    {
-      'target_name': 'instaweb_mobilize_xhr_js_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': '<(compiled_js_dir)/opt/mobilize',
-        'var_name': 'mobilize_xhr_js',
-      },
-      'sources': [
-        '<(compiled_js_dir)/opt/mobilize/xhr_dbg.js',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-    {
-      'target_name': 'instaweb_mobilize_xhr_js_opt_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': '<(compiled_js_dir)/opt/mobilize',
-        'var_name': 'mobilize_xhr_js_opt',
-      },
-      'sources': [
-        '<(compiled_js_dir)/opt/mobilize/xhr_opt.js',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-
-    {
-      'target_name': 'instaweb_mobilize_css_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': 'opt/mobilize',
-        'var_name': 'mobilize_css',
-      },
-      'sources': [
-        'opt/mobilize/mobilize.css',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-
-    {
-      'target_name': 'instaweb_mobilize_layout_css_data2c',
-      'variables': {
-        'instaweb_data2c_subdir': 'pagespeed/opt/mobilize',
-        'instaweb_js_subdir': 'opt/mobilize',
-        'var_name': 'mobilize_layout_css',
-      },
-      'sources': [
-        'opt/mobilize/layout.css',
-      ],
-      'includes': ['../net/instaweb/data2c.gypi']
-    },
-
   ]
 }
 

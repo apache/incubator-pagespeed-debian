@@ -49,6 +49,28 @@ using pagespeed::image_compression::PngCompressParams;
 
 namespace {
 
+// A wrapper that ensures that any padding bytes are initialized
+// deterministically.
+void* PngWrapMalloc(png_structp ptr, png_size_t size) {
+  if ((size & 7) == 0) {
+    return malloc(size);
+  } else {
+    png_size_t extra = 8 - (size & 7);
+    png_size_t rounded = size + extra;
+    DCHECK_NE(rounded, 0);
+    if (rounded == 0) {
+      return nullptr;
+    }
+    char* p = reinterpret_cast<char*>(malloc(rounded));
+    memset(p + (rounded - 8), 0, 8);
+    return p;
+  }
+}
+
+static void PngWrapFree(png_structp, png_voidp ptr) {
+  free(ptr);
+}
+
 // we use these four combinations because different images seem to benefit from
 // different parameters and this combination of 4 seems to work best for a large
 // set of PNGs from the web.
@@ -161,6 +183,9 @@ PngCompressParams::PngCompressParams(bool compression, bool progressive)
     is_progressive(progressive) {
 }
 
+PngCompressParams::~PngCompressParams() {
+}
+
 ScopedPngStruct::ScopedPngStruct(Type type,
     MessageHandler* handler)
   : png_ptr_(NULL),
@@ -184,6 +209,7 @@ ScopedPngStruct::ScopedPngStruct(Type type,
     info_ptr_ = png_create_info_struct(png_ptr_);
   }
 
+  png_set_mem_fn(png_ptr_, nullptr, &PngWrapMalloc, &PngWrapFree);
   png_set_error_fn(png_ptr_, message_handler_, &PngErrorFn, &PngWarningFn);
 }
 
@@ -974,28 +1000,24 @@ ScanlineStatus PngScanlineReaderRaw::InitializeWithStatus(
   // Set up callbacks for interlacing (progressive) image.
   png_set_interlace_handling(png_ptr);
 
+  if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA ||
+      (color_type == PNG_COLOR_TYPE_GRAY &&
+       png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))) {
+    // Expand Gray_Alpha (and Gray + tRNS which will be turned into
+    // Gray_Alpaha by png_set_expand) to RGBA.
+    png_set_gray_to_rgb(png_ptr);
+  }
+
+  // Expand paletted colors into true RGB triplets.
+  if (color_type == PNG_COLOR_TYPE_PALETTE) {
+    png_set_palette_to_rgb(png_ptr);
+  }
+
   // Update the reader struct after setting the transformations.
   png_read_update_info(png_ptr, info_ptr);
 
   // Get the updated color type.
   color_type = png_get_color_type(png_ptr, info_ptr);
-
-  if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA ||
-      color_type == PNG_COLOR_TYPE_PALETTE) {
-    if (color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
-      // Expand Gray_Alpha to RGBA.
-      png_set_gray_to_rgb(png_ptr);
-    } else {
-      // Expand paletted colors into true RGB triplets.
-      png_set_palette_to_rgb(png_ptr);
-    }
-
-    // Update the reader struct after modifying the transformations.
-    png_read_update_info(png_ptr, info_ptr);
-
-    // Get the updated color type.
-    color_type = png_get_color_type(png_ptr, info_ptr);
-  }
 
   // Determine the pixel format and the number of channels.
   switch (color_type) {
@@ -1158,7 +1180,7 @@ bool PngScanlineWriter::Validate(const PngCompressParams* params,
   }
 
   if (png_image == NULL) {
-    PS_LOG_DFATAL(message_handler_, "Ouput PNG image cannot be NULL.");
+    PS_LOG_DFATAL(message_handler_, "Output PNG image cannot be NULL.");
     return false;
   }
   return true;

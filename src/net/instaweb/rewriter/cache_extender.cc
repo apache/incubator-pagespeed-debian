@@ -35,6 +35,7 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/server_context.h"
 #include "net/instaweb/rewriter/public/single_rewrite_context.h"
+#include "net/instaweb/rewriter/public/srcset_slot.h"
 #include "net/instaweb/rewriter/public/url_namer.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/statistics.h"
@@ -43,15 +44,16 @@
 #include "pagespeed/kernel/base/string_writer.h"
 #include "pagespeed/kernel/base/timer.h"
 #include "pagespeed/kernel/html/html_element.h"
+#include "pagespeed/kernel/html/html_name.h"
 #include "pagespeed/kernel/http/content_type.h"
 #include "pagespeed/kernel/http/google_url.h"
+#include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/http/semantic_type.h"
 #include "pagespeed/opt/logging/enums.pb.h"
 
 namespace net_instaweb {
 class MessageHandler;
-class RewriteContext;
 
 // names for Statistics variables.
 const char CacheExtender::kCacheExtensions[] = "cache_extensions";
@@ -63,20 +65,45 @@ const int64 kMinThresholdMs = Timer::kMonthMs;
 
 class CacheExtender::Context : public SingleRewriteContext {
  public:
-  Context(CacheExtender* extender, RewriteDriver* driver,
+  Context(RewriteDriver::InputRole input_role,
+          CacheExtender* extender, RewriteDriver* driver,
           RewriteContext* parent)
       : SingleRewriteContext(driver, parent,
                              NULL /* no resource context */),
-        extender_(extender) {}
+        input_role_(input_role), extender_(extender) {}
   virtual ~Context() {}
 
+  bool PolicyPermitsRendering() const override;
   virtual void Render();
   virtual void RewriteSingle(const ResourcePtr& input,
                              const OutputResourcePtr& output);
   virtual const char* id() const { return extender_->id(); }
   virtual OutputResourceKind kind() const { return kOnTheFlyResource; }
 
+  virtual void FixFetchFallbackHeaders(const CachedResult& cached_result,
+                               ResponseHeaders* headers) {
+    SingleRewriteContext::FixFetchFallbackHeaders(cached_result, headers);
+    if (num_slots() != 1 || slot(0)->resource().get() == NULL) {
+      return;
+    }
+    ResourcePtr input_resource(slot(0)->resource());
+
+    if (ShouldAddCanonical(input_resource)) {
+      AddLinkRelCanonicalForFallbackHeaders(headers);
+    }
+  }
+
+  // We only add link: rel = canonical to images and PDF; people don't normally
+  // use search engines to look for .css and .js files, so adding it
+  // there would just be a waste of bytes.
+  bool ShouldAddCanonical(const ResourcePtr& input_resource) {
+    return input_resource->type() != NULL &&
+           (input_resource->type()->IsImage() ||
+            input_resource->type()->type() == ContentType::kPdf);
+  }
+
  private:
+  RewriteDriver::InputRole input_role_;
   CacheExtender* extender_;
   DISALLOW_COPY_AND_ASSIGN(Context);
 };
@@ -127,7 +154,7 @@ bool CacheExtender::ShouldRewriteResource(
     return false;
   }
 
-  if (url_namer->ProxyMode()) {
+  if (url_namer->ProxyMode() == UrlNamer::ProxyExtent::kFull) {
     return !url_namer->IsProxyEncoded(origin_gurl);
   }
   const DomainLawyer* lawyer = driver()->options()->domain_lawyer();
@@ -147,15 +174,19 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
   resource_tag_scanner::ScanElement(element, driver()->options(), &attributes);
   for (int i = 0, n = attributes.size(); i < n; ++i) {
     bool may_load = false;
+    RewriteDriver::InputRole input_role = RewriteDriver::InputRole::kUnknown;
     switch (attributes[i].category) {
       case semantic_type::kStylesheet:
         may_load = driver()->MayCacheExtendCss();
+        input_role = RewriteDriver::InputRole::kStyle;
         break;
       case semantic_type::kImage:
         may_load = driver()->MayCacheExtendImages();
+        input_role = RewriteDriver::InputRole::kImg;
         break;
       case semantic_type::kScript:
         may_load = driver()->MayCacheExtendScripts();
+        input_role = RewriteDriver::InputRole::kScript;
         break;
       default:
         // Does the url in the attribute end in .pdf, ignoring query params?
@@ -178,7 +209,7 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
     // resources are non-cacheable or privately cacheable.
     if (driver()->IsRewritable(element)) {
       ResourcePtr input_resource(CreateInputResourceOrInsertDebugComment(
-          attributes[i].url->DecodedValueOrNull(), element));
+          attributes[i].url->DecodedValueOrNull(), input_role, element));
       if (input_resource.get() == NULL) {
         continue;
       }
@@ -190,9 +221,32 @@ void CacheExtender::StartElementImpl(HtmlElement* element) {
 
       ResourceSlotPtr slot(driver()->GetSlot(
           input_resource, element, attributes[i].url));
-      Context* context = new Context(this, driver(), NULL /* not nested */);
+      Context* context = new Context(input_role, this, driver(),
+                                     nullptr /* not nested */);
       context->AddSlot(slot);
       driver()->InitiateRewrite(context);
+    }
+  }
+
+  if (element->keyword() == HtmlName::kImg &&
+      driver()->MayCacheExtendImages()) {
+    HtmlElement::Attribute* srcset = element->FindAttribute(HtmlName::kSrcset);
+    if (srcset != nullptr) {
+      SrcSetSlotCollectionPtr slot_collection(
+          driver()->GetSrcSetSlotCollection(this, element, srcset));
+      for (int i = 0; i < slot_collection->num_image_candidates(); ++i) {
+        SrcSetSlot* slot = slot_collection->slot(i);
+        // slot will be null if resource could not be created due to URL parsing
+        // or being against our policy (not authorized domain, etc).
+        if (slot == nullptr) {
+          continue;
+        }
+        Context* context = new Context(
+              RewriteDriver::InputRole::kImg, this,
+              driver(), nullptr /* !nested */);
+        context->AddSlot(RefCountedPtr<ResourceSlot>(slot));
+        driver()->InitiateRewrite(context);
+      }
     }
   }
 }
@@ -204,17 +258,25 @@ bool CacheExtender::ComputeOnTheFly() const {
 void CacheExtender::Context::RewriteSingle(
     const ResourcePtr& input_resource,
     const OutputResourcePtr& output_resource) {
-  // We only add link: rel = canonical to images and PDF; people don't normally
-  // use search engines to look for .css and .js files, so adding it
-  // there would just be a waste of bytes.
-  if (input_resource->type() != NULL &&
-      (input_resource->type()->IsImage() ||
-       input_resource->type()->type() == ContentType::kPdf)) {
-    AddLinkRelCanonical(input_resource, output_resource);
+  if (ShouldAddCanonical(input_resource)) {
+    AddLinkRelCanonical(input_resource, output_resource->response_headers());
   }
   RewriteDone(
       extender_->RewriteLoadedResource(
-          input_resource, output_resource, output_partition(0)), 0);
+          input_resource, output_resource, mutable_output_partition(0)), 0);
+}
+
+bool CacheExtender::Context::PolicyPermitsRendering() const {
+  if (num_output_partitions() == 1 && output(0).get() != nullptr
+      && output(0)->has_hash()) {
+    // This uses the InputRole rather than CspDirective variant to
+    // handle kUnknown (and to get bonus handling of kReconstruction,
+    // which wouldn't actually call this, but for which we still need to
+    // override).
+    return Driver()->IsLoadPermittedByCsp(
+        GoogleUrl(output(0)->url()), input_role_);
+  }
+  return true;  // e.g. failure cases -> still want to permit error to render.
 }
 
 void CacheExtender::Context::Render() {
@@ -265,20 +327,31 @@ RewriteResult CacheExtender::RewriteLoadedResource(
   // See if the resource is cacheable; and if so whether there is any need
   // to cache extend it.
   bool ok = false;
+  // Assume that it may have cookies; see comment in
+  // CacheableResourceBase::IsValidAndCacheableImpl.
+  RequestHeaders::Properties req_properties;
   const ContentType* output_type = NULL;
   if (!server_context()->http_cache()->force_caching() &&
-      !headers->IsProxyCacheable()) {
+      !headers->IsProxyCacheable(
+          req_properties,
+          ResponseHeaders::GetVaryOption(driver()->options()->respect_vary()),
+          ResponseHeaders::kNoValidator)) {
     // Note: RewriteContextTest.PreserveNoCacheWithFailedRewrites
     // relies on CacheExtender failing rewrites in this case.
     // If you change this behavior that test MUST be updated as it covers
     // security.
     not_cacheable_count_->Add(1);
   } else if (ShouldRewriteResource(
-                 headers, now_ms, input_resource,url, result)) {
+      headers, now_ms, input_resource, url, result)) {
     // We must be careful what Content-Types we allow to be cache extended.
     // Specifically, we do not want to cache extend any Content-Types that
     // could execute scripts when loaded in a browser because that could
     // open XSS vectors in case of system misconfiguration.
+    //
+    // In particular, if somehow a.com/b.com (incorrectly) authorize each other
+    // as trusted in the DomainLawyer an external fetch of
+    // a.com/,hb.com,_evil.html.pagespeed.ce.html, would run b.com's content
+    // inside a.com's domain, getting access to a.com frames.
     //
     // We whitelist a set of safe Content-Types here.
     //
@@ -344,12 +417,14 @@ RewriteResult CacheExtender::RewriteLoadedResource(
 }
 
 RewriteContext* CacheExtender::MakeRewriteContext() {
-  return new Context(this, driver(), NULL /*not nested*/);
+  return new Context(RewriteDriver::InputRole::kReconstruction, this,
+                     driver(), nullptr /*not nested*/);
 }
 
 RewriteContext* CacheExtender::MakeNestedContext(
     RewriteContext* parent, const ResourceSlotPtr& slot) {
-  Context* context = new Context(this, NULL /* driver*/, parent);
+  Context* context = new Context(
+      RewriteDriver::InputRole::kUnknown, this, nullptr /* driver*/, parent);
   context->AddSlot(slot);
   return context;
 }

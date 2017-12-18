@@ -192,7 +192,12 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   // the original size of optimized resources.
   void SetOriginalContentLength(int64 content_length);
 
-  // Removes cookie headers, and returns true if any changes were made.
+  // Sets the content-length attribute, removing any matching
+  // x-orginal-content-length header.
+  void SetContentLength(int64 content_length);
+
+  // Removes hop-by-hop plus cookie headers, and returns true if any changes
+  // were made.
   bool Sanitize();
 
   // Copies the HttpResponseHeaders proto from the response headers to the given
@@ -218,13 +223,8 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   void set_implicit_cache_ttl_ms(const int64 ttl) {
     http_options_.implicit_cache_ttl_ms = ttl;
   }
-  int64 min_cache_ttl_ms() const {
-    return http_options_.min_cache_ttl_ms;
-  }
-  void set_min_cache_ttl_ms(const int64 ttl) {
-    http_options_.min_cache_ttl_ms = ttl;
-  }
 
+  bool has_last_modified_time_ms() const;
   int64 last_modified_time_ms() const;
   int64 date_ms() const;  // Timestamp from Date header.
   bool has_date_ms() const;
@@ -367,6 +367,32 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   bool ClearOptionCookies(const GoogleUrl& gurl, StringPiece option_cookies,
                           const StringPieceVector& to_exclude);
 
+  // Returns true if the headers may contain a Link: rel = canonical entry.
+  // (Slightly approximate, will never say 'no' if it's there).
+  bool HasLinkRelCanonical() const;
+
+  // Constructs a <url>; rel="canonical" value for use with a Link header.
+  static GoogleString RelCanonicalHeaderValue(StringPiece url);
+
+  // Gives a new value for the cache control header, making it more restrictive
+  // by adding s-maxage=<s_maxage_sec>.  Takes into account existing s-maxage
+  // and maxage segments:
+  // * If there is no s-maxage:
+  //   * If there's a maxage <= s_maxage_sec:
+  //     * Make no changes.
+  //   * Otherwise append an s_maxage
+  // * Otherwise, bring s-maxage down to s_maxage_sec if it's larger.
+  void SetSMaxAge(int s_maxage_sec);
+  // Stand-alone version of SetSMaxAge.  If there are changes to make, returns
+  // true and sets updated_cache_control.
+  static bool ApplySMaxAge(int s_maxage_sec,
+                           StringPiece existing_cache_control,
+                           GoogleString* updated_cache_control);
+
+  // Returns true if the given value should be interpreted as a header being
+  // marked as hop by hop when listed as a value in a Connection: header.
+  static bool IsHopByHopIndication(StringPiece val);
+
  protected:
   virtual void UpdateHook();
 
@@ -391,7 +417,6 @@ class ResponseHeaders : public Headers<HttpResponseHeaders> {
   int64 force_cache_ttl_ms_;
   // Indicates if the response was force cached.
   bool force_cached_;
-  bool min_cache_ttl_applied_;
 
   // Allow copy and assign.
 };

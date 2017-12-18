@@ -48,12 +48,12 @@ class TimedVariable;
 // TODO(sligocki): Rename as per style-guide.
 class ProxyInterface : public UrlAsyncFetcher {
  public:
-  ProxyInterface(const StringPiece& hostname, int port,
+  ProxyInterface(StringPiece stats_prefix, StringPiece hostname, int port,
                  ServerContext* server_context, Statistics* stats);
   virtual ~ProxyInterface();
 
   // Initializes statistics variables associated with this class.
-  static void InitStats(Statistics* statistics);
+  static void InitStats(StringPiece stats_prefix, Statistics* statistics);
 
   // All requests use this interface. We decide internally whether the
   // request is a pagespeed resource, HTML page to be rewritten or another
@@ -72,8 +72,7 @@ class ProxyInterface : public UrlAsyncFetcher {
       bool is_resource_fetch,
       const GoogleUrl& request_url,
       RewriteOptions* options,
-      AsyncFetch* async_fetch,
-      const bool requires_blink_cohort);
+      AsyncFetch* async_fetch);
 
  protected:
   // Needed by subclasses when overriding InitiatePropertyCacheLookup.
@@ -98,6 +97,8 @@ class ProxyInterface : public UrlAsyncFetcher {
 
   // If the URL and port are for this server, don't proxy those (to avoid
   // infinite fetching loops). This might be the favicon or something...
+  // TODO(sligocki): It would be nice to be able to turn this off in situations
+  // where we're using a fetcher which definitely can't fetch from localhost.
   bool UrlAndPortMatchThisServer(const GoogleUrl& url);
 
   // This server's hostname and port (to avoid making circular requests).

@@ -20,8 +20,7 @@
 
 #include "pagespeed/kernel/sharedmem/shared_mem_cache.h"
 
-#include <vector>
-
+#include "base/logging.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/google_message_handler.h"
 #include "pagespeed/kernel/base/gtest.h"
@@ -36,7 +35,6 @@
 #include "pagespeed/kernel/cache/cache_test_base.h"
 #include "pagespeed/kernel/sharedmem/inprocess_shared_mem.h"
 #include "pagespeed/kernel/util/platform.h"
-#include "pagespeed/kernel/base/abstract_shared_mem.h"
 
 namespace {
 const int kMaxSize = 100;
@@ -109,12 +107,12 @@ class SharedMemCacheSpammerTest : public testing::Test {
 
 TEST_F(SharedMemCacheSpammerTest, BasicOperation) {
   SharedString put_buffer("val");
-  cache_->Put("key", &put_buffer);
+  cache_->Put("key", put_buffer);
   CacheTestBase::Callback callback;
   cache_->Get("key", &callback);
   EXPECT_TRUE(callback.called());
   EXPECT_EQ(CacheInterface::kAvailable, callback.state());
-  EXPECT_EQ(GoogleString("val"), callback.value()->Value());
+  EXPECT_EQ(GoogleString("val"), callback.value().Value());
 }
 
 TEST_F(SharedMemCacheSpammerTest, SpamCacheEvictionsNoDeletions) {

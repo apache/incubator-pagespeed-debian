@@ -31,6 +31,7 @@
 
 #include "base/logging.h"
 #include "net/instaweb/rewriter/cached_result.pb.h"
+#include "net/instaweb/rewriter/input_info.pb.h"
 #include "net/instaweb/rewriter/public/javascript_code_block.h"
 #include "net/instaweb/rewriter/public/javascript_filter.h"
 #include "net/instaweb/rewriter/public/output_resource.h"
@@ -219,7 +220,8 @@ class JsCombineFilter::Context : public RewriteContext {
   // Create and add the slot that corresponds to this element.
   bool AddElement(HtmlElement* element, HtmlElement::Attribute* href) {
     ResourcePtr resource(filter_->CreateInputResourceOrInsertDebugComment(
-        href->DecodedValueOrNull(), element));
+        href->DecodedValueOrNull(), RewriteDriver::InputRole::kScript,
+        element));
     if (resource.get() == NULL) {
       return false;
     }
@@ -332,13 +334,17 @@ class JsCombineFilter::Context : public RewriteContext {
     RewriteDone(result, partition_index);
   }
 
+  bool PolicyPermitsRendering() const {
+    return AreOutputsAllowedByCsp(CspDirective::kScriptSrc);
+  }
+
   // For every partition, write a new script tag that points to the
   // combined resource.  Then create new script tags for each slot
   // in the partition that evaluate the variable that refers to the
   // original script for that tag.
   virtual void Render() {
     for (int p = 0, np = num_output_partitions(); p < np; ++p) {
-      CachedResult* partition = output_partition(p);
+      const CachedResult* partition = output_partition(p);
       int partition_size = partition->input_size();
       if (partition_size > 1) {
         // Make sure we can edit every element here.
@@ -404,7 +410,7 @@ class JsCombineFilter::Context : public RewriteContext {
 
   // Create an element for the combination of all the elements in the
   // partition. Insert it before first one.
-  void MakeCombinedElement(CachedResult* partition) {
+  void MakeCombinedElement(const CachedResult* partition) {
     int first_index = partition->input(0).index();
     HtmlResourceSlot* first_slot =
         static_cast<HtmlResourceSlot*>(slot(first_index).get());
@@ -624,6 +630,13 @@ void JsCombineFilter::Flush() {
 // reset.
 void JsCombineFilter::ConsiderJsForCombination(HtmlElement* element,
                                                HtmlElement::Attribute* src) {
+  if (!driver()->content_security_policy().PermitsEval()) {
+    driver()->InsertDebugComment(
+        "Not considering JS combining since CSP forbids eval", element);
+    context_->Reset();
+    return;
+  }
+
   // Worst-case scenario is if we somehow ended up with nested scripts.
   // In this case, we just give up entirely.
   if (script_depth_ > 0) {
@@ -726,15 +739,12 @@ JsCombineFilter::JsCombiner* JsCombineFilter::combiner() const {
 // In sync flow, just write out what we have so far, and then
 // reset the context.
 void JsCombineFilter::NextCombination() {
-  if (!context_->empty()) {
+  if (!context_->empty() &&
+      driver()->content_security_policy().PermitsEval()) {
     driver()->InitiateRewrite(context_.release());
     context_.reset(MakeContext());
   }
   context_->Reset();
-}
-
-void JsCombineFilter::DetermineEnabled(GoogleString* disabled_reason) {
-  set_is_enabled(!driver()->flushed_cached_html());
 }
 
 }  // namespace net_instaweb

@@ -120,6 +120,10 @@ class SimpleSelector {
     // AND, OR, NOT, ONLY_CHILD, ONLY_TYPE, CONTENT, POSITIONAL
     //    ROOT, TEXT, PSEUDOELEMENT, PROCESSING_INSTRUCTION,
     //    NEGATIVE, COMMENT, CDATA_SECTION,
+    //
+    // When implementing any of them, please also update
+    // webutil/dom/css_utils.cc to avoid issues like
+    // http://g/goldmine-team/q3WjtBrzChQ/discussion
   };
 
   // Factory methods to generate SimpleSelectors of various types.

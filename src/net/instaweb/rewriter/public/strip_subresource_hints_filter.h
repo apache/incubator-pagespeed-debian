@@ -31,16 +31,15 @@ class RewriteDriver;
 class StripSubresourceHintsFilter : public EmptyHtmlFilter {
  public:
   explicit StripSubresourceHintsFilter(RewriteDriver* driver);
-  virtual ~StripSubresourceHintsFilter();
+  ~StripSubresourceHintsFilter() override;
 
-  virtual void StartDocument();
-  virtual void StartElement(HtmlElement* element);
-  virtual void EndDocument();
-  virtual void EndElement(HtmlElement* element);
-  virtual void Flush();
-  virtual const char* Name() const { return "StripSubresourceHints"; }
+  void StartDocument() override;
+  void StartElement(HtmlElement* element) override;
+  const char* Name() const override { return "StripSubresourceHints"; }
 
  private:
+  bool ShouldStrip(HtmlElement* element);
+
   RewriteDriver* driver_;
   HtmlElement* delete_element_;
   bool remove_script_;

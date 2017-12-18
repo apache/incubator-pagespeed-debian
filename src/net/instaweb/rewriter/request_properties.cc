@@ -164,15 +164,6 @@ bool RequestProperties::IsTablet() const {
   return device_properties_->IsTablet();
 }
 
-bool RequestProperties::SupportsSplitHtml(bool allow_mobile) const {
-  return device_properties_->SupportsSplitHtml(allow_mobile);
-}
-
-bool RequestProperties::CanPreloadResources() const {
-  // TODO(anupama): Why do we not use a lazybool for this?
-  return device_properties_->CanPreloadResources();
-}
-
 UserAgentMatcher::DeviceType RequestProperties::GetDeviceType() const {
   return device_properties_->GetDeviceType();
 }
@@ -189,9 +180,7 @@ void RequestProperties::LogDeviceInfo(
       SupportsWebpInPlace(),
       SupportsWebpRewrittenUrls(),
       SupportsWebpLosslessAlpha(),
-      IsBot(),
-      SupportsSplitHtml(enable_aggressive_rewriters_for_mobile),
-      CanPreloadResources());
+      IsBot());
 }
 
 bool RequestProperties::ForbidWebpInlining() const {

@@ -79,7 +79,7 @@ void DeviceProperties::ParseRequestHeaders(
 
   const char* save_data_header =
       request_headers.Lookup1(HttpAttributes::kSaveData);
-  if (save_data_header != NULL && StringCaseEqual("on", save_data_header)) {
+  if (save_data_header != nullptr && StringCaseEqual("on", save_data_header)) {
     requests_save_data_ = kTrue;
   } else {
     requests_save_data_ = kFalse;
@@ -132,7 +132,7 @@ bool DeviceProperties::SupportsCriticalImagesBeacon() const {
   // For now this script has the same user agent requirements as image inlining,
   // however that could change in the future if more advanced JS is used by the
   // beacon. Also disable for bots. See
-  // https://code.google.com/p/modpagespeed/issues/detail?id=813.
+  // https://github.com/pagespeed/mod_pagespeed/issues/813.
   return SupportsImageInlining() && !IsBot();
 }
 
@@ -203,20 +203,6 @@ bool DeviceProperties::IsBot() const {
   return (is_bot_ == kTrue);
 }
 
-bool DeviceProperties::SupportsSplitHtml(bool allow_mobile) const {
-  if (supports_split_html_ == kNotSet) {
-    supports_split_html_ =
-        ua_matcher_->SupportsSplitHtml(user_agent_, allow_mobile) ?
-        kTrue : kFalse;
-  }
-  return (supports_split_html_ == kTrue);
-}
-
-bool DeviceProperties::CanPreloadResources() const {
-  return ua_matcher_->GetPrefetchMechanism(user_agent_) !=
-      UserAgentMatcher::kPrefetchNotSupported;
-}
-
 UserAgentMatcher::DeviceType DeviceProperties::GetDeviceType() const {
   if (device_type_set_ == kNotSet) {
     device_type_ = ua_matcher_->GetDeviceTypeForUA(user_agent_);
@@ -227,7 +213,7 @@ UserAgentMatcher::DeviceType DeviceProperties::GetDeviceType() const {
 
 // Chrome 36 on iOS devices failed to display inlined WebP image, so inlining
 // WebP on these devices is forbidden.
-// https://code.google.com/p/chromium/issues/detail?id=402514
+// https://bugs.chromium.org/p/chromium/issues/detail?id=402514
 bool DeviceProperties::ForbidWebpInlining() const {
   if (ua_matcher_->IsiOSUserAgent(user_agent_)) {
     int major = kNotSet;

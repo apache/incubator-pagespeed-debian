@@ -27,11 +27,9 @@
 #include "net/instaweb/rewriter/public/rewrite_options.h"
 #include "net/instaweb/rewriter/public/rewrite_query.h"
 #include "net/instaweb/rewriter/public/server_context.h"
-#include "pagespeed/system/system_cache_path.h"
-#include "pagespeed/system/system_caches.h"
-#include "pagespeed/system/system_rewrite_options.h"
 #include "net/instaweb/util/public/property_cache.h"
 #include "net/instaweb/util/public/property_store.h"
+#include "strings/stringpiece_utils.h"
 #include "pagespeed/kernel/base/cache_interface.h"
 #include "pagespeed/kernel/base/callback.h"
 #include "pagespeed/kernel/base/message_handler.h"
@@ -49,6 +47,9 @@
 #include "pagespeed/kernel/http/request_headers.h"
 #include "pagespeed/kernel/http/response_headers.h"
 #include "pagespeed/kernel/util/statistics_logger.h"
+#include "pagespeed/system/system_cache_path.h"
+#include "pagespeed/system/system_caches.h"
+#include "pagespeed/system/system_rewrite_options.h"
 
 namespace net_instaweb {
 
@@ -87,7 +88,6 @@ const char kLongBreak[] = " &nbsp;&nbsp; ";
 const Tab kTabs[] = {
   {"Statistics", "Statistics", "statistics", "?", kLongBreak},
   {"Configuration", "Configuration", "config", "?config", kShortBreak},
-  {"(SPDY)", "SPDY Configuration", "spdy_config", "?spdy_config", kLongBreak},
   {"Histograms", "Histograms", "histograms", "?histograms", kLongBreak},
   {"Caches", "Caches", "cache", "?cache", kLongBreak},
   {"Console", "Console", "console", NULL, kLongBreak},
@@ -328,6 +328,14 @@ void AdminSite::ConsoleJsonHandler(const QueryParams& params,
   } else {
     fetch->response_headers()->SetStatusAndReason(HttpStatus::kOK);
 
+    // TODO(morlovich): It would be more secure to do:
+    //    Content-Type: application/javascript; charset=utf-8
+    // instead of using a JSON one.  There are probably a few other
+    // anti-sniffing headers we could add as well.
+    //
+    // Also, it would be good to start what we serve with )]}' and a newline,
+    // and updating the client js, to make completely sure the browser can't be
+    // tricked into running it.
     fetch->response_headers()->Add(HttpAttributes::kContentType,
                                    kContentTypeJson.mime_type());
 
@@ -407,7 +415,7 @@ GoogleString HackCacheDescriptor(StringPiece name) {
   // a few keywords out of this to understand the main pointers.
   static const char* kCacheKeywords[] = {
     "Compressed", "Async", "SharedMemCache", "LRUCache", "AprMemCache",
-    "FileCache"
+    "FileCache", "RedisCache"
   };
   const char* delim = "";
   for (int i = 0, n = arraysize(kCacheKeywords); i < n; ++i) {
@@ -580,6 +588,7 @@ void AdminSite::PrintCaches(bool is_global, AdminSource source,
       // either of these flags to limit the content when someone asks
       // for info about the cache.
       flags |= SystemCaches::kIncludeMemcached;
+      flags |= SystemCaches::kIncludeRedis;
       fetch->Write("<div id='cache_struct'>",
                    message_handler_);
       fetch->Write(kTableStart, message_handler_);
@@ -628,25 +637,13 @@ void AdminSite::PrintCaches(bool is_global, AdminSource source,
   }
 }
 
-void AdminSite::PrintNormalConfig(
+void AdminSite::PrintConfig(
     AdminSource source, AsyncFetch* fetch,
     SystemRewriteOptions* global_system_rewrite_options) {
   AdminHtml admin_html("config", "", source, timer_, fetch, message_handler_);
   HtmlKeywords::WritePre(
       global_system_rewrite_options->OptionsToString(), "",
       fetch, message_handler_);
-}
-
-void AdminSite::PrintSpdyConfig(AdminSource source, AsyncFetch* fetch,
-                                const SystemRewriteOptions* spdy_config) {
-  AdminHtml admin_html("spdy_config", "", source, timer_, fetch,
-                       message_handler_);
-  if (spdy_config == NULL) {
-    fetch->Write("SPDY-specific configuration missing.", message_handler_);
-  } else {
-    HtmlKeywords::WritePre(spdy_config->OptionsToString(), "",
-                           fetch, message_handler_);
-  }
 }
 
 void AdminSite::MessageHistoryHandler(const RewriteOptions& options,
@@ -712,8 +709,7 @@ void AdminSite::AdminPage(
     CacheInterface* filesystem_metadata_cache, HTTPCache* http_cache,
     CacheInterface* metadata_cache, PropertyCache* page_property_cache,
     ServerContext* server_context, Statistics* statistics, Statistics* stats,
-    SystemRewriteOptions* global_system_rewrite_options,
-    const SystemRewriteOptions* spdy_config) {
+    SystemRewriteOptions* global_system_rewrite_options) {
   // The handler is "pagespeed_admin", so we must dispatch off of
   // the remainder of the URL.  For
   // "http://example.com/pagespeed_admin/foo?a=b" we want to pull out
@@ -760,9 +756,7 @@ void AdminSite::AdminPage(
     } else if (leaf == "graphs") {
       GraphsHandler(*options, kPageSpeedAdmin, query_params, fetch, statistics);
     } else if (leaf == "config") {
-      PrintNormalConfig(kPageSpeedAdmin, fetch, global_system_rewrite_options);
-    } else if (leaf == "spdy_config") {
-      PrintSpdyConfig(kPageSpeedAdmin, fetch, spdy_config);
+      PrintConfig(kPageSpeedAdmin, fetch, global_system_rewrite_options);
     } else if (leaf == "console") {
       // TODO(jmarantz): add vhost-local and aggregate message buffers.
       ConsoleHandler(*global_system_rewrite_options, *options, kPageSpeedAdmin,
@@ -806,14 +800,11 @@ void AdminSite::StatisticsPage(
     HTTPCache* http_cache, CacheInterface* metadata_cache,
     PropertyCache* page_property_cache, ServerContext* server_context,
     Statistics* statistics, Statistics* stats,
-    SystemRewriteOptions* global_system_rewrite_options,
-    const SystemRewriteOptions* spdy_config) {
+    SystemRewriteOptions* global_system_rewrite_options) {
   if (query_params.Has("json")) {
     ConsoleJsonHandler(query_params, fetch, statistics);
   } else if (query_params.Has("config")) {
-    PrintNormalConfig(kStatistics, fetch, global_system_rewrite_options);
-  } else if (query_params.Has("spdy_config")) {
-    PrintSpdyConfig(kStatistics, fetch, spdy_config);
+    PrintConfig(kStatistics, fetch, global_system_rewrite_options);
   } else if (query_params.Has("histograms")) {
     PrintHistograms(kStatistics, fetch, stats);
   } else if (query_params.Has("graphs")) {
@@ -880,7 +871,7 @@ void AdminSite::PurgeHandler(StringPiece url, SystemCachePath* cache_path,
       new PurgeFetchCallbackGasket(fetch, message_handler_);
   PurgeContext::PurgeCallback* callback = NewCallback(
       gasket, &PurgeFetchCallbackGasket::Done);
-  if (url.ends_with("*")) {
+  if (strings::EndsWith(url, "*")) {
     // If the url is "*" we'll just purge everything.  Note that we will
     // ignore any sub-paths in the expression.  We can only purge the
     // entire cache, or specific URLs, not general wildcards.

@@ -29,7 +29,6 @@
 
 namespace net_instaweb {
 
-class AbstractMutex;
 class ThreadSystem;
 
 // These variables are thread-safe.
@@ -37,7 +36,7 @@ class SimpleStatsVariable : public MutexedScalar {
  public:
   SimpleStatsVariable(StringPiece name, Statistics* stats);
   virtual ~SimpleStatsVariable();
-  virtual StringPiece GetName() const { return StringPiece(NULL); }
+  virtual StringPiece GetName() const { return StringPiece(); }
 
   void set_mutex(AbstractMutex* mutex) { mutex_.reset(mutex); }
 

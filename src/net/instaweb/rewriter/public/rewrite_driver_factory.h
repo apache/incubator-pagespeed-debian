@@ -21,9 +21,9 @@
 
 #include <set>
 #include <vector>
+#include <memory>
 
-#include "net/instaweb/rewriter/public/central_controller_interface.h"
-#include "net/instaweb/rewriter/public/central_controller_interface_adapter.h"
+#include "pagespeed/controller/central_controller.h"
 #include "pagespeed/kernel/base/abstract_mutex.h"
 #include "pagespeed/kernel/base/basictypes.h"
 #include "pagespeed/kernel/base/function.h"
@@ -39,21 +39,15 @@ namespace pagespeed { namespace js { struct JsTokenizerPatterns; } }
 
 namespace net_instaweb {
 
-class CacheHtmlInfoFinder;
-class CriticalCssFinder;
 class CriticalImagesFinder;
-class CriticalLineInfoFinder;
 class CriticalSelectorFinder;
 class FileSystem;
-class FlushEarlyInfoFinder;
 class ExperimentMatcher;
 class Hasher;
 class MessageHandler;
-class MobilizeCachedFinder;
 class NamedLockManager;
 class NonceGenerator;
 class ProcessContext;
-class PropertyCache;
 class ServerContext;
 class RewriteDriver;
 class RewriteOptions;
@@ -142,8 +136,6 @@ class RewriteDriverFactory {
   // You cannot set the base URL fetcher once ComputeUrlAsyncFetcher has
   // been called.
   void set_base_url_async_fetcher(UrlAsyncFetcher* url_fetcher);
-  // Takes ownership of distributed_fetcher.
-  void set_base_distributed_async_fetcher(UrlAsyncFetcher* distributed_fetcher);
   bool set_filename_prefix(StringPiece p);
 
   // Determines whether Slurping is enabled.
@@ -182,7 +174,6 @@ class RewriteDriverFactory {
   // they must be called once prior to spawning threads, e.g. via
   // CreateServerContext.
   virtual UrlAsyncFetcher* ComputeUrlAsyncFetcher();
-  virtual UrlAsyncFetcher* ComputeDistributedFetcher();
 
   // Threadsafe mechanism to create a managed ServerContext.  The
   // ServerContext is owned by the factory, and should not be
@@ -234,13 +225,6 @@ class RewriteDriverFactory {
 
   ThreadSystem* thread_system() { return thread_system_.get(); }
 
-  // Return interface to various functions that workers need delegated
-  // to a central service. Depending on the implemenation, this may invoke
-  // RPCs.
-  CentralControllerInterfaceAdapter* central_controller_interface() {
-    return central_controller_interface_.get();
-  }
-
   // Returns the set of directories that we (our our subclasses) have created
   // thus far.
   const StringSet& created_directories() const {
@@ -254,6 +238,9 @@ class RewriteDriverFactory {
   // to SetStatistics.  Failing that, it will be initialized in the
   // first call to InitServerContext(), which is thread-safe.
   RewriteStats* rewrite_stats();
+
+  // Returns true if the server supports waveforms in its status page.
+  virtual bool HasWaveforms() const { return false; }
 
   // statistics (default is NullStatistics).  This can be overridden by calling
   // SetStatistics, either from subclasses or externally.
@@ -315,13 +302,6 @@ class RewriteDriverFactory {
   // a specific experiment.
   virtual ExperimentMatcher* NewExperimentMatcher();
 
-  // Control the number of simultaneous expensive CPU operations going on at
-  // once. Invokes Run on your callback at a time when it is OK to do the
-  // expensive operation, or Cancel if you should not perform the operation.
-  // Depending on the implemation, may queue the callback for theoretically
-  // unbounded time.
-  void ScheduleExpensiveOperation(ExpensiveOperationCallback* callback);
-
  protected:
   bool FetchersComputed() const;
   virtual void StopCacheActivity();
@@ -361,27 +341,9 @@ class RewriteDriverFactory {
   // will inject all of these from what's available in 'this'.
   virtual ServerContext* NewDecodingServerContext() = 0;
 
-  virtual UrlAsyncFetcher* DefaultDistributedUrlFetcher() { return NULL; }
-
-  virtual CriticalCssFinder* DefaultCriticalCssFinder();
   virtual CriticalImagesFinder* DefaultCriticalImagesFinder(
       ServerContext* server_context);
   virtual CriticalSelectorFinder* DefaultCriticalSelectorFinder(
-      ServerContext* server_context);
-
-  // Note: this one may return NULL.
-  virtual MobilizeCachedFinder* DefaultMobilizeCachedFinder(
-      ServerContext* server_context);
-
-  // Default implementation returns NULL.
-  virtual CacheHtmlInfoFinder* DefaultCacheHtmlInfoFinder(
-      PropertyCache* cache, ServerContext* server_context);
-
-  // Default implementation returns NULL.
-  virtual FlushEarlyInfoFinder* DefaultFlushEarlyInfoFinder();
-
-  // Default implementation returns a valid CriticalSelectorFinder.
-  virtual CriticalLineInfoFinder* DefaultCriticalLineInfoFinder(
       ServerContext* server_context);
 
   // They may also supply a custom lock manager. The default implementation
@@ -439,7 +401,11 @@ class RewriteDriverFactory {
   void InitStubDecodingServerContext(ServerContext* context);
 
   // Allow sub-classes to pick which CentralController they want to use.
-  virtual CentralControllerInterface* CreateCentralController();
+  // lock_manager is owned by the caller and must outlive the Controller.
+  // This uses shared_ptr to solve lifecycle differences among different
+  // implementations.
+  virtual std::shared_ptr<CentralController> GetCentralController(
+      NamedLockManager* lock_manager);
 
   // For use in tests.
   void RebuildDecodingDriverForTests(ServerContext* server_context);
@@ -456,16 +422,11 @@ class RewriteDriverFactory {
 
   void InitDecodingDriver(ServerContext* server_context);
 
-  // This should only be called during startup. Takes ownership of interface.
-  void set_central_controller_interface(CentralControllerInterface* interface);
-
   scoped_ptr<MessageHandler> html_parse_message_handler_;
   scoped_ptr<MessageHandler> message_handler_;
   scoped_ptr<FileSystem> file_system_;
   UrlAsyncFetcher* url_async_fetcher_;
-  UrlAsyncFetcher* distributed_async_fetcher_;
   scoped_ptr<UrlAsyncFetcher> base_url_async_fetcher_;
-  scoped_ptr<UrlAsyncFetcher> base_distributed_async_fetcher_;
   scoped_ptr<Hasher> hasher_;
   scoped_ptr<NonceGenerator> nonce_generator_;
   scoped_ptr<SHA1Signature> signature_;
@@ -512,8 +473,6 @@ class RewriteDriverFactory {
 
   // Manage locks for output resources.
   scoped_ptr<NamedLockManager> lock_manager_;
-
-  scoped_ptr<CentralControllerInterfaceAdapter> central_controller_interface_;
 
   // Default statistics implementation which can be overridden by children
   // by calling SetStatistics().

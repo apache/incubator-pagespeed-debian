@@ -21,8 +21,10 @@
  *
  */
 
+goog.setTestOnly('goog.testing.jsunit');
 goog.provide('goog.testing.jsunit');
 
+goog.require('goog.dom.TagName');
 goog.require('goog.testing.TestCase');
 goog.require('goog.testing.TestRunner');
 
@@ -31,8 +33,7 @@ goog.require('goog.testing.TestRunner');
  * Base path for JsUnit app files, relative to Closure's base path.
  * @type {string}
  */
-goog.testing.jsunit.BASE_PATH =
-    '../../third_party/java/jsunit/core/app/';
+goog.testing.jsunit.BASE_PATH = '../../third_party/java/jsunit/core/app/';
 
 
 /**
@@ -60,7 +61,7 @@ goog.define('goog.testing.jsunit.AUTO_RUN_DELAY_IN_MS', 500);
 
 (function() {
   // Only allow one global test runner to be created on a page.
-  if (goog.global['G_testRunner']) {
+  if (goog.global['G_testRunner'] instanceof goog.testing.TestRunner) {
     return;
   }
 
@@ -77,11 +78,11 @@ goog.define('goog.testing.jsunit.AUTO_RUN_DELAY_IN_MS', 500);
   if (top['JsUnitTestManager'] || top['jsUnitTestManager']) {
     // Running inside JsUnit so add support code.
     var path = goog.basePath + goog.testing.jsunit.CORE_SCRIPT;
-    document.write('<script type="text/javascript" src="' +
-                   path + '"></' + 'script>');
+    document.write(
+        '<script type="text/javascript" src="' + path + '"></' +
+        'script>');
 
   } else {
-
     // Create a test runner.
     var tr = new goog.testing.TestRunner();
 
@@ -124,7 +125,7 @@ goog.define('goog.testing.jsunit.AUTO_RUN_DELAY_IN_MS', 500);
         // Webkit started passing an event object as the only argument to
         // window.onerror.  It doesn't contain an error message, url or line
         // number.  We therefore log as much info as we can.
-        if (error.target && error.target.tagName == 'SCRIPT') {
+        if (error.target && error.target.tagName == goog.dom.TagName.SCRIPT) {
           tr.logError('UNKNOWN ERROR: Script ' + error.target.src);
         } else {
           tr.logError('UNKNOWN ERROR: No error information available.');

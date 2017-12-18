@@ -16,6 +16,7 @@ goog.provide('goog.ui.media.FlickrSetTest');
 goog.setTestOnly('goog.ui.media.FlickrSetTest');
 
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.html.testing');
 goog.require('goog.testing.jsunit');
 goog.require('goog.ui.media.FlashObject');
@@ -28,12 +29,12 @@ var FLICKR_USER = 'ingawalker';
 var FLICKR_SET = '72057594102831547';
 var FLICKRSET_URL =
     'http://flickr.com/photos/' + FLICKR_USER + '/sets/' + FLICKR_SET;
-var parent = goog.dom.createElement('div');
+var parent = goog.dom.createElement(goog.dom.TagName.DIV);
 
 function setUp() {
   flickr = new goog.ui.media.FlickrSet();
-  var set = new goog.ui.media.FlickrSetModel(FLICKR_USER, FLICKR_SET,
-      'caption');
+  var set =
+      new goog.ui.media.FlickrSetModel(FLICKR_USER, FLICKR_SET, 'caption');
   control = new goog.ui.media.Media(set, flickr);
 }
 
@@ -44,7 +45,7 @@ function tearDown() {
 function testBasicRendering() {
   control.render(parent);
   var el = goog.dom.getElementsByTagNameAndClass(
-      'div', goog.ui.media.FlickrSet.CSS_CLASS, parent);
+      goog.dom.TagName.DIV, goog.ui.media.FlickrSet.CSS_CLASS, parent);
   assertEquals(1, el.length);
   assertEquals(FLICKRSET_URL, control.getDataModel().getUrl());
 }
@@ -52,23 +53,24 @@ function testBasicRendering() {
 function testParsingUrl() {
   assertExtractsCorrectly(FLICKR_USER, FLICKR_SET, FLICKRSET_URL);
   // user id with @ sign
-  assertExtractsCorrectly('30441750@N06', '7215760789302468',
+  assertExtractsCorrectly(
+      '30441750@N06', '7215760789302468',
       'http://flickr.com/photos/30441750@N06/sets/7215760789302468/');
   // user id with - sign
-  assertExtractsCorrectly('30441750-N06', '7215760789302468',
+  assertExtractsCorrectly(
+      '30441750-N06', '7215760789302468',
       'http://flickr.com/photos/30441750-N06/sets/7215760789302468/');
 
   var invalidUrl = 'http://invalidUrl/filename.doc';
-  var e = assertThrows('', function() {
-    goog.ui.media.FlickrSetModel.newInstance(invalidUrl);
-  });
+  var e = assertThrows(
+      '', function() { goog.ui.media.FlickrSetModel.newInstance(invalidUrl); });
   assertEquals('failed to parse flickr url: ' + invalidUrl, e.message);
 }
 
 function testBuildingUrl() {
-  assertEquals(FLICKRSET_URL,
-      goog.ui.media.FlickrSetModel.buildUrl(
-          FLICKR_USER, FLICKR_SET, FLICKRSET_URL));
+  assertEquals(
+      FLICKRSET_URL, goog.ui.media.FlickrSetModel.buildUrl(
+                         FLICKR_USER, FLICKR_SET, FLICKRSET_URL));
 }
 
 function testCreatingModel() {
@@ -82,20 +84,19 @@ function testCreatingModel() {
 function testSettingWhichFlashUrlToUse() {
   goog.ui.media.FlickrSet.setFlashUrl(
       goog.html.testing.newTrustedResourceUrlForTest('http://foo'));
-  assertEquals('http://foo',
-      goog.ui.media.FlickrSet.flashUrl_.getTypedStringValue());
+  assertEquals(
+      'http://foo', goog.ui.media.FlickrSet.flashUrl_.getTypedStringValue());
 }
 
 function testCreatingDomOnInitialState() {
   control.render(parent);
   var caption = goog.dom.getElementsByTagNameAndClass(
-      'div',
-      goog.ui.media.FlickrSet.CSS_CLASS + '-caption',
+      goog.dom.TagName.DIV, goog.ui.media.FlickrSet.CSS_CLASS + '-caption',
       parent);
   assertEquals(1, caption.length);
 
   var flash = goog.dom.getElementsByTagNameAndClass(
-      'div', goog.ui.media.FlashObject.CSS_CLASS, parent);
+      goog.dom.TagName.DIV, goog.ui.media.FlashObject.CSS_CLASS, parent);
   assertEquals(1, flash.length);
 }
 

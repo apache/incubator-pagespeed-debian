@@ -71,93 +71,6 @@ TEST_F(UserAgentMatcherTest, NotSupportsImageInlining) {
       kAndroidChrome18UserAgent));
 }
 
-TEST_F(UserAgentMatcherTest, BlinkWhitelistForDesktop) {
-  const RequestHeaders headers;
-  EXPECT_EQ(UserAgentMatcher::kBlinkWhiteListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kFirefoxUserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkWhiteListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kIe9UserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkWhiteListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kChromeUserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkWhiteListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kSafariUserAgent, &headers));
-}
-
-TEST_F(UserAgentMatcherTest, BlinkBlackListForDesktop) {
-  const RequestHeaders headers;
-  EXPECT_EQ(UserAgentMatcher::kBlinkBlackListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kIe6UserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkBlackListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kIe8UserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkBlackListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kFirefox1UserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kBlinkBlackListForDesktop,
-            user_agent_matcher_->GetBlinkRequestType(
-                kFirefox3UserAgent, &headers));
-}
-
-TEST_F(UserAgentMatcherTest, DoesNotSupportBlink) {
-  const RequestHeaders headers;
-  EXPECT_EQ(UserAgentMatcher::kDoesNotSupportBlink,
-            user_agent_matcher_->GetBlinkRequestType(
-                kOpera5UserAgent, &headers));
-  EXPECT_EQ(UserAgentMatcher::kDoesNotSupportBlink,
-            user_agent_matcher_->GetBlinkRequestType(
-                kPSPUserAgent, &headers));
-}
-
-TEST_F(UserAgentMatcherTest, PrefetchMechanism) {
-  const RequestHeaders headers;
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                "prefetch_image_tag"));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kChromeUserAgent));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchLinkScriptTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kIe9UserAgent));
-  for (int i = 0; i < kIe11UserAgentsArraySize; ++i) {
-    EXPECT_EQ(UserAgentMatcher::kPrefetchLinkScriptTag,
-              user_agent_matcher_->GetPrefetchMechanism(
-                  kIe11UserAgents[i]));
-  }
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kSafariUserAgent));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchLinkScriptTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                "prefetch_link_script_tag"));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchNotSupported,
-            user_agent_matcher_->GetPrefetchMechanism(
-                NULL));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchNotSupported,
-            user_agent_matcher_->GetPrefetchMechanism(""));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kAndroidChrome21UserAgent));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchNotSupported,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kIPhoneUserAgent));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kIPadUserAgent));
-  // Chrome >= 42 gets awesome link rel=prefetch
-  EXPECT_EQ(UserAgentMatcher::kPrefetchImageTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kChrome41UserAgent));
-  EXPECT_EQ(UserAgentMatcher::kPrefetchLinkRelPrefetchTag,
-            user_agent_matcher_->GetPrefetchMechanism(
-                kChrome42UserAgent));
-}
-
 TEST_F(UserAgentMatcherTest, SupportsJsDefer) {
   EXPECT_FALSE(user_agent_matcher_->SupportsJsDefer(
       kIe9UserAgent, false));
@@ -474,6 +387,10 @@ TEST_F(UserAgentMatcherTest, SupportsWebpLosslessAlpha) {
       kNexus10ChromeUserAgent));
   EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
       XT907UserAgent));
+  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
+      kPagespeedInsightsMobileUserAgent));
+  EXPECT_TRUE(user_agent_matcher_->SupportsWebpLosslessAlpha(
+      kPagespeedInsightsDesktopUserAgent));
 }
 
 TEST_F(UserAgentMatcherTest, DoesntSupportWebpLosslessAlpha) {
@@ -545,21 +462,13 @@ TEST_F(UserAgentMatcherTest, SupportsDnsPrefetchUsingRelPrefetch) {
       kIe9UserAgent));
 }
 
-TEST_F(UserAgentMatcherTest, SplitHtmlRelated) {
-  VerifySplitHtmlSupport();
-}
-
 TEST_F(UserAgentMatcherTest, GetDeviceTypeForUA) {
   VerifyGetDeviceTypeForUA();
 }
 
-TEST_F(UserAgentMatcherTest, IE11BlinkFailure) {
-  RequestHeaders* not_used = NULL;
+TEST_F(UserAgentMatcherTest, IE11NoDeferJs) {
   for (int i = 0; i < kIe11UserAgentsArraySize; ++i) {
     const char* user_agent = kIe11UserAgents[i];
-    UserAgentMatcher::BlinkRequestType blink_type =
-        user_agent_matcher_->GetBlinkRequestType(user_agent, not_used);
-    EXPECT_EQ(UserAgentMatcher::kDoesNotSupportBlink, blink_type);
     EXPECT_FALSE(user_agent_matcher_->SupportsJsDefer(user_agent, true));
   }
 }
@@ -603,6 +512,10 @@ TEST_F(UserAgentMatcherTest, DoesntSupportAnimatedWebp) {
       kIPhone4Safari));
   EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(
       kWindowsPhoneUserAgent));
+  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(
+      kPagespeedInsightsMobileUserAgent));
+  EXPECT_FALSE(user_agent_matcher_->SupportsWebpAnimated(
+      kPagespeedInsightsDesktopUserAgent));
 }
 
 }  // namespace net_instaweb

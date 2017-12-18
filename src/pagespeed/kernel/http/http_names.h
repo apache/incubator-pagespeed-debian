@@ -32,10 +32,13 @@ namespace net_instaweb {
 struct HttpAttributes {
   static const char kAccept[];
   static const char kAcceptEncoding[];
+  static const char kAcceptRanges[];
   static const char kAccessControlAllowOrigin[];
   static const char kAccessControlAllowCredentials[];
   static const char kAge[];
   static const char kAllow[];
+  static const char kAltSvc[];
+  static const char kAlternateProtocol[];
   static const char kAttachment[];
   static const char kAuthorization[];
   static const char kCacheControl[];
@@ -44,6 +47,7 @@ struct HttpAttributes {
   static const char kContentDisposition[];
   static const char kContentLanguage[];
   static const char kContentLength[];
+  static const char kContentSecurityPolicy[];
   static const char kContentType[];
   static const char kCookie[];
   static const char kCookie2[];
@@ -107,40 +111,8 @@ struct HttpAttributes {
   // A request header for client to specify client options.
   static const char kXPsaClientOptions[];
 
-  // This header indicates to the distributed task that it should not timeout
-  // its rewrite.
-  static const char kXPsaDistributedRewriteBlock[];
-
-  // This header is set in distributed rewrite requests that originated from
-  // fetch requests (.pagespeed. and IPRO).
-  static const char kXPsaDistributedRewriteFetch[];
-
-  // This header is set in distributed rewrite requests that originated from
-  // HTML requests (HTML and nested filters).
-  static const char kXPsaDistributedRewriteForHtml[];
-
   // This header is set on optional fetches that got dropped due to load.
   static const char kXPsaLoadShed[];
-
-  // If this header is present on an incoming request it will be treated as if
-  // it came over a SPDY connection for purposes of applying special
-  // configuration or optimizations.
-  static const char kXPsaOptimizeForSpdy[];
-
-  // This header is set in a distributed rewrite task to ask for metadata
-  // in the response.
-  static const char kXPsaRequestMetadata[];
-
-  // This header is set in a distributed rewrite response and the value
-  // is the serialized metadata.
-  static const char kXPsaResponseMetadata[];
-
-  // This url param is set when request for the below the fold chunk of the
-  // split html response.
-  static const char kXSplit[];
-  // Values of kXSplit url param for requesting parts of the split html content.
-  static const char kXSplitAboveTheFold[];
-  static const char kXSplitBelowTheFold[];
 
   static const char kXRequestedWith[];
 
@@ -149,12 +121,18 @@ struct HttpAttributes {
   static const char kXOriginalContentLength[];
   static const char kXUACompatible[];
 
-  // The config to be used fo the split html xpath.
-  static const char kXPsaSplitConfig[];
-
   // Sendfile type responses.
   static const char kXSendfile[];
   static const char kXAccelRedirect[];
+  // PageSpeed Loop detection for proxy mode.
+  static const char kXPageSpeedLoop[];
+
+  // Gets a sorted StringPieceVector containing all the end-to-end headers.
+  // Any fields listed in here should be ignored during sanitization when they
+  // are specified in a Connection: header.
+  // See http://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html#sec13.5.1
+  // and https://www.mnot.net/blog/2011/07/11/what_proxies_must_do
+  static const StringPieceVector& SortedEndToEndHeaders();
 
   // Gets a sorted StringPieceVector containing all the hop-by-hop headers,
   // plus Set-Cookie and Set-Cookie2, per
@@ -164,7 +142,7 @@ struct HttpAttributes {
   // returning it via StringPieceVector causes us to lose this guarantee and we
   // end up creating temporary GoogleStrings to convert these back to char*.
   // This performance overhead might be revisited if considered important.
-  static StringPieceVector SortedHopByHopHeaders();
+  static const StringPieceVector& SortedHopByHopHeaders();
 
   // Gets a StringPieceVector containing the caching-related headers that should
   // be removed from responses.
@@ -172,7 +150,7 @@ struct HttpAttributes {
   // returning it via StringPieceVector causes us to lose this guarantee and we
   // end up creating temporary GoogleStrings to convert these back to char*.
   // This performance overhead might be revisited if considered important.
-  static StringPieceVector CachingHeadersToBeRemoved();
+  static const StringPieceVector& CachingHeadersToBeRemoved();
 };
 
 namespace HttpStatus {
@@ -232,10 +210,6 @@ enum Code {
   kProxyConfigurationFailure = 522,
   kProxyDeclinedRequest = 523,
   kProxyDnsLookupFailure = 524,
-
-  // PSOL-specific response code to indiciate that a distributed connection
-  // failed.
-  kDistributedConnectionFailure = 550,
 
   // Instaweb-specific response codes: these are intentionally chosen to be
   // outside the normal HTTP range, but we consider these response codes

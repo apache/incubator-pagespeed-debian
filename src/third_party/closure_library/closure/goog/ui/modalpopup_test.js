@@ -19,13 +19,16 @@ goog.require('goog.a11y.aria');
 goog.require('goog.a11y.aria.State');
 goog.require('goog.dispose');
 goog.require('goog.dom');
+goog.require('goog.dom.TagName');
 goog.require('goog.events');
 goog.require('goog.events.EventTarget');
+goog.require('goog.events.EventType');
 goog.require('goog.fx.Transition');
 goog.require('goog.fx.css3');
 goog.require('goog.string');
 goog.require('goog.style');
 goog.require('goog.testing.MockClock');
+goog.require('goog.testing.events');
 goog.require('goog.testing.jsunit');
 goog.require('goog.ui.ModalPopup');
 goog.require('goog.ui.PopupBase');
@@ -48,6 +51,28 @@ function tearDown() {
 }
 
 
+function testOrientationChange() {
+  var i = 0;
+  popup = new goog.ui.ModalPopup();
+  popup.resizeBackgroundTask_ = function() { i++; };
+  popup.render();
+  popup.setVisible(true);
+  var event = new goog.events.Event(
+      goog.events.EventType.ORIENTATIONCHANGE,
+      popup.getDomHelper().getWindow());
+
+  goog.testing.events.fireBrowserEvent(event);
+  assertEquals(1, i);
+
+  goog.testing.events.fireBrowserEvent(event);
+  assertEquals(2, i);
+
+  popup.setVisible(false);
+  goog.testing.events.fireBrowserEvent(event);
+  assertEquals(2, i);
+}
+
+
 function testDispose() {
   popup = new goog.ui.ModalPopup();
   popup.render();
@@ -55,7 +80,8 @@ function testDispose() {
   goog.dispose(popup);
   assertNull(goog.dom.getElementByClass('goog-modalpopup-bg'));
   assertNull(goog.dom.getElementByClass('goog-modalpopup'));
-  assertEquals(0, goog.dom.getElementsByTagNameAndClass('span').length);
+  assertEquals(
+      0, goog.dom.getElementsByTagNameAndClass(goog.dom.TagName.SPAN).length);
 }
 
 
@@ -63,29 +89,39 @@ function testRenderWithoutIframeMask() {
   popup = new goog.ui.ModalPopup();
   popup.render();
 
-  assertEquals(0, goog.dom.getElementsByTagNameAndClass(
-      'iframe', 'goog-modalpopup-bg').length);
+  assertEquals(
+      0, goog.dom
+             .getElementsByTagNameAndClass(
+                 goog.dom.TagName.IFRAME, 'goog-modalpopup-bg')
+             .length);
 
-  var bg = goog.dom.getElementsByTagNameAndClass('div', 'goog-modalpopup-bg');
+  var bg = goog.dom.getElementsByTagNameAndClass(
+      goog.dom.TagName.DIV, 'goog-modalpopup-bg');
   assertEquals(1, bg.length);
   var content = goog.dom.getElementByClass('goog-modalpopup');
   assertNotNull(content);
-  var tabCatcher = goog.dom.getElementsByTagNameAndClass('span');
+  var tabCatcher = goog.dom.getElementsByTagNameAndClass(goog.dom.TagName.SPAN);
   assertEquals(1, tabCatcher.length);
 
   assertTrue(goog.dom.compareNodeOrder(bg[0], content) < 0);
   assertTrue(goog.dom.compareNodeOrder(content, tabCatcher[0]) < 0);
-  assertTrue(goog.string.isEmptyOrWhitespace(goog.string.makeSafe(
-      goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
   popup.setVisible(true);
-  assertTrue(goog.string.isEmptyOrWhitespace(goog.string.makeSafe(
-      goog.a11y.aria.getState(
-          popup.getElementStrict(), goog.a11y.aria.State.HIDDEN))));
-  assertEquals('true',
-      goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(
+                  popup.getElementStrict(), goog.a11y.aria.State.HIDDEN))));
+  assertEquals(
+      'true', goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN));
   popup.setVisible(false);
-  assertTrue(goog.string.isEmptyOrWhitespace(goog.string.makeSafe(
-      goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
 }
 
 
@@ -94,30 +130,36 @@ function testRenderWithIframeMask() {
   popup.render();
 
   var iframe = goog.dom.getElementsByTagNameAndClass(
-      'iframe', 'goog-modalpopup-bg');
+      goog.dom.TagName.IFRAME, 'goog-modalpopup-bg');
   assertEquals(1, iframe.length);
-  var bg = goog.dom.getElementsByTagNameAndClass('div', 'goog-modalpopup-bg');
+  var bg = goog.dom.getElementsByTagNameAndClass(
+      goog.dom.TagName.DIV, 'goog-modalpopup-bg');
   assertEquals(1, bg.length);
   var content = goog.dom.getElementByClass('goog-modalpopup');
   assertNotNull(content);
-  var tabCatcher = goog.dom.getElementsByTagNameAndClass('span');
+  var tabCatcher = goog.dom.getElementsByTagNameAndClass(goog.dom.TagName.SPAN);
   assertEquals(1, tabCatcher.length);
 
   assertTrue(goog.dom.compareNodeOrder(iframe[0], bg[0]) < 0);
   assertTrue(goog.dom.compareNodeOrder(bg[0], content) < 0);
   assertTrue(goog.dom.compareNodeOrder(content, tabCatcher[0]) < 0);
-  assertTrue(goog.string.isEmptyOrWhitespace(goog.string.makeSafe(
-      goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
   popup.setVisible(true);
-  assertTrue(goog.string.isEmptyOrWhitespace(goog.string.makeSafe(
-      goog.a11y.aria.getState(
-          popup.getElementStrict(), goog.a11y.aria.State.HIDDEN))));
-  assertEquals('true',
-      goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(
+                  popup.getElementStrict(), goog.a11y.aria.State.HIDDEN))));
+  assertEquals(
+      'true', goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN));
   popup.setVisible(false);
-  assertTrue(goog.string.isEmptyOrWhitespace(
-      goog.string.makeSafe(
-          goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
+  assertTrue(
+      goog.string.isEmptyOrWhitespace(
+          goog.string.makeSafe(
+              goog.a11y.aria.getState(main, goog.a11y.aria.State.HIDDEN))));
 }
 
 
@@ -148,13 +190,14 @@ function testRenderDoesNotShowAnyElement() {
   popup.render();
 
   var iframe = goog.dom.getElementsByTagNameAndClass(
-      'iframe', 'goog-modalpopup-bg');
+      goog.dom.TagName.IFRAME, 'goog-modalpopup-bg');
   assertFalse(goog.style.isElementShown(iframe[0]));
-  var bg = goog.dom.getElementsByTagNameAndClass('div', 'goog-modalpopup-bg');
+  var bg = goog.dom.getElementsByTagNameAndClass(
+      goog.dom.TagName.DIV, 'goog-modalpopup-bg');
   assertFalse(goog.style.isElementShown(bg[0]));
-  assertFalse(goog.style.isElementShown(
-      goog.dom.getElementByClass('goog-modalpopup')));
-  var tabCatcher = goog.dom.getElementsByTagNameAndClass('span');
+  assertFalse(
+      goog.style.isElementShown(goog.dom.getElementByClass('goog-modalpopup')));
+  var tabCatcher = goog.dom.getElementsByTagNameAndClass(goog.dom.TagName.SPAN);
   assertFalse(goog.style.isElementShown(tabCatcher[0]));
 }
 
@@ -164,7 +207,7 @@ function testIframeOpacityIsSetToZero() {
   popup.render();
 
   var iframe = goog.dom.getElementsByTagNameAndClass(
-      'iframe', 'goog-modalpopup-bg')[0];
+      goog.dom.TagName.IFRAME, 'goog-modalpopup-bg')[0];
   assertEquals(0, goog.style.getOpacity(iframe));
 }
 
@@ -174,13 +217,11 @@ function testEventFiredOnShow() {
   popup.render();
 
   var beforeShowCallCount = 0;
-  var beforeShowHandler = function() {
-    beforeShowCallCount++;
-  };
+  var beforeShowHandler = function() { beforeShowCallCount++; };
   var showCallCount = false;
   var showHandler = function() {
-    assertEquals('BEFORE_SHOW is not dispatched before SHOW',
-        1, beforeShowCallCount);
+    assertEquals(
+        'BEFORE_SHOW is not dispatched before SHOW', 1, beforeShowCallCount);
     showCallCount++;
   };
 
@@ -201,13 +242,11 @@ function testEventFiredOnHide() {
   popup.setVisible(true);
 
   var beforeHideCallCount = 0;
-  var beforeHideHandler = function() {
-    beforeHideCallCount++;
-  };
+  var beforeHideHandler = function() { beforeHideCallCount++; };
   var hideCallCount = false;
   var hideHandler = function() {
-    assertEquals('BEFORE_HIDE is not dispatched before HIDE',
-        1, beforeHideCallCount);
+    assertEquals(
+        'BEFORE_HIDE is not dispatched before HIDE', 1, beforeHideCallCount);
     hideCallCount++;
   };
 
@@ -263,8 +302,9 @@ function testTransitionsPlayedOnShow() {
     showHandlerCalled = true;
   });
 
-  popup.setTransition(mockPopupShowTransition, mockPopupHideTransition,
-      mockBgShowTransition, mockBgHideTransition);
+  popup.setTransition(
+      mockPopupShowTransition, mockPopupHideTransition, mockBgShowTransition,
+      mockBgHideTransition);
   assertFalse(mockPopupShowTransition.wasPlayed);
   assertFalse(mockBgShowTransition.wasPlayed);
 
@@ -292,8 +332,9 @@ function testTransitionsPlayedOnHide() {
     hideHandlerCalled = true;
   });
 
-  popup.setTransition(mockPopupShowTransition, mockPopupHideTransition,
-      mockBgShowTransition, mockBgHideTransition);
+  popup.setTransition(
+      mockPopupShowTransition, mockPopupHideTransition, mockBgShowTransition,
+      mockBgHideTransition);
   popup.setVisible(true);
   assertFalse(mockPopupHideTransition.wasPlayed);
   assertFalse(mockBgHideTransition.wasPlayed);
@@ -312,21 +353,21 @@ function testTransitionsAndDisposingOnHideWorks() {
   popup = new goog.ui.ModalPopup();
   popup.render();
 
-  goog.events.listen(popup, goog.ui.PopupBase.EventType.HIDE, function() {
-    popup.dispose();
-  });
+  goog.events.listen(
+      popup, goog.ui.PopupBase.EventType.HIDE, function() { popup.dispose(); });
 
-  var popupShowTransition = goog.fx.css3.fadeIn(popup.getElement(),
-      0.1 /* duration */);
-  var popupHideTransition = goog.fx.css3.fadeOut(popup.getElement(),
-      0.1 /* duration */);
-  var bgShowTransition = goog.fx.css3.fadeIn(popup.getElement(),
-      0.1 /* duration */);
-  var bgHideTransition = goog.fx.css3.fadeOut(popup.getElement(),
-      0.1 /* duration */);
+  var popupShowTransition =
+      goog.fx.css3.fadeIn(popup.getElement(), 0.1 /* duration */);
+  var popupHideTransition =
+      goog.fx.css3.fadeOut(popup.getElement(), 0.1 /* duration */);
+  var bgShowTransition =
+      goog.fx.css3.fadeIn(popup.getElement(), 0.1 /* duration */);
+  var bgHideTransition =
+      goog.fx.css3.fadeOut(popup.getElement(), 0.1 /* duration */);
 
-  popup.setTransition(popupShowTransition, popupHideTransition,
-      bgShowTransition, bgHideTransition);
+  popup.setTransition(
+      popupShowTransition, popupHideTransition, bgShowTransition,
+      bgHideTransition);
   popup.setVisible(true);
   popup.setVisible(false);
   // Nothing to assert. We only want to ensure that there is no error.
@@ -392,7 +433,7 @@ function testBackgroundHeight() {
   var viewportSize = goog.dom.getViewportSize();
   var w = viewportSize.width * 2;
   var h = viewportSize.height * 2;
-  var dummy = goog.dom.createElement('div');
+  var dummy = goog.dom.createElement(goog.dom.TagName.DIV);
   dummy.style.position = 'absolute';
   goog.style.setSize(dummy, w, h);
   document.body.appendChild(dummy);
@@ -403,7 +444,8 @@ function testBackgroundHeight() {
     popup.setVisible(true);
 
     var size = goog.style.getSize(popup.getBackgroundElement());
-    assertTrue('Background element must cover the size of the content',
+    assertTrue(
+        'Background element must cover the size of the content',
         size.width >= w && size.height >= h);
   } finally {
     goog.dom.removeNode(dummy);
@@ -413,10 +455,12 @@ function testBackgroundHeight() {
 
 function testSetupBackwardTabWrapResetsFlagAfterTimeout() {
   popup.setupBackwardTabWrap();
-  assertTrue('Backward tab wrap should be in progress',
+  assertTrue(
+      'Backward tab wrap should be in progress',
       popup.backwardTabWrapInProgress_);
   mockClock.tick(1);
-  assertFalse('Backward tab wrap flag should be reset after delay',
+  assertFalse(
+      'Backward tab wrap flag should be reset after delay',
       popup.backwardTabWrapInProgress_);
 }
 
@@ -425,18 +469,20 @@ function testPopupGetsFocus() {
   popup = new goog.ui.ModalPopup();
   popup.render();
   popup.setVisible(true);
-  assertTrue('Dialog must receive initial focus',
+  assertTrue(
+      'Dialog must receive initial focus',
       goog.dom.getActiveElement(document) == popup.getElement());
 }
 
 
 function testDecoratedPopupGetsFocus() {
-  var dialogElem = goog.dom.createElement('div');
+  var dialogElem = goog.dom.createElement(goog.dom.TagName.DIV);
   document.body.appendChild(dialogElem);
   popup = new goog.ui.ModalPopup();
   popup.decorate(dialogElem);
   popup.setVisible(true);
-  assertTrue('Dialog must receive initial focus',
+  assertTrue(
+      'Dialog must receive initial focus',
       goog.dom.getActiveElement(document) == popup.getElement());
   goog.dom.removeNode(dialogElem);
 }
