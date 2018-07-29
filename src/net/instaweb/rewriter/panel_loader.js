@@ -198,7 +198,7 @@ pagespeed.PanelLoader.prototype.executeATFScripts = function() {
     };
     window.pagespeed.deferJs.registerScriptTags(
         criticalScriptsDoneCallback, pagespeed.lastScriptIndexBeforePanelStub);
-    // TODO(ksimbili): Wait untill the high res Images are set before starting
+    // TODO(ksimbili): Wait until the high res Images are set before starting
     // the execution.
     window.pagespeed.deferJs.run();
   }
